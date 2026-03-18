@@ -1,12 +1,13 @@
-# api
+# service
 
 ## Purpose
 
-`api` is the external protocol layer.
+`service` is the external protocol layer.
 
 It translates MCP/HTTP requests into the internal architecture, but should remain thin. It is not the place where business logic, execution semantics, or runtime details should accumulate.
 
 It owns:
+
 - protocol request/response translation
 - edge-level validation and normalization
 - calling into `registry`, `toolset`, `invoke`, and `codemode`
@@ -32,4 +33,4 @@ This is the outermost package area. External callers depend on it through MCP an
 
 ## Architectural rule
 
-`api` must not call runtimes directly. It should stay a translation layer.
+`service` must not call runtimes directly. It should stay a translation layer.

@@ -5,61 +5,43 @@ import (
 
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
-func TestMCPServerListsDiscoveryAndActionTools(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New())
+func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
+	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
 	names := h.ToolNames()
 
-	assertContains(t, names, mcpserver.ToolDiscoveryExecute)
-	assertContains(t, names, mcpserver.ToolActionExecute)
+	assertContains(t, names, "calc.add")
 }
 
-func TestMCPServerCallsToolDiscoveryExecute(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New())
+func TestMCPServerCallsInvokeForTool(t *testing.T) {
+	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
 
-	result := h.CallTool(mcpserver.ToolDiscoveryExecute, map[string]any{
-		"code": "return discover.find({ task: 'triage zendesk tickets' })",
+	result := h.CallTool("calc.add", map[string]any{
+		"a": 5,
+		"b": 5,
 	})
-
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
 
 	structured := mcptest.StructuredMap(t, result)
-	// TODO: revisit the strucute of this map
-	if got := structured["mode"]; got != "discovery" {
-		t.Fatalf("expected mode discovery, got %#v", got)
+	if got := structured["tool"]; got != "calc.add" {
+		t.Fatalf("expected tool calc.add, got %#v", got)
 	}
-	if got := structured["toolboxID"]; got != "tbx_test_snapshot" {
-		t.Fatalf("expected toolboxID tbx_test_snapshot, got %#v", got)
+	if got := structured["result"]; got != "10" {
+		t.Fatalf("expected result 10, got %#v", got)
+	}
+	if got := structured["status"]; got != "stub-invoked" {
+		t.Fatalf("expected status stub-invoked, got %#v", got)
 	}
 }
 
-func TestMCPServerCallsToolActionExecute(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New())
-
-	discovery := h.CallTool(mcpserver.ToolDiscoveryExecute, map[string]any{
-		"code": "return discover.find({ task: 'post an escalation' })",
+func testToolset() toolset.ResolvedToolset {
+	return toolset.NewResolvedToolset([]toolset.Tool{
+		{Name: "calc.add", Description: "Add two numbers"},
 	})
-	toolboxID := mcptest.StructuredMap(t, discovery)["toolboxID"]
-
-	action := h.CallTool(mcpserver.ToolActionExecute, map[string]any{
-		"toolboxID": toolboxID,
-		"code":      "return await tools.slack.channels.messages.send({ channel_id: '#escalation', message: 'Urgent ticket' })",
-	})
-
-	if action.IsError {
-		t.Fatalf("expected non-error result")
-	}
-
-	structured := mcptest.StructuredMap(t, action)
-	if got := structured["mode"]; got != "action" {
-		t.Fatalf("expected mode action, got %#v", got)
-	}
-	if got := structured["toolboxID"]; got != toolboxID {
-		t.Fatalf("expected toolboxID %#v, got %#v", toolboxID, got)
-	}
 }
 
 func assertContains(t *testing.T, values []string, want string) {

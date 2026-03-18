@@ -245,7 +245,7 @@ When in doubt:
 6. **Treat CodeMode as distinct from plain tool invocation.**
 
 If you need architectural context, read:
-- `docs/ARCHITECTURE.md`
+- `docs/architecture.md`
 - `tool/README.md`
 - `toolset/README.md`
 - `invoke/README.md`

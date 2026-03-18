@@ -6,7 +6,7 @@ The design is centered around three ideas:
 
 1. **`tool` defines what exists** — static package and tool definitions.
 2. **`toolset` defines what is available for one request** — bindings, context, credentials, and the agent-visible view.
-3. **`invoke` is the one place that executes a single tool call correctly** — API and CodeMode both go through it.
+3. **`invoke` is the one place that executes a single tool call correctly** — `service` and `codemode` both go through it.
 
 ## Package overview
 
@@ -20,7 +20,7 @@ The design is centered around three ideas:
 - `runtime/wasix` — native WASM execution via the Rust host
 - `invoke` — orchestration for one tool call
 - `codemode` — code session semantics against a toolset
-- `api` — MCP/HTTP protocol translation
+- `service` — MCP/HTTP/CLI layer
 
 ## Dependency diagram
 
@@ -56,10 +56,10 @@ flowchart TD
   C --> I
   C --> A
 
-  API[api] --> R
-  API --> TS
-  API --> I
-  API --> C
+  S[service] --> R
+  S --> TS
+  S --> I
+  S --> C
 ```
 
 ## Main data flows
@@ -67,7 +67,7 @@ flowchart TD
 ### 1. Package loading
 
 ```text
-API / harness
+Service / harness
   -> registry
   -> loaded package artifact
      - manifest
@@ -78,7 +78,7 @@ API / harness
 ### 2. Request-scoped tool assembly
 
 ```text
-API / harness
+Service / harness
   -> toolset
      inputs:
        - selected tools
@@ -96,7 +96,7 @@ API / harness
 ### 3. Single tool invocation
 
 ```text
-API or CodeMode
+Service or CodeMode
   -> invoke
      inputs:
        - resolved toolset
@@ -134,7 +134,7 @@ invoke
 ### 6. CodeMode flow
 
 ```text
-API / harness
+Service / harness
   -> codemode
      inputs:
        - resolved toolset
@@ -155,7 +155,7 @@ API / harness
 | `runtime/wasix` | native WASM execution request | subprocess result, stdout/stderr, runtime error | synchronous, subprocess boundary |
 | `invoke` | resolved toolset, selected tool, params, request metadata | normalized invocation result + audit | synchronous orchestration |
 | `codemode` | resolved toolset, agent code, session config | code session result + aggregated audit | synchronous session execution |
-| `api` | MCP/HTTP protocol requests | protocol responses | synchronous translation layer |
+| `service` | MCP/HTTP/CLI protocol requests | protocol responses | synchronous translation layer |
 | `assets` | asset lookup request | resolved asset refs / blobs / cache hits | synchronous lookup |
 | `audit` | event objects from producers | shared event schemas | value-object boundary |
 
@@ -163,8 +163,8 @@ API / harness
 
 These are the most important architectural rules to preserve:
 
-1. **`api` does not call runtimes directly.**
-   - `api` only uses `registry`, `toolset`, `invoke`, and `codemode`.
+1. **`service` does not call runtimes directly.**
+   - `service` only uses `registry`, `toolset`, `invoke`, and `codemode`.
 
 2. **`codemode` does not call runtimes directly.**
    - `codemode` delegates tool execution to `invoke`.
@@ -192,4 +192,4 @@ If you are new to the repo, read the package docs in this order:
 6. `codemode/README.md`
 7. `transport/README.md`
 8. `registry/README.md`
-9. `api/README.md`
+9. `service/README.md`

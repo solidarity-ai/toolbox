@@ -1,0 +1,4 @@
+- run a toolbox server that has preauthed tools like gws etc so that users can run them without having to setup google console.
+- have a remote mode and a local mode for the toolbox server.
+- for non-indempotent tools, have a error messages that explains that the tool call was not imdepotent and we're not sure if it ran or not, and here is a linked tool that you might use to check.
+- tool provenance: track trusted sources for tools/packages, support provenance metadata and maybe code signing, and make tool pinning explicit so harnesses know exactly what source and version they are executing.

@@ -2,23 +2,21 @@ package mcpserver
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/service"
 )
 
 const (
-	ToolDiscoveryExecute = "tool_discovery_execute"
-	ToolActionExecute    = "tool_action_execute"
-
-	stubToolboxID = "tbx_test_snapshot"
+	ToolDiscoveryExecute = service.ToolDiscoveryExecute
+	ToolActionExecute    = service.ToolActionExecute
 )
 
 // New creates an MCP server with the initial Toolbox MCP surface.
 //
-// TODO: The handlers are intentionally stubbed for now. They exist to validate the
-// outside-in MCP contract before real codemode wiring is added.
+// The server currently delegates to stub service-layer implementations so the
+// outside-in caller contracts can be validated before real codemode wiring is added.
 func New() *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		"toolbox-mcp-server",
@@ -49,37 +47,18 @@ func newActionTool() mcp.Tool {
 	)
 }
 
-func handleDiscoveryExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleDiscoveryExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	code, err := request.RequireString("code")
 	if err != nil {
 		return nil, err
 	}
 
-	structured := map[string]any{
-		"mode":      "discovery",
-		"toolboxID": stubToolboxID,
-		"result": map[string]any{
-			"receivedCode": code,
-			"capabilities": []map[string]any{
-				{
-					"name":        ToolDiscoveryExecute,
-					"description": "Discover available capabilities and obtain a toolbox snapshot handle.",
-				},
-				{
-					"name":        ToolActionExecute,
-					"description": "Execute action code against a discovered toolbox snapshot.",
-				},
-			},
-		},
-	}
-
-	return mcp.NewToolResultStructured(
-		structured,
-		fmt.Sprintf("discovery complete; toolboxID=%s", stubToolboxID),
-	), nil
+	return service.ExecuteToolDiscovery(ctx, service.ToolDiscoveryExecuteRequest{
+		Code: code,
+	})
 }
 
-func handleActionExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleActionExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	toolboxID, err := request.RequireString("toolboxID")
 	if err != nil {
 		return nil, err
@@ -90,17 +69,8 @@ func handleActionExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.C
 		return nil, err
 	}
 
-	structured := map[string]any{
-		"mode":      "action",
-		"toolboxID": toolboxID,
-		"result": map[string]any{
-			"receivedCode": code,
-			"status":       "stub-executed",
-		},
-	}
-
-	return mcp.NewToolResultStructured(
-		structured,
-		fmt.Sprintf("action complete for toolboxID=%s", toolboxID),
-	), nil
+	return service.ExecuteToolAction(ctx, service.ToolActionExecuteRequest{
+		ToolboxID: toolboxID,
+		Code:      code,
+	})
 }

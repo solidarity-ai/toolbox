@@ -1,11 +1,14 @@
 package toolset
 
+import tooldef "github.com/solidarity-ai/toolbox/tool"
+
 // Tool is the smallest useful agent-visible tool shape for the first outside-in seam.
 //
 // More fields can be added later when the real resolved toolset needs them.
 type Tool struct {
 	Name        string
 	Description string
+	TS          *tooldef.TSToolDef
 }
 
 // ResolvedToolset is a stubbed resolved toolset for the first outside-in tests.

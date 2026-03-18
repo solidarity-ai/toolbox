@@ -3,6 +3,7 @@ package invoke
 import (
 	"fmt"
 
+	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -13,6 +14,10 @@ import (
 func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any) (string, error) {
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
+			if tool.TS != nil {
+				return quickts.Run(*tool.TS, args)
+			}
+
 			return runStub(tool.Name, args)
 		}
 	}
@@ -21,9 +26,5 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 }
 
 func runStub(toolName string, args map[string]any) (string, error) {
-	if toolName == "calc.add" {
-		return "10", nil
-	}
-
 	return toolName, nil
 }

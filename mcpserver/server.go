@@ -34,7 +34,7 @@ func handleToolCall(resolved toolset.ResolvedToolset, toolName string) server.To
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		ran, err := invoke.Run(resolved, toolName, argumentMap(request.Params.Arguments))
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		structured := map[string]any{

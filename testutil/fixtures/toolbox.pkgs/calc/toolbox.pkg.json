@@ -1,0 +1,10 @@
+{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/calc.add.ts",
+      "idempotent": true
+    }
+  ]
+}

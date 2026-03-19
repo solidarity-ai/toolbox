@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "runtime", "tools"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime": {
+      "type": "string",
+      "enum": ["typescript-sandbox"]
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entry_ts"],
+        "properties": {
+          "entry_ts": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotent": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

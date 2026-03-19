@@ -101,6 +101,10 @@ Each tool is a TypeScript file in the `tools/` directory. The filename is the re
 
 During packaging, Toolbox validates the exported public contract for each tool and emits JSON Schema artifacts from that contract. This happens at package build/validation time, not at invocation time.
 
+Toolbox uses two validation modes for `toolbox.pkg.json`:
+- dev validation accepts an incomplete manifest shape for local iteration and reports stricter distribution-only requirements as warnings
+- distribution validation is strict and rejects missing required packaging metadata such as per-tool safety flags
+
 ### Filename Convention
 
 The filename defines the tool's resource path:

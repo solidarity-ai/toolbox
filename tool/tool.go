@@ -7,6 +7,22 @@ import (
 
 const calcToolsPackageDir = "github.com/solidarity-ai/calc-tools"
 
+// Package is the smallest useful static package shape for the first package-loading seam.
+type Package struct {
+	Name    string
+	Runtime ToolRuntime
+	Tools   []PackageTool
+}
+
+type ToolRuntime string
+
+const RuntimeTypeScriptSandbox ToolRuntime = "typescript-sandbox"
+
+type PackageTool struct {
+	EntryTS    string
+	Idempotent *bool
+}
+
 // TSToolDef is the smallest useful TS tool definition for the current invoke
 // seam. It points at one tool entry file inside a package-shaped filesystem.
 type TSToolDef struct {

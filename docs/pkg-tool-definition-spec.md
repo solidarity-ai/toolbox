@@ -28,7 +28,7 @@ Versions are pinned in the toolset. There is no automatic upgrading.
 
 ```
 my-tools/
-├── manifest.toml           # package metadata, points to things
+├── manifest.json           # package metadata, points to things
 ├── tools/                   # tool source files (default location)
 │   ├── users.list.ts
 │   ├── users.get.ts
@@ -46,47 +46,53 @@ The manifest is thin. It declares package identity, optionally overrides default
 
 ### Minimal manifest (pure TS package, all defaults):
 
-```toml
-[package]
-path = "github.com/your-org/slack-tools"
-version = "v1.0.0"
-description = "Slack API tools"
+```json
+{
+  "package": {
+    "path": "github.com/your-org/slack-tools",
+    "version": "v1.0.0",
+    "description": "Slack API tools"
+  }
+}
 ```
 
 Tools are discovered automatically from `tools/` directory. No assets. No special requirements.
 
 ### Full manifest (TS + WASM asset package):
 
-```toml
-[package]
-path = "github.com/your-org/google-workspace-tools"
-version = "v1.2.0"
-description = "Google Workspace admin tools"
-
-# Override default locations (optional, these ARE the defaults)
-[source]
-tools = "tools/"
-assets = "assets/"
-
-# WASM binary assets this package includes
-[assets.gwc]
-type = "wasm"
-# Looked up at: assets/gwc.wasm (by convention: assets/{name}.wasm)
-
-# Package-level requirements
-[requirements]
-credentials = [
-  { name = "google_service_account", description = "Google service account JSON key" }
-]
-
-allowed_hosts = [
-  "*.googleapis.com",
-  "oauth2.googleapis.com"
-]
-
-[requirements.resources]
-memory_mb = 256
-timeout_seconds = 60
+```json
+{
+  "package": {
+    "path": "github.com/your-org/google-workspace-tools",
+    "version": "v1.2.0",
+    "description": "Google Workspace admin tools"
+  },
+  "source": {
+    "tools": "tools/",
+    "assets": "assets/"
+  },
+  "assets": {
+    "gwc": {
+      "type": "wasm"
+    }
+  },
+  "requirements": {
+    "credentials": [
+      {
+        "name": "google_service_account",
+        "description": "Google service account JSON key"
+      }
+    ],
+    "allowed_hosts": [
+      "*.googleapis.com",
+      "oauth2.googleapis.com"
+    ],
+    "resources": {
+      "memory_mb": 256,
+      "timeout_seconds": 60
+    }
+  }
+}
 ```
 
 ## Tool Definitions
@@ -299,7 +305,7 @@ The WASM module cache uses LRU eviction sized by total bytes. Default limit is c
 1. Toolset references `github.com/your-org/tools@v1.2.0`
 2. Client checks local cache for this version
 3. If not cached: clone/fetch the repo at tag `v1.2.0`
-4. Read `manifest.toml`
+4. Read `manifest.json`
 5. Compile TS tools to QuickJS bytecode, cache
 6. Cache WASM assets, pre-compile with wasmer, cache compiled modules
 7. Ready to execute

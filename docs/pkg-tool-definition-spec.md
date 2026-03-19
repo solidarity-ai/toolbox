@@ -28,7 +28,7 @@ Versions are pinned in the toolset. There is no automatic upgrading.
 
 ```
 my-tools/
-├── manifest.json           # package metadata, points to things
+├── toolbox.pkg.json        # authored source package definition
 ├── tools/                   # tool source files (default location)
 │   ├── users.list.ts
 │   ├── users.get.ts
@@ -38,60 +38,54 @@ my-tools/
     └── gwc.wasm
 ```
 
-Convention over configuration. The manifest can omit anything that follows defaults.
+Convention over configuration. The source package definition can omit anything that follows defaults.
 
-## Manifest
+Built artifacts may also include:
 
-The manifest is thin. It declares package identity, optionally overrides default locations, declares assets, and declares package-level requirements.
+```
+dist/
+└── toolbox.pkg.compiled.json
+```
 
-### Minimal manifest (pure TS package, all defaults):
+`toolbox.pkg.compiled.json` is the normalized compiled package form. In source mode, packaging compiles this form in memory by default.
+
+Loading uses the same split:
+- source package loading reads `toolbox.pkg.json`, compiles the normalized package form in memory, then validates that compiled form
+- built package loading reads `toolbox.pkg.compiled.json` directly, then validates that compiled form
+
+## Source Package Definition
+
+The authored source package file is `toolbox.pkg.json`. It is thin. It declares package identity, tool entries, and package-level settings. Packaging then compiles that source form plus tool-source metadata into a normalized package model.
+
+### Minimal source package:
 
 ```json
 {
-  "package": {
-    "path": "github.com/your-org/slack-tools",
-    "version": "v1.0.0",
-    "description": "Slack API tools"
-  }
+  "name": "slack",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/channels.messages.send.ts"
+    }
+  ]
 }
 ```
 
-Tools are discovered automatically from `tools/` directory. No assets. No special requirements.
+Per-tool descriptions and some defaults may come from tool source during local development. Packaging compiles them into the normalized package form.
 
-### Full manifest (TS + WASM asset package):
+### Source package with explicit tool metadata:
 
 ```json
 {
-  "package": {
-    "path": "github.com/your-org/google-workspace-tools",
-    "version": "v1.2.0",
-    "description": "Google Workspace admin tools"
-  },
-  "source": {
-    "tools": "tools/",
-    "assets": "assets/"
-  },
-  "assets": {
-    "gwc": {
-      "type": "wasm"
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
     }
-  },
-  "requirements": {
-    "credentials": [
-      {
-        "name": "google_service_account",
-        "description": "Google service account JSON key"
-      }
-    ],
-    "allowed_hosts": [
-      "*.googleapis.com",
-      "oauth2.googleapis.com"
-    ],
-    "resources": {
-      "memory_mb": 256,
-      "timeout_seconds": 60
-    }
-  }
+  ]
 }
 ```
 
@@ -104,6 +98,8 @@ During packaging, Toolbox validates the exported public contract for each tool a
 Toolbox uses two validation modes for `toolbox.pkg.json`:
 - dev validation accepts an incomplete manifest shape for local iteration and reports stricter distribution-only requirements as warnings
 - distribution validation is strict and rejects missing required packaging metadata such as per-tool safety flags
+
+The validation target is the compiled package form, not the raw source file. In source mode, packaging compiles `toolbox.pkg.json` plus tool-source metadata into a normalized package model in memory, then validates that compiled model against the dev or publishable schema. Built packages ship the compiled form directly as `toolbox.pkg.compiled.json`.
 
 ### Filename Convention
 
@@ -162,6 +158,8 @@ export async function execute(params, ctx) {
 ```
 
 Note: `params.user_id` and `params.calendar_id` are available in `execute` because they're inferred from the resource path. They don't need to be declared in `params` — they're always present.
+
+Tool metadata is not only for static safety labeling. Fields such as `readOnly`, `idempotent`, and `accessMode` are also expected to inform recovery guidance later, for example helping an LLM decide whether to retry, re-read state, or choose a safer follow-up tool after a failed call.
 
 ### Pure TS Tool (no WASM asset)
 

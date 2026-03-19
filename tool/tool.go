@@ -9,18 +9,27 @@ const calcToolsPackageDir = "github.com/solidarity-ai/calc-tools"
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
-	Name    string
-	Runtime ToolRuntime
-	Tools   []PackageTool
+	Name    string        `json:"name"`
+	Runtime ToolRuntime   `json:"runtime"`
+	Tools   []PackageTool `json:"tools"`
 }
 
 type ToolRuntime string
 
 const RuntimeTypeScriptSandbox ToolRuntime = "typescript-sandbox"
 
+type AccessMode string
+
+const (
+	AccessModeReadOnly    AccessMode = "readOnly"
+	AccessModeAppendOnly  AccessMode = "appendOnly"
+	AccessModeCanDestruct AccessMode = "canDestruct"
+)
+
 type PackageTool struct {
-	EntryTS    string
-	Idempotent *bool
+	EntryTS    string     `json:"entry_ts"`
+	Idempotent *bool      `json:"idempotent,omitempty"`
+	AccessMode AccessMode `json:"accessMode,omitempty"`
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

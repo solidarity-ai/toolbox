@@ -10,17 +10,75 @@ import (
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
+type loadPackageTestCase struct {
+	name         string
+	fileName     string
+	load         func(string, ValidationMode) (LoadResult, error)
+	mode         ValidationMode
+	manifest     string
+	wantPackage  tooldef.Package
+	wantWarnings int
+	wantErr      string
+}
+
 func TestLoadPackageFromDir(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name         string
-		mode         ValidationMode
-		manifest     string
-		wantPackage  tooldef.Package
-		wantWarnings int
-		wantErr      string
-	}{
+	tests := baseLoadPackageTestCases()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runLoadPackageTestCase(t, tt)
+		})
+	}
+}
+
+// TODO: when building for distribution a package should issue warnings/or compilation errors if the inferred fields have not been added.
+// i.e. don't do the inference if the ValidationMode is ValidationModeBuild
+// This follows for comments as well.
+
+func runLoadPackageTestCase(t *testing.T, tt loadPackageTestCase) {
+	t.Helper()
+
+	dir := t.TempDir()
+	fileName := tt.fileName
+	if fileName == "" {
+		fileName = "toolbox.pkg.json"
+	}
+	load := tt.load
+	if load == nil {
+		load = LoadPackageFromDirWithMode
+	}
+	manifestPath := filepath.Join(dir, fileName)
+	if err := os.WriteFile(manifestPath, []byte(tt.manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	result, err := load(dir, tt.mode)
+	if tt.wantErr != "" {
+		if err == nil {
+			t.Fatalf("expected error containing %q", tt.wantErr)
+		}
+		if !strings.Contains(err.Error(), tt.wantErr) {
+			t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+		}
+		return
+	}
+
+	if err != nil {
+		t.Fatalf("load package dir: %v", err)
+	}
+	if len(result.Warnings) != tt.wantWarnings {
+		t.Fatalf("expected %d warnings, got %d", tt.wantWarnings, len(result.Warnings))
+	}
+	if diff := cmp.Diff(tt.wantPackage, result.Package); diff != "" {
+		t.Fatalf("LoadPackageFromDir() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func baseLoadPackageTestCases() []loadPackageTestCase {
+	sourceTests := []loadPackageTestCase{
 		{
 			name: "valid dev",
 			mode: ValidationModeDev,
@@ -28,14 +86,14 @@ func TestLoadPackageFromDir(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
   ]
 }`,
 			wantPackage: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true)},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
 				},
 			},
 		},
@@ -46,14 +104,14 @@ func TestLoadPackageFromDir(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
   ]
 }`,
 			wantPackage: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true)},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
 				},
 			},
 		},
@@ -66,7 +124,7 @@ func TestLoadPackageFromDir(t *testing.T) {
     { "entry_ts": "tools/calc.add.ts" }
   ]
 }`,
-			wantErr: `"name"`,
+			wantErr: `minLength`,
 		},
 		{
 			name: "missing runtime",
@@ -77,7 +135,7 @@ func TestLoadPackageFromDir(t *testing.T) {
     { "entry_ts": "tools/calc.add.ts" }
   ]
 }`,
-			wantErr: `"runtime"`,
+			wantErr: `enum`,
 		},
 		{
 			name: "missing idempotent warns in dev",
@@ -86,14 +144,14 @@ func TestLoadPackageFromDir(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts" }
+    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
   ]
 }`,
 			wantPackage: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts"},
+					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReadOnly},
 				},
 			},
 			wantWarnings: 1,
@@ -105,46 +163,128 @@ func TestLoadPackageFromDir(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts" }
+    { "entry_ts": "tools/calc.add.ts", "accessMode": "appendOnly" }
   ]
 }`,
 			wantErr: `"idempotent"`,
 		},
+		{
+			name: "missing accessMode warns in dev",
+			mode: ValidationModeDev,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeAppendOnly},
+				},
+			},
+			wantWarnings: 0,
+		},
+		{
+			name: "missing accessMode compiles and passes in dist",
+			mode: ValidationModeDist,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeAppendOnly},
+				},
+			},
+		},
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			dir := t.TempDir()
-			manifestPath := filepath.Join(dir, "toolbox.pkg.json")
-			if err := os.WriteFile(manifestPath, []byte(tt.manifest), 0o644); err != nil {
-				t.Fatalf("write manifest: %v", err)
-			}
-
-			result, err := LoadPackageFromDirWithMode(dir, tt.mode)
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q", tt.wantErr)
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("load package dir: %v", err)
-			}
-			if len(result.Warnings) != tt.wantWarnings {
-				t.Fatalf("expected %d warnings, got %d", tt.wantWarnings, len(result.Warnings))
-			}
-			if diff := cmp.Diff(tt.wantPackage, result.Package); diff != "" {
-				t.Fatalf("LoadPackageFromDir() mismatch (-want +got):\n%s", diff)
-			}
-		})
+	builtTests := []loadPackageTestCase{
+		{
+			name:     "valid built dev",
+			fileName: "toolbox.pkg.compiled.json",
+			load:     LoadBuiltDirWithMode,
+			mode:     ValidationModeDev,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+				},
+			},
+		},
+		{
+			name:     "built missing idempotent warns in dev",
+			fileName: "toolbox.pkg.compiled.json",
+			load:     LoadBuiltDirWithMode,
+			mode:     ValidationModeDev,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReadOnly},
+				},
+			},
+			wantWarnings: 1,
+		},
+		{
+			name:     "built missing accessMode warns in dev",
+			fileName: "toolbox.pkg.compiled.json",
+			load:     LoadBuiltDirWithMode,
+			mode:     ValidationModeDev,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true)},
+				},
+			},
+			wantWarnings: 1,
+		},
+		{
+			name:     "built missing accessMode errors in dist",
+			fileName: "toolbox.pkg.compiled.json",
+			load:     LoadBuiltDirWithMode,
+			mode:     ValidationModeDist,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true }
+  ]
+}`,
+			wantErr: `"accessMode"`,
+		},
 	}
+	return append(sourceTests, builtTests...)
 }
 
 func boolPtr(v bool) *bool {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -27,8 +28,9 @@ type packageManifest struct {
 }
 
 type packageManifestTool struct {
-	EntryTS    string `json:"entry_ts"`
-	Idempotent *bool  `json:"idempotent"`
+	EntryTS    string              `json:"entry_ts"`
+	Idempotent *bool               `json:"idempotent"`
+	AccessMode *tooldef.AccessMode `json:"accessMode"`
 }
 
 type ValidationMode int
@@ -63,7 +65,7 @@ type LoadResult struct {
 //
 // A directory is treated as a package iff it contains toolbox.pkg.json.
 func LoadPackageFromDir(dir string) (tooldef.Package, error) {
-	result, err := LoadPackageFromDirWithMode(dir, ValidationModeDev)
+	result, err := LoadSourceDirWithMode(dir, ValidationModeDev)
 	if err != nil {
 		return tooldef.Package{}, err
 	}
@@ -72,25 +74,43 @@ func LoadPackageFromDir(dir string) (tooldef.Package, error) {
 
 // LoadPackageFromDirWithMode loads a source package using the requested validation mode.
 func LoadPackageFromDirWithMode(dir string, mode ValidationMode) (LoadResult, error) {
+	return LoadSourceDirWithMode(dir, mode)
+}
+
+// LoadSourceDir loads a source package rooted at dir.
+func LoadSourceDir(dir string) (tooldef.Package, error) {
+	result, err := LoadSourceDirWithMode(dir, ValidationModeDev)
+	if err != nil {
+		return tooldef.Package{}, err
+	}
+	return result.Package, nil
+}
+
+// LoadSourceDirWithMode loads a source package and validates its compiled form.
+func LoadSourceDirWithMode(dir string, mode ValidationMode) (LoadResult, error) {
 	manifestPath := filepath.Join(dir, "toolbox.pkg.json")
+	return loadSourcePackageFromFile(manifestPath, mode)
+}
+
+// LoadBuiltDir loads a compiled package rooted at dir.
+func LoadBuiltDir(dir string) (tooldef.Package, error) {
+	result, err := LoadBuiltDirWithMode(dir, ValidationModeDev)
+	if err != nil {
+		return tooldef.Package{}, err
+	}
+	return result.Package, nil
+}
+
+// LoadBuiltDirWithMode loads a compiled package using the requested validation mode.
+func LoadBuiltDirWithMode(dir string, mode ValidationMode) (LoadResult, error) {
+	compiledPath := filepath.Join(dir, "toolbox.pkg.compiled.json")
+	return loadBuiltPackageFromFile(compiledPath, mode)
+}
+
+func loadSourcePackageFromFile(manifestPath string, mode ValidationMode) (LoadResult, error) {
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return LoadResult{}, err
-	}
-
-	var instance map[string]any
-	if err := json.Unmarshal(raw, &instance); err != nil {
-		return LoadResult{}, fmt.Errorf("read %s: %w", manifestPath, err)
-	}
-	if err := resolvedToolboxPkgDevSchema.Validate(instance); err != nil {
-		return LoadResult{}, fmt.Errorf("validate %s: %w", manifestPath, err)
-	}
-	var warnings []Warning
-	if err := resolvedToolboxPkgDistSchema.Validate(instance); err != nil {
-		if mode == ValidationModeDist {
-			return LoadResult{}, fmt.Errorf("validate %s for distribution: %w", manifestPath, err)
-		}
-		warnings = append(warnings, Warning{Message: fmt.Sprintf("distribution validation: %v", err)})
 	}
 
 	var manifest packageManifest
@@ -98,20 +118,105 @@ func LoadPackageFromDirWithMode(dir string, mode ValidationMode) (LoadResult, er
 		return LoadResult{}, fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
-	pkg := tooldef.Package{
-		Name:    manifest.Name,
-		Runtime: manifest.Runtime,
-		Tools:   make([]tooldef.PackageTool, len(manifest.Tools)),
-	}
-	for i, tool := range manifest.Tools {
-		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:    tool.EntryTS,
-			Idempotent: tool.Idempotent,
-		}
+	pkg := compilePackage(manifest)
+
+	warnings, err := validateCompiledPackage(pkg, mode, manifestPath)
+	if err != nil {
+		return LoadResult{}, err
 	}
 
 	return LoadResult{
 		Package:  pkg,
 		Warnings: warnings,
 	}, nil
+}
+
+func loadBuiltPackageFromFile(compiledPath string, mode ValidationMode) (LoadResult, error) {
+	raw, err := os.ReadFile(compiledPath)
+	if err != nil {
+		return LoadResult{}, err
+	}
+
+	var pkg tooldef.Package
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return LoadResult{}, fmt.Errorf("read %s: %w", compiledPath, err)
+	}
+
+	warnings, err := validateCompiledPackage(pkg, mode, compiledPath)
+	if err != nil {
+		return LoadResult{}, err
+	}
+
+	return LoadResult{
+		Package:  pkg,
+		Warnings: warnings,
+	}, nil
+}
+
+func compilePackage(manifest packageManifest) tooldef.Package {
+	pkg := tooldef.Package{
+		Name:    manifest.Name,
+		Runtime: manifest.Runtime,
+		Tools:   make([]tooldef.PackageTool, len(manifest.Tools)),
+	}
+	for i, tool := range manifest.Tools {
+		accessMode := inferAccessMode(tool.EntryTS)
+		if tool.AccessMode != nil {
+			accessMode = *tool.AccessMode
+		}
+		pkg.Tools[i] = tooldef.PackageTool{
+			EntryTS:    tool.EntryTS,
+			Idempotent: tool.Idempotent,
+			AccessMode: accessMode,
+		}
+	}
+	return pkg
+}
+
+func validateCompiledPackage(pkg tooldef.Package, mode ValidationMode, label string) ([]Warning, error) {
+	raw, err := json.Marshal(pkg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal compiled package %s: %w", label, err)
+	}
+
+	var instance map[string]any
+	if err := json.Unmarshal(raw, &instance); err != nil {
+		return nil, fmt.Errorf("unmarshal compiled package %s: %w", label, err)
+	}
+	if err := resolvedToolboxPkgDevSchema.Validate(instance); err != nil {
+		return nil, fmt.Errorf("validate compiled package %s: %w", label, err)
+	}
+
+	var warnings []Warning
+	if err := resolvedToolboxPkgDistSchema.Validate(instance); err != nil {
+		if mode == ValidationModeDist {
+			return nil, fmt.Errorf("validate compiled package %s for distribution: %w", label, err)
+		}
+		warnings = append(warnings, Warning{Message: fmt.Sprintf("distribution validation: %v", err)})
+	}
+	return warnings, nil
+}
+
+func inferAccessMode(entryTS string) tooldef.AccessMode {
+	verb := inferVerb(entryTS)
+	switch verb {
+	case "list", "get", "read", "fetch", "search", "find", "describe":
+		return tooldef.AccessModeReadOnly
+	case "create", "add", "send", "post", "clone", "new":
+		return tooldef.AccessModeAppendOnly
+	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit":
+		return tooldef.AccessModeCanDestruct
+	default:
+		return tooldef.AccessModeCanDestruct
+	}
+}
+
+func inferVerb(entryTS string) string {
+	base := filepath.Base(entryTS)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	parts := strings.Split(base, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }

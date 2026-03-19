@@ -38,7 +38,7 @@ func New() *Builder {
 //
 // A directory is treated as a package iff it contains toolbox.pkg.json.
 func (b *Builder) AddFromDir(dir string) error {
-	pkg, err := packaging.LoadPackageFromDir(dir)
+	pkg, err := packaging.LoadSourceDir(dir)
 	if err != nil {
 		return err
 	}

@@ -23,6 +23,10 @@
             "type": "string",
             "minLength": 1
           },
+          "accessMode": {
+            "type": "string",
+            "enum": ["readOnly", "appendOnly", "canDestruct"]
+          },
           "idempotent": {
             "type": "boolean"
           }

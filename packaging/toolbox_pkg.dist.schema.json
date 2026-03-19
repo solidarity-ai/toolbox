@@ -10,7 +10,7 @@
     },
     "runtime": {
       "type": "string",
-      "enum": ["typescript-sandbox"]
+      "enum": ["typescript-sandbox", "typescript+wasmer-sandbox"]
     },
     "tools": {
       "type": "array",

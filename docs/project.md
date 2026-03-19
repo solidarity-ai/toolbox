@@ -220,6 +220,27 @@ This gives two runtime paths:
 
 ---
 
+## High-risk areas
+
+One of the highest-risk technical areas currently identified is a shared virtual filesystem across runtimes.
+
+Why this is high risk:
+- TypeScript code may need a Node-style `fs` view
+- native WASM tools may need a real VFS inside the Rust host
+- CLI-style tools may write files that later TypeScript code needs to read back and include in final results
+- CodeMode and direct tool execution both benefit from one consistent scratch/filesystem model during a run
+
+This is not just a CodeMode concern. It is a cross-runtime execution concern that affects:
+- runtime interoperability
+- result handling
+- intermediate artifacts
+- caching
+- isolation boundaries
+
+The current direction is to treat this as a shared runtime concern rather than inventing separate filesystem models per runtime.
+
+---
+
 ## Current open questions
 
 Some areas are intentionally not settled yet:

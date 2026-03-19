@@ -1,0 +1,11 @@
+{
+  "name": "google-workspace",
+  "runtime": "typescript+wasmer-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

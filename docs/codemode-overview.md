@@ -467,6 +467,8 @@ That proxy boundary is also the natural place to support richer call behavior la
 - normalized LLM-friendly error objects
 - retry or replay policy that stays outside the sandbox
 
+A shared virtual filesystem is also desirable across runtimes. This is not only a CodeMode convenience. Many CLI-style tools will write files as part of execution, and TypeScript code may then need to read those files back and include them in a final result. The long-term runtime model should therefore support one shared scratch/filesystem view that is accessible across the participating runtimes in a run, for example through a Node-style fs shim on the TypeScript side and an actual VFS inside the Wasmer-based runtime.
+
 ---
 
 ## Discovery vs action behavior

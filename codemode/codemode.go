@@ -106,6 +106,8 @@ func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error
 
 func preludeForTools(resolved toolset.ResolvedToolset) string {
 	var b strings.Builder
+	b.WriteString("const __toolboxInvoke = globalThis.__invokeTool;\n")
+	b.WriteString("delete globalThis.__invokeTool;\n")
 	b.WriteString("globalThis.tools = {};\n")
 
 	seen := map[string]bool{}
@@ -117,7 +119,7 @@ func preludeForTools(resolved toolset.ResolvedToolset) string {
 	for _, tool := range tools {
 		parts := strings.Split(tool.Name, ".")
 		if len(parts) == 1 {
-			fmt.Fprintf(&b, "globalThis.tools[%q] = (args) => __invokeTool(%q, args);\n", parts[0], tool.Name)
+			fmt.Fprintf(&b, "globalThis.tools[%q] = (args) => __toolboxInvoke(%q, args);\n", parts[0], tool.Name)
 			continue
 		}
 
@@ -131,7 +133,7 @@ func preludeForTools(resolved toolset.ResolvedToolset) string {
 		}
 
 		method := parts[len(parts)-1]
-		fmt.Fprintf(&b, "%s[%q] = (args) => __invokeTool(%q, args);\n", prefix, method, tool.Name)
+		fmt.Fprintf(&b, "%s[%q] = (args) => __toolboxInvoke(%q, args);\n", prefix, method, tool.Name)
 	}
 
 	return b.String()

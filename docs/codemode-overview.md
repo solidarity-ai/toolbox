@@ -446,11 +446,26 @@ The exact emitted shape is a `codemode` concern, not a `toolset` concern.
 `toolset` defines **what is visible**.
 `codemode` defines **how that visible shape is presented as code**.
 
+### Compiler note
+
+We have now proved that `typescript-go` exposes enough checker/signature information to recover SDK-facing function types directly from compiled tool code, including:
+- multiple top-level parameters in declaration order
+- optional parameters
+- nested object parameter types
+
+That means `codemode` can generate visible SDK types from compiler output after binding/hiding is applied, without needing to parse tool source text manually. This proof is about SDK type generation only; it does not imply that binding itself should operate on nested paths.
+
 ### Execution note
 
 The SDK should not execute by importing and running tool modules inside the code-mode sandbox. Tool code is not isolated enough for that model, and it would blur the `codemode -> invoke -> runtime` boundary.
 
 Instead, the long-term SDK should expose proxy-backed tool objects or functions whose calls cross back into Go and delegate to `invoke`. The current direct module/typecheck wiring is only a temporary bootstrap for test coverage.
+
+That proxy boundary is also the natural place to support richer call behavior later, such as:
+- structured partial/intermediate data on failure
+- cache hits for repeated tool calls
+- normalized LLM-friendly error objects
+- retry or replay policy that stays outside the sandbox
 
 ---
 

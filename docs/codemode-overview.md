@@ -446,6 +446,12 @@ The exact emitted shape is a `codemode` concern, not a `toolset` concern.
 `toolset` defines **what is visible**.
 `codemode` defines **how that visible shape is presented as code**.
 
+### Execution note
+
+The SDK should not execute by importing and running tool modules inside the code-mode sandbox. Tool code is not isolated enough for that model, and it would blur the `codemode -> invoke -> runtime` boundary.
+
+Instead, the long-term SDK should expose proxy-backed tool objects or functions whose calls cross back into Go and delegate to `invoke`. The current direct module/typecheck wiring is only a temporary bootstrap for test coverage.
+
 ---
 
 ## Discovery vs action behavior

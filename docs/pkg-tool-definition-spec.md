@@ -93,6 +93,8 @@ timeout_seconds = 60
 
 Each tool is a TypeScript file in the `tools/` directory. The filename is the resource path + method.
 
+During packaging, Toolbox validates the exported public contract for each tool and emits JSON Schema artifacts from that contract. This happens at package build/validation time, not at invocation time.
+
 ### Filename Convention
 
 The filename defines the tool's resource path:

@@ -7,19 +7,19 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
-	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 )
 
 func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
 	names := h.ToolNames()
 
 	assertContains(t, names, "calc.add")
+	assertContains(t, names, "calc.asyncAdd")
 }
 
 func TestMCPServerCallsInvokeForTool(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
 
 	result := h.CallTool("calc.add", map[string]any{
 		"a": 5,
@@ -42,9 +42,9 @@ func TestMCPServerCallsInvokeForTool(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
 
-	result := h.CallTool("calc.add", map[string]any{
+	result := h.CallTool("calc.asyncAdd", map[string]any{
 		"a": 7,
 		"b": 4,
 	})
@@ -59,7 +59,7 @@ func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(testToolset()))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
 
 	result := h.CallTool("calc.add", map[string]any{
 		"a": "6",
@@ -78,17 +78,6 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	if !strings.Contains(text.Text, "typescript check failed") {
 		t.Fatalf("expected typecheck failure, got %#v", text.Text)
 	}
-}
-
-func testToolset() toolset.ResolvedToolset {
-	calcAdd, ok := tooldef.StubTSToolDef("calc.add")
-	if !ok {
-		panic("expected calc.add stub TS tool definition")
-	}
-
-	return toolset.NewResolvedToolset([]toolset.Tool{
-		{Name: "calc.add", Description: "Add two numbers", TS: &calcAdd},
-	})
 }
 
 func assertContains(t *testing.T, values []string, want string) {

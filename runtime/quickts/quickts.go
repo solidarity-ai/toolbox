@@ -116,8 +116,8 @@ func withRunner(base fs.FS, source string) (fs.FS, error) {
 }
 
 func runnerSource(entry string, argsJSON string) string {
-	return fmt.Sprintf(`import { execute as add } from "./%s";
-export default add(%s, {});
+	return fmt.Sprintf(`import { execute } from "./%s";
+export default await execute(%s, {});
 `, entry, argsJSON)
 }
 

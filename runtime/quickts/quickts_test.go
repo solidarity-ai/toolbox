@@ -4,16 +4,11 @@ import (
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 )
 
 func TestRunCalcAddStub(t *testing.T) {
-	def, ok := tooldef.StubTSToolDef("calc.add")
-	if !ok {
-		t.Fatalf("expected calc.add stub tool def")
-	}
-
-	got, err := quickts.Run(def, map[string]any{
+	got, err := quickts.Run(tooltest.CalcAdd(t), map[string]any{
 		"a": 7,
 		"b": 4,
 	})
@@ -31,8 +26,8 @@ func TestRunnerSourceEmbedsJSONArgs(t *testing.T) {
 		`{"a":7,"b":4}`,
 	)
 
-	want := "import { execute as add } from \"./github.com/solidarity-ai/calc-tools/tools/calc.add.ts\";\n" +
-		"export default add({\"a\":7,\"b\":4}, {});\n"
+	want := "import { execute } from \"./github.com/solidarity-ai/calc-tools/tools/calc.add.ts\";\n" +
+		"export default await execute({\"a\":7,\"b\":4}, {});\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}

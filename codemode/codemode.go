@@ -11,6 +11,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
 	"github.com/microsoft/typescript-go/toolboxapi"
+	"github.com/solidarity-ai/toolbox/fsoverlay"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -81,27 +82,19 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 }
 
 func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error) {
-	files := fstest.MapFS{
-		"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
-		"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
+	layers := []fs.FS{
+		fstest.MapFS{
+			"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
+			"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
+		},
 	}
-
 	for _, tool := range resolved.Tools() {
 		if tool.TS == nil {
 			continue
 		}
-
-		src, ok := tool.TS.Files.(fstest.MapFS)
-		if !ok {
-			return nil, fmt.Errorf("unsupported tool fs type %T", tool.TS.Files)
-		}
-
-		for name, file := range src {
-			files[name] = file
-		}
+		layers = append(layers, tool.TS.Files)
 	}
-
-	return files, nil
+	return fsoverlay.New(layers...), nil
 }
 
 func preludeForTools(resolved toolset.ResolvedToolset) string {
@@ -153,7 +146,7 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 		if tool.TS == nil {
 			continue
 		}
-		fmt.Fprintf(&b, "import * as toolmod%d from \"./%s\";\n", i, tool.TS.Entry)
+		fmt.Fprintf(&b, "import toolmod%d from \"./%s\";\n", i, tool.TS.Entry)
 	}
 
 	namespaces := map[string][]string{}
@@ -169,7 +162,7 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 		}
 
 		namespaces[parts[0]] = append(namespaces[parts[0]], fmt.Sprintf(
-			"    %s(args: Parameters<typeof toolmod%d.execute>[0]): ToolResult<ReturnType<typeof toolmod%d.execute>> { return __invokeTool<ToolResult<ReturnType<typeof toolmod%d.execute>>>(%q, args); },",
+			"    %s(args: Parameters<typeof toolmod%d>[0]): ToolResult<ReturnType<typeof toolmod%d>> { return __invokeTool<ToolResult<ReturnType<typeof toolmod%d>>>(%q, args); },",
 			parts[1],
 			i,
 			i,

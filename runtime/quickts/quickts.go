@@ -12,6 +12,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
 	"github.com/microsoft/typescript-go/toolboxapi"
+	"github.com/solidarity-ai/toolbox/fsoverlay"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -20,9 +21,24 @@ const (
 	runnerJSFile = "__toolbox_run.js"
 )
 
+type ExecResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exitCode"`
+}
+
+type Host struct {
+	Exec func(binary string, args []string) (ExecResult, error)
+}
+
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
 // already runnable as a JS module and hides QuickJS behind this package.
 func Run(def tooldef.TSToolDef, args map[string]any) (string, error) {
+	return RunWithHost(def, args, Host{})
+}
+
+// RunWithHost is the same minimal runtime seam with optional host imports.
+func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string, error) {
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return "", fmt.Errorf("marshal args: %w", err)
@@ -60,6 +76,10 @@ func Run(def tooldef.TSToolDef, args map[string]any) (string, error) {
 	}
 	defer rt.Close()
 
+	if err := installHost(rt, host); err != nil {
+		return "", err
+	}
+
 	val, err := rt.Eval(runnerJSFile, qjs.Code(code), qjs.TypeModule())
 	if err != nil {
 		return "", fmt.Errorf("run %s: %w", def.Entry, err)
@@ -67,6 +87,36 @@ func Run(def tooldef.TSToolDef, args map[string]any) (string, error) {
 	defer val.Free()
 
 	return val.String(), nil
+}
+
+func installHost(rt *qjs.Runtime, host Host) error {
+	if host.Exec == nil {
+		return nil
+	}
+
+	ctx := rt.Context()
+	jsExec, err := qjs.FuncToJS(ctx, func(binary string, args []string) (string, error) {
+		result, err := host.Exec(binary, args)
+		if err != nil {
+			return "", err
+		}
+
+		data, err := json.Marshal(result)
+		if err != nil {
+			return "", fmt.Errorf("marshal exec result: %w", err)
+		}
+		return string(data), nil
+	})
+	if err != nil {
+		return fmt.Errorf("bind exec: %w", err)
+	}
+
+	ctx.Global().SetPropertyStr("__toolboxExec", jsExec)
+	if _, err := rt.Eval("__toolbox_host.js", qjs.Code(`globalThis.exec = (binary, args) => JSON.parse(__toolboxExec(binary, args));`)); err != nil {
+		return fmt.Errorf("load host imports: %w", err)
+	}
+
+	return nil
 }
 
 func emit(files fs.FS) (string, error) {
@@ -101,23 +151,17 @@ func emit(files fs.FS) (string, error) {
 }
 
 func withRunner(base fs.FS, source string) (fs.FS, error) {
-	files, ok := base.(fstest.MapFS)
-	if !ok {
-		return nil, fmt.Errorf("unsupported tool fs type %T", base)
-	}
-
-	out := make(fstest.MapFS, len(files)+1)
-	for name, file := range files {
-		out[name] = file
-	}
-	out[runnerTSFile] = &fstest.MapFile{Data: []byte(source)}
-
-	return out, nil
+	return fsoverlay.New(
+		fstest.MapFS{
+			runnerTSFile: &fstest.MapFile{Data: []byte(source)},
+		},
+		base,
+	), nil
 }
 
 func runnerSource(entry string, argsJSON string) string {
-	return fmt.Sprintf(`import { execute } from "./%s";
-export default await execute(%s, {});
+	return fmt.Sprintf(`import tool from "./%s";
+export default await tool(%s, {});
 `, entry, argsJSON)
 }
 

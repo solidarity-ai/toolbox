@@ -22,12 +22,12 @@ func TestRunCalcAddStub(t *testing.T) {
 
 func TestRunnerSourceEmbedsJSONArgs(t *testing.T) {
 	got := quickts.RunnerSourceForTest(
-		"github.com/solidarity-ai/calc-tools/tools/calc.add.ts",
+		"tools/calc.add.ts",
 		`{"a":7,"b":4}`,
 	)
 
-	want := "import { execute } from \"./github.com/solidarity-ai/calc-tools/tools/calc.add.ts\";\n" +
-		"export default await execute({\"a\":7,\"b\":4}, {});\n"
+	want := "import tool from \"./tools/calc.add.ts\";\n" +
+		"export default await tool({\"a\":7,\"b\":4}, {});\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}

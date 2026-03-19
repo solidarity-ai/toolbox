@@ -1,10 +1,12 @@
-# runtime/quickjs
+# runtime/quickts
 
 ## Purpose
 
-`runtime/quickjs` executes TypeScript/JavaScript tools.
+`runtime/quickjs` executes TypeScript tools.
 
 It owns:
+
+- Typescript type checking
 - JavaScript engine/session lifecycle
 - host import wiring
 - loading/evaluating tool code
@@ -14,9 +16,11 @@ It owns:
 ## Who depends on this package
 
 ### `invoke`
-Uses `runtime/quickjs` when the selected tool is a TS/JS tool.
+
+Uses `runtime/quickts` when the selected tool is a JS tool.
 
 ### `codemode`
+
 May depend on the same engine primitives conceptually, but should still execute tools through `invoke` rather than reproducing tool-call semantics itself.
 
 ## What they use it for

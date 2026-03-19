@@ -53,8 +53,8 @@ export default tools.calc.sub({ a: x, b: 1 });
 
 func TestRunRejectsDirectToolModuleImport(t *testing.T) {
 	_, err := codemode.Run(tooltest.CalcToolset(t), `
-import { execute } from "./github.com/solidarity-ai/calc-tools/tools/calc.add.ts";
-export default execute({ a: 5, b: 5 }, {});
+import tool from "./tools/calc.add.ts";
+export default tool({ a: 5, b: 5 }, {});
 `)
 	if err == nil {
 		t.Fatal("expected direct tool module import to be rejected")
@@ -63,7 +63,7 @@ export default execute({ a: 5, b: 5 }, {});
 
 func TestRunRejectsDirectSharedPackageImport(t *testing.T) {
 	_, err := codemode.Run(tooltest.CalcToolset(t), `
-import { internalValue } from "./github.com/solidarity-ai/calc-tools/lib/internal.ts";
+import { internalValue } from "./lib/internal.ts";
 export default internalValue();
 `)
 	if err == nil {

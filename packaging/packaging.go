@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,11 @@ type LoadResult struct {
 	Warnings []Warning
 }
 
+type LoadedPackage struct {
+	Package tooldef.Package
+	Files   fs.FS
+}
+
 // LoadPackageFromDir loads a source package rooted at dir.
 //
 // A directory is treated as a package iff it contains toolbox.pkg.json.
@@ -92,6 +98,21 @@ func LoadSourceDirWithMode(dir string, mode ValidationMode) (LoadResult, error) 
 	return loadSourcePackageFromFile(manifestPath, mode)
 }
 
+func LoadSourcePackage(dir string) (LoadedPackage, error) {
+	return LoadSourcePackageWithMode(dir, ValidationModeDev)
+}
+
+func LoadSourcePackageWithMode(dir string, mode ValidationMode) (LoadedPackage, error) {
+	result, err := LoadSourceDirWithMode(dir, mode)
+	if err != nil {
+		return LoadedPackage{}, err
+	}
+	return LoadedPackage{
+		Package: result.Package,
+		Files:   os.DirFS(dir),
+	}, nil
+}
+
 // LoadBuiltDir loads a compiled package rooted at dir.
 func LoadBuiltDir(dir string) (tooldef.Package, error) {
 	result, err := LoadBuiltDirWithMode(dir, ValidationModeDev)
@@ -105,6 +126,21 @@ func LoadBuiltDir(dir string) (tooldef.Package, error) {
 func LoadBuiltDirWithMode(dir string, mode ValidationMode) (LoadResult, error) {
 	compiledPath := filepath.Join(dir, "toolbox.pkg.compiled.json")
 	return loadBuiltPackageFromFile(compiledPath, mode)
+}
+
+func LoadBuiltPackage(dir string) (LoadedPackage, error) {
+	return LoadBuiltPackageWithMode(dir, ValidationModeDev)
+}
+
+func LoadBuiltPackageWithMode(dir string, mode ValidationMode) (LoadedPackage, error) {
+	result, err := LoadBuiltDirWithMode(dir, mode)
+	if err != nil {
+		return LoadedPackage{}, err
+	}
+	return LoadedPackage{
+		Package: result.Package,
+		Files:   os.DirFS(dir),
+	}, nil
 }
 
 func loadSourcePackageFromFile(manifestPath string, mode ValidationMode) (LoadResult, error) {
@@ -219,4 +255,29 @@ func inferVerb(entryTS string) string {
 		return ""
 	}
 	return parts[len(parts)-1]
+}
+
+func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
+	tools := make([]tooldef.ResolvedTool, 0, len(p.Package.Tools))
+	for _, pkgTool := range p.Package.Tools {
+		tools = append(tools, tooldef.ResolvedTool{
+			Name:        inferToolName(pkgTool.EntryTS),
+			Description: inferToolDescription(pkgTool.EntryTS),
+			Package:     &p.Package,
+			TS: &tooldef.TSToolDef{
+				Entry: pkgTool.EntryTS,
+				Files: p.Files,
+			},
+		})
+	}
+	return tools
+}
+
+func inferToolName(entryTS string) string {
+	base := filepath.Base(entryTS)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func inferToolDescription(entryTS string) string {
+	return inferToolName(entryTS)
 }

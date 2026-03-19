@@ -1,6 +1,8 @@
 package mcpserver_test
 
 import (
+	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,6 +10,7 @@ import (
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
@@ -77,6 +80,51 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	}
 	if !strings.Contains(text.Text, "typescript check failed") {
 		t.Fatalf("expected typecheck failure, got %#v", text.Text)
+	}
+}
+
+func TestMCPServerRoutesExecThroughTSWasmerForLoadedPackage(t *testing.T) {
+	dir := filepath.Join("..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(dir); err != nil {
+		t.Fatalf("add package dir: %v", err)
+	}
+
+	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	result := h.CallTool("users.list", map[string]any{})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+
+	structured := mcptest.StructuredMap(t, result)
+	raw, ok := structured["result"].(string)
+	if !ok {
+		t.Fatalf("expected string result, got %#v", structured["result"])
+	}
+
+	var decoded struct {
+		Runtime string   `json:"runtime"`
+		Binary  string   `json:"binary"`
+		Args    []string `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if decoded.Runtime != "tswasmer-stub" {
+		t.Fatalf("expected runtime tswasmer-stub, got %q", decoded.Runtime)
+	}
+	if decoded.Binary != "gwc" {
+		t.Fatalf("expected binary gwc, got %q", decoded.Binary)
+	}
+	wantArgs := []string{"users", "list", "--format", "json"}
+	if len(decoded.Args) != len(wantArgs) {
+		t.Fatalf("expected args %v, got %v", wantArgs, decoded.Args)
+	}
+	for i := range wantArgs {
+		if decoded.Args[i] != wantArgs[i] {
+			t.Fatalf("expected args %v, got %v", wantArgs, decoded.Args)
+		}
 	}
 }
 

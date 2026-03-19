@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
+	"github.com/solidarity-ai/toolbox/runtime/tswasmer"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -15,16 +17,43 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
 			if tool.TS != nil {
-				return quickts.Run(*tool.TS, args)
+				return runTSTool(tool, args)
 			}
 
-			return runStub(tool.Name, args)
+			return "", fmt.Errorf("tool %s has no executable", tool.Name)
 		}
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func runStub(toolName string, args map[string]any) (string, error) {
-	return toolName, nil
+func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
+	if tool.Package == nil {
+		return "", fmt.Errorf("tool %s has no package runtime", tool.Name)
+	}
+
+	switch tool.Package.Runtime {
+	case tooldef.RuntimeTypeScriptSandbox:
+		return quickts.Run(*tool.TS, args)
+	case tooldef.RuntimeTypeScriptWasmerSandbox:
+		return quickts.RunWithHost(*tool.TS, args, quickts.Host{
+			Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
+				result, err := tswasmer.Run(tswasmer.Request{
+					Binary: binary,
+					Args:   execArgs,
+				})
+				if err != nil {
+					return quickts.ExecResult{}, err
+				}
+
+				return quickts.ExecResult{
+					Stdout:   result.Stdout,
+					Stderr:   result.Stderr,
+					ExitCode: result.ExitCode,
+				}, nil
+			},
+		})
+	default:
+		return "", fmt.Errorf("unsupported runtime for tool %s: %q", tool.Name, tool.Package.Runtime)
+	}
 }

@@ -66,8 +66,12 @@ func BenchmarkVFSRoundTrip(b *testing.B) {
 		benchVFSServerOnly(b)
 	})
 
-	b.Run("WASMGuestOnly", func(b *testing.B) {
-		benchWASMGuestOnly(b, fixtureDir)
+	b.Run("WASMGuestCold", func(b *testing.B) {
+		benchWASMGuestCold(b, fixtureDir)
+	})
+
+	b.Run("WASMGuestCached", func(b *testing.B) {
+		benchWASMGuestCached(b, fixtureDir)
 	})
 
 	b.Run("FullRoundTrip", func(b *testing.B) {
@@ -124,10 +128,55 @@ func benchVFSServerOnly(b *testing.B) {
 	}
 }
 
-// benchWASMGuestOnly measures VFS server + WASM guest execution (Rust via
-// wasixcli-sandbox), bypassing the TS/QuickJS layer.
-func benchWASMGuestOnly(b *testing.B, fixtureDir string) {
+// benchWASMGuestCold measures VFS server + WASM guest execution without
+// compiled module cache (Cranelift compilation every iteration).
+func benchWASMGuestCold(b *testing.B, fixtureDir string) {
 	wasmPath := filepath.Join(fixtureDir, "dist", "vfs-guest.wasm")
+	cacheDir := filepath.Join(os.TempDir(), "toolbox-wasm-cache")
+
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		os.RemoveAll(cacheDir) // force recompilation
+		memFS := vfs.NewMemFS()
+		if err := memFS.WriteFile("/input.txt", []byte("hello from bench")); err != nil {
+			b.Fatalf("pre-populate: %v", err)
+		}
+		sockPath := filepath.Join(b.TempDir(), "vfs.sock")
+		listener, err := net.Listen("unix", sockPath)
+		if err != nil {
+			b.Fatalf("listen: %v", err)
+		}
+		srv := vfs.NewServer(memFS, listener)
+		go srv.Serve()
+		b.StartTimer()
+
+		result, err := tswasixcli.Run(tswasixcli.Request{
+			WasmPath:    wasmPath,
+			VFSSockPath: sockPath,
+		})
+
+		b.StopTimer()
+		srv.Close()
+		os.Remove(sockPath)
+		b.StartTimer()
+
+		if err != nil {
+			b.Fatalf("tswasixcli.Run: %v", err)
+		}
+		if result.ExitCode != 0 {
+			b.Fatalf("guest exited %d: stderr=%q", result.ExitCode, result.Stderr)
+		}
+	}
+}
+
+// benchWASMGuestCached measures VFS server + WASM guest execution with a warm
+// compiled module cache (deserialization instead of Cranelift compilation).
+func benchWASMGuestCached(b *testing.B, fixtureDir string) {
+	wasmPath := filepath.Join(fixtureDir, "dist", "vfs-guest.wasm")
+
+	// Warm up the cache with one invocation before timing.
+	warmUpWASMCache(b, wasmPath)
 
 	b.ResetTimer()
 	for range b.N {
@@ -161,6 +210,37 @@ func benchWASMGuestOnly(b *testing.B, fixtureDir string) {
 		if result.ExitCode != 0 {
 			b.Fatalf("guest exited %d: stderr=%q", result.ExitCode, result.Stderr)
 		}
+	}
+}
+
+// warmUpWASMCache runs the WASM guest once to populate the compiled module cache.
+func warmUpWASMCache(b *testing.B, wasmPath string) {
+	b.Helper()
+	memFS := vfs.NewMemFS()
+	if err := memFS.WriteFile("/input.txt", []byte("warmup")); err != nil {
+		b.Fatalf("warmup pre-populate: %v", err)
+	}
+	sockPath := filepath.Join(b.TempDir(), "warmup.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		b.Fatalf("warmup listen: %v", err)
+	}
+	srv := vfs.NewServer(memFS, listener)
+	go srv.Serve()
+	defer func() {
+		srv.Close()
+		os.Remove(sockPath)
+	}()
+
+	result, err := tswasixcli.Run(tswasixcli.Request{
+		WasmPath:    wasmPath,
+		VFSSockPath: sockPath,
+	})
+	if err != nil {
+		b.Fatalf("warmup tswasixcli.Run: %v", err)
+	}
+	if result.ExitCode != 0 {
+		b.Fatalf("warmup failed: stderr=%q", result.Stderr)
 	}
 }
 

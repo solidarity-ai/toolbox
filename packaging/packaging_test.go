@@ -412,6 +412,102 @@ func TestLoadSourcePackageRestrictsTypeScriptFilesToManifestAndGlobs(t *testing.
 	}
 }
 
+func TestLoadSourcePackageExtractsToolMetadata(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "toolbox.pkg.json"), `{
+  "name": "test-pkg",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "users.list.ts"), `/**
+ * List all users in the workspace
+ */
+export default async function tool(params: { query: string; limit?: number }, ctx: unknown) {
+  return [];
+}
+`)
+
+	pkg, err := LoadSourcePackage(dir)
+	if err != nil {
+		t.Fatalf("LoadSourcePackage() error = %v", err)
+	}
+
+	if len(pkg.Package.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(pkg.Package.Tools))
+	}
+	tool := pkg.Package.Tools[0]
+	if tool.Description != "List all users in the workspace" {
+		t.Fatalf("expected description %q, got %q", "List all users in the workspace", tool.Description)
+	}
+	if tool.ParamsSchema == nil {
+		t.Fatal("expected params schema to be populated")
+	}
+	schemaType, _ := tool.ParamsSchema["type"].(string)
+	if schemaType != "object" {
+		t.Fatalf("expected object schema type, got %q", schemaType)
+	}
+	props, _ := tool.ParamsSchema["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("expected properties in params schema")
+	}
+	if _, ok := props["query"]; !ok {
+		t.Fatal("expected 'query' property in params schema")
+	}
+
+	resolved := pkg.ResolvedTools()
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved tool, got %d", len(resolved))
+	}
+	if resolved[0].Description != "List all users in the workspace" {
+		t.Fatalf("expected resolved description %q, got %q", "List all users in the workspace", resolved[0].Description)
+	}
+	if resolved[0].ParamsSchema == nil {
+		t.Fatal("expected resolved params schema")
+	}
+}
+
+func TestLoadSourcePackageFallsBackToFilenameDescription(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "toolbox.pkg.json"), `{
+  "name": "test-pkg",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default async function tool(params: { a: number; b: number }, ctx: unknown) {
+  return params.a + params.b;
+}
+`)
+
+	pkg, err := LoadSourcePackage(dir)
+	if err != nil {
+		t.Fatalf("LoadSourcePackage() error = %v", err)
+	}
+
+	// No JSDoc, so Description on PackageTool stays empty
+	tool := pkg.Package.Tools[0]
+	if tool.Description != "" {
+		t.Fatalf("expected empty description on PackageTool, got %q", tool.Description)
+	}
+	// But params schema should still be extracted
+	if tool.ParamsSchema == nil {
+		t.Fatal("expected params schema even without JSDoc")
+	}
+
+	// ResolvedTool should fall back to filename-inferred description
+	resolved := pkg.ResolvedTools()
+	if resolved[0].Description != "calc.add" {
+		t.Fatalf("expected fallback description %q, got %q", "calc.add", resolved[0].Description)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

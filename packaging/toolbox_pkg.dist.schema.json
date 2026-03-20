@@ -43,6 +43,12 @@
           },
           "idempotent": {
             "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "paramsSchema": {
+            "type": "object"
           }
         }
       }

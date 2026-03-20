@@ -25,20 +25,23 @@ const (
 )
 
 type PackageTool struct {
-	EntryTS    string     `json:"entry_ts"`
-	Idempotent *bool      `json:"idempotent,omitempty"`
-	AccessMode AccessMode `json:"accessMode,omitempty"`
+	EntryTS      string         `json:"entry_ts"`
+	Idempotent   *bool          `json:"idempotent,omitempty"`
+	AccessMode   AccessMode     `json:"accessMode,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	ParamsSchema map[string]any `json:"paramsSchema,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current
 // outside-in seams. It combines static package identity with the concrete
 // executable artifact for one visible tool.
 type ResolvedTool struct {
-	Name        string
-	Description string
-	Package     *Package
-	TS          *TSToolDef
-	TSWasm      *TSWasmToolDef
+	Name         string
+	Description  string
+	ParamsSchema map[string]any
+	Package      *Package
+	TS           *TSToolDef
+	TSWasm       *TSWasmToolDef
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

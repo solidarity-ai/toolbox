@@ -51,11 +51,11 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string,
 		return "", err
 	}
 
-	diagnostics, err := toolbox.Check(context.Background(), toolbox.CheckInput{
+	diagnostics, _, err := toolbox.Check(context.Background(), toolbox.CheckInput{
 		Files:            files,
 		Entry:            runnerTSFile,
 		CurrentDirectory: "/",
-	})
+	}, nil)
 	if err != nil {
 		// TODO: Normalize checker/runtime errors into an LLM-friendly shape instead
 		// of returning raw compiler/library text.

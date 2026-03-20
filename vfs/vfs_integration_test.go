@@ -18,7 +18,7 @@ func TestWASMGuestFileRoundTrip(t *testing.T) {
 	wasmPath := fixtureWasmPath(t)
 	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasixcli binary not built: %v", err)
+		t.Skipf("wasixcli-sandbox binary not built: %v", err)
 	}
 	if _, err := os.Stat(wasmPath); err != nil {
 		t.Skipf("vfs-guest.wasm not found: %v", err)

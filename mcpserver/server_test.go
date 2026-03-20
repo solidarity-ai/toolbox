@@ -170,7 +170,7 @@ func requireTSWasmerArtifacts(t *testing.T) {
 	paths := []string{
 		filepath.Join(gwsFixtureDir(), "toolbox.pkg.json"),
 		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
-		filepath.Join("..", "wasixcli", "target", "debug", "wasixcli"),
+		filepath.Join("..", "wasixcli-sandbox", "target", "debug", "wasixcli-sandbox"),
 	}
 
 	for _, p := range paths {

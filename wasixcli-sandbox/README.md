@@ -1,6 +1,6 @@
-# wasixcli
+# wasixcli-sandbox
 
-`wasixcli` is the Rust runtime for the typescript+wasix-sandbox path.
+`wasixcli-sandbox` is the Rust runtime for the typescript+wasix-sandbox path.
 
 Phase 1 now runs one real WASI guest `.wasm`:
 - the host takes a wasm path plus guest argv

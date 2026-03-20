@@ -32,4 +32,4 @@ go.work.sum
 .bg-shell
 
 # Rust sandbox build output
-wasixcli/target/
+wasixcli-sandbox/target/

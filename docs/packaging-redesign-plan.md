@@ -19,15 +19,16 @@ packaging/
 ├── archive/
 │   ├── archive.go                 # Pack / Unpack / Verify
 │   └── archive_test.go
-├── source/
-│   ├── source.go                  # LoadSourceDir, LoadSourcePackage
-│   ├── sourcefs.go                # sourceFS implementation (moved from packaging/sourcefs.go)
-│   └── source_test.go
-└── cmd/
-    └── toolbox-pack/
-        ├── go.mod                 # standalone module
-        ├── go.sum
-        └── main.go               # CLI entry point
+└── source/
+    ├── source.go                  # LoadSourceDir, LoadSourcePackage
+    ├── sourcefs.go                # sourceFS implementation (moved from packaging/sourcefs.go)
+    └── source_test.go
+
+cmd/
+└── toolbox-pack/
+    ├── go.mod                     # standalone module
+    ├── go.sum
+    └── main.go                    # CLI entry point
 ```
 
 ## 2. Type definitions
@@ -362,11 +363,11 @@ func main() {
 
 ## 7. `go.work` / `go.mod` setup
 
-### 7.1 New module: `packaging/cmd/toolbox-pack`
+### 7.1 New module: `cmd/toolbox-pack`
 
 ```
-// packaging/cmd/toolbox-pack/go.mod
-module github.com/solidarity-ai/toolbox/packaging/cmd/toolbox-pack
+// cmd/toolbox-pack/go.mod
+module github.com/solidarity-ai/toolbox/cmd/toolbox-pack
 
 go 1.26.1
 
@@ -394,7 +395,7 @@ go 1.26.1
 use (
     .
     ./devtools
-    ./packaging/cmd/toolbox-pack
+    ./cmd/toolbox-pack
 )
 ```
 
@@ -470,7 +471,7 @@ Does not import packaging. **No changes needed.**
 - **Pack integration test**: source dir → Pack → archive + manifest on disk → LoadArchive → same Package
 - **LoadDev delegation**: verify it delegates correctly to source
 
-### 9.5 `packaging/cmd/toolbox-pack`
+### 9.5 `cmd/toolbox-pack`
 
 - **CLI integration test**: run the binary on a fixture dir, verify output files exist, archive is valid
 - **Error cases**: missing dir, invalid manifest, unwritable output dir
@@ -498,14 +499,14 @@ testutil/fixtures/toolbox.archives/calc/
 3. **Archive file naming: `<name>.toolbox.pkg` or flat `package.toolbox.pkg`?**
    Using the package name makes it clear which package the archive is for when multiple archives are in the same directory. The plan assumes `<name>.toolbox.pkg`.
 
-4. **Should `packaging/archive` include WASM binaries from `executables` in the archive?**
-   Yes — the archive should be self-contained. The `sourceFS` today only includes TS files, but for archives we also need WASM binaries. The pack step should include all files referenced by tool entries, additional globs, AND executable paths.
+4. **~~Should `packaging/archive` include WASM binaries from `executables` in the archive?~~ Resolved: yes, delegate file collection to runtime-specific logic.**
+   The archive must be self-contained. Different runtimes need different files packed (TS-only packages need just TS sources, wasmer packages also need WASM binaries). Rather than hardcoding this in `archive.Pack`, delegate file collection to runtime-aware objects so each runtime type defines which files belong in the archive. The pack step collects tool entries + additional globs for all runtimes, and additionally includes executable paths for wasmer runtimes.
 
-5. **Schema file naming in the repo vs manifest filenames.**
-   The schema files validate JSON shapes. `toolbox_devpkg.schema.json` validates what goes in `toolbox.devpkg.json`. `toolbox_pkg.schema.json` validates `toolbox.pkg.json`. This is clear but worth confirming.
+5. **~~Schema file naming in the repo vs manifest filenames.~~ Resolved: confirmed.**
+   `toolbox_devpkg.schema.json` validates `toolbox.devpkg.json`. `toolbox_pkg.schema.json` validates `toolbox.pkg.json`.
 
-6. **Should the `toolbox-pack` CLI live at `packaging/cmd/toolbox-pack` or at the repo root `cmd/toolbox-pack`?**
-   Placing it under `packaging/cmd/` signals that it's tightly coupled to the packaging module. Placing it at `cmd/toolbox-pack/` follows the more common Go convention. The plan assumes `packaging/cmd/toolbox-pack` per the spec but this is worth discussing.
+6. **~~Should the `toolbox-pack` CLI live at `packaging/cmd/toolbox-pack` or at the repo root `cmd/toolbox-pack`?~~ Resolved: `cmd/toolbox-pack`.**
+   Follows standard Go convention. Still gets its own `go.mod` for dependency isolation.
 
 7. **Backward compatibility period.**
    Should we support reading both `toolbox.pkg.json` (old source name) and `toolbox.devpkg.json` (new source name) during a transition period? Or rename in one shot? The plan assumes a clean rename since this is pre-1.0.

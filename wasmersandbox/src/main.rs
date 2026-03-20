@@ -1,8 +1,11 @@
+mod proxy_fs;
+
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 use std::io::Read;
 use std::process;
+use std::sync::Arc;
 use wasmer::{
     sys::{Cranelift, EngineBuilder, Features},
     Module,
@@ -51,6 +54,14 @@ fn run() -> Result<()> {
             .with_args(guest_args.iter().map(String::as_str))
             .with_stdout(Box::new(stdout_tx))
             .with_stderr(Box::new(stderr_tx));
+
+        // Mount the shared VFS if a socket path is provided.
+        if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
+            let proxy = proxy_fs::ProxyFs::connect(&socket_path)
+                .context("connect to VFS proxy")?;
+            runner.with_mount("/".to_string(), Arc::new(proxy));
+        }
+
         runner
             .run_wasm(
                 RuntimeOrEngine::Engine(engine),

@@ -10,8 +10,9 @@ import (
 )
 
 type Request struct {
-	WasmPath string
-	Args     []string
+	WasmPath    string
+	Args        []string
+	VFSSockPath string // Unix socket for shared VFS proxy (optional).
 }
 
 type Result struct {
@@ -26,6 +27,10 @@ func Run(request Request) (Result, error) {
 	}
 
 	cmd := exec.Command(resolveHostBinaryPath(), append([]string{request.WasmPath}, request.Args...)...)
+
+	if request.VFSSockPath != "" {
+		cmd.Env = append(cmd.Environ(), "TOOLBOX_VFS_SOCK="+request.VFSSockPath)
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

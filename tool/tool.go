@@ -4,9 +4,10 @@ import "io/fs"
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
-	Name    string        `json:"name"`
-	Runtime ToolRuntime   `json:"runtime"`
-	Tools   []PackageTool `json:"tools"`
+	Name                      string        `json:"name"`
+	Runtime                   ToolRuntime   `json:"runtime"`
+	AdditionalTypeScriptGlobs []string      `json:"additionalTypeScriptGlobs,omitempty"`
+	Tools                     []PackageTool `json:"tools"`
 }
 
 type ToolRuntime string

@@ -11,7 +11,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
-	"github.com/microsoft/typescript-go/toolboxapi"
+	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/fsoverlay"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
@@ -49,7 +49,7 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string,
 		return "", err
 	}
 
-	diagnostics, err := toolboxapi.Check(context.Background(), toolboxapi.CheckInput{
+	diagnostics, err := toolbox.Check(context.Background(), toolbox.CheckInput{
 		Files:            files,
 		Entry:            runnerTSFile,
 		CurrentDirectory: "/",
@@ -165,7 +165,7 @@ export default await tool(%s, {});
 `, entry, argsJSON)
 }
 
-func formatDiagnostics(diagnostics []toolboxapi.Diagnostic) string {
+func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {
 	parts := make([]string, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.File != "" {

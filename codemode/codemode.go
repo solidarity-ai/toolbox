@@ -10,7 +10,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
-	"github.com/microsoft/typescript-go/toolboxapi"
+	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/fsoverlay"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -29,7 +29,7 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 		return "", err
 	}
 
-	diagnostics, err := toolboxapi.Check(context.Background(), toolboxapi.CheckInput{
+	diagnostics, err := toolbox.Check(context.Background(), toolbox.CheckInput{
 		Files:            files,
 		Entry:            "__codemode_run.ts",
 		CurrentDirectory: "/",
@@ -188,7 +188,7 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 	return b.String()
 }
 
-func formatDiagnostics(diagnostics []toolboxapi.Diagnostic) string {
+func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {
 	parts := make([]string, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.File != "" {

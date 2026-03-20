@@ -5,13 +5,32 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 
+	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
+
+var (
+	checkSessionsMu sync.RWMutex
+	checkSessions   = map[*tooldef.Package]*toolbox.CheckSession{}
+)
+
+func getCheckSession(pkg *tooldef.Package) *toolbox.CheckSession {
+	checkSessionsMu.RLock()
+	defer checkSessionsMu.RUnlock()
+	return checkSessions[pkg]
+}
+
+func setCheckSession(pkg *tooldef.Package, session *toolbox.CheckSession) {
+	checkSessionsMu.Lock()
+	defer checkSessionsMu.Unlock()
+	checkSessions[pkg] = session
+}
 
 // Run is the minimal invoke seam for the first outside-in tests.
 //
@@ -35,7 +54,10 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 }
 
 func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
-	return quickts.Run(*tool.TS, args)
+	session := getCheckSession(tool.Package)
+	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{}, &session)
+	setCheckSession(tool.Package, session)
+	return result, err
 }
 
 // RunWithVFS is like Run but accepts an existing MemFS for the shared VFS.
@@ -67,7 +89,8 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 	}
 	defer cleanup()
 
-	return quickts.RunWithHost(tool.TSWasm.TSToolDef, args, quickts.Host{
+	session := getCheckSession(tool.Package)
+	result, err := quickts.RunWithHost(tool.TSWasm.TSToolDef, args, quickts.Host{
 		ReadFile: func(path string) (string, error) {
 			data, err := memFS.ReadAll(path)
 			if err != nil {
@@ -99,7 +122,9 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				ExitCode: result.ExitCode,
 			}, nil
 		},
-	})
+	}, &session)
+	setCheckSession(tool.Package, session)
+	return result, err
 }
 
 // startVFSServer creates a UDS, starts the VFS server goroutine, and returns

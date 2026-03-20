@@ -1,6 +1,6 @@
-# wasmersandbox
+# wasixcli
 
-`wasmersandbox` is the Rust runtime for the typescript+wasmer-sandbox path.
+`wasixcli` is the Rust runtime for the typescript+wasix-cli path.
 
 Phase 1 now runs one real WASI guest `.wasm`:
 - the host takes a wasm path plus guest argv
@@ -12,7 +12,7 @@ This is still intentionally narrow:
 - no shared VFS mounting yet
 - no real Google Workspace CLI guest yet
 
-The current end-to-end smoke path is exercised through `runtime/tswasmer`.
+The current end-to-end smoke path is exercised through `runtime/tswasixcli`.
 
 ## Toolchain
 

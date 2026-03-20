@@ -14,7 +14,7 @@ type ToolRuntime string
 
 const RuntimeTypeScriptSandbox ToolRuntime = "typescript-sandbox"
 
-const RuntimeTypeScriptWasmerSandbox ToolRuntime = "typescript+wasmer-sandbox"
+const RuntimeTypeScriptWasixCLI ToolRuntime = "typescript+wasix-cli"
 
 type AccessMode string
 

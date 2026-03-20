@@ -8,7 +8,7 @@ import (
 
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
-	"github.com/solidarity-ai/toolbox/runtime/tswasmer"
+	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
@@ -25,9 +25,9 @@ import (
 //  5. The TS entry returns the file contents as the tool result
 //  6. Go verifies the result matches what the WASM guest wrote
 func TestVFSRoundTripThroughInvoke(t *testing.T) {
-	hostBinary := tswasmer.ResolveHostBinaryPathForTest()
+	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasmersandbox binary not built: %v", err)
+		t.Skipf("wasixcli binary not built: %v", err)
 	}
 
 	fixtureDir := vfsTestFixtureDir(t)
@@ -47,7 +47,7 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 	}
 
 	// Run the tool through invoke — full path:
-	// TS (quickts) → exec → tswasmer → wasmersandbox → ProxyFs → VFS server
+	// TS (quickts) → exec → tswasixcli → wasixcli → ProxyFs → VFS server
 	// then TS reads the written file back via fs.readFileSync → MemFS
 	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
 	if err != nil {

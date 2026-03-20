@@ -1,6 +1,6 @@
 {
   "name": "vfs-test",
-  "runtime": "typescript+wasmer-sandbox",
+  "runtime": "typescript+wasix-cli",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

@@ -15,7 +15,7 @@ use wasmer_wasix::{runners::wasi::{RuntimeOrEngine, WasiRunner}, Pipe};
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("wasmersandbox: {err:#}");
+        eprintln!("wasixcli: {err:#}");
         process::exit(1);
     }
 }
@@ -24,7 +24,7 @@ fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let wasm_path = args
         .next()
-        .context("usage: wasmersandbox <wasm-path> [args...]")?;
+        .context("usage: wasixcli <wasm-path> [args...]")?;
     let guest_args: Vec<String> = args.collect();
 
     let wasm_bytes = fs::read(&wasm_path)

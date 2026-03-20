@@ -1,4 +1,4 @@
-package tswasmer
+package tswasixcli
 
 import (
 	"bytes"
@@ -54,16 +54,16 @@ func Run(request Request) (Result, error) {
 		return result, nil
 	}
 
-	return Result{}, fmt.Errorf("run wasmersandbox: %w", err)
+	return Result{}, fmt.Errorf("run wasixcli: %w", err)
 }
 
 func resolveHostBinaryPath() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return "wasmersandbox"
+		return "wasixcli"
 	}
 
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasmersandbox", "target", "debug", "wasmersandbox"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasixcli", "target", "debug", "wasixcli"))
 }
 
 // ResolveHostBinaryPathForTest exposes the host binary path for integration tests.

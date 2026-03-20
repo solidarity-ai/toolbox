@@ -65,3 +65,8 @@ func resolveHostBinaryPath() string {
 
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasmersandbox", "target", "debug", "wasmersandbox"))
 }
+
+// ResolveHostBinaryPathForTest exposes the host binary path for integration tests.
+func ResolveHostBinaryPathForTest() string {
+	return resolveHostBinaryPath()
+}

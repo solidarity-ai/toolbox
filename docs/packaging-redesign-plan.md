@@ -8,7 +8,10 @@ After the redesign the `packaging/` tree looks like this:
 
 ```
 packaging/
-├── packaging.go                   # thin top-level coordination API
+├── packaging.go                   # thin top-level coordination API, re-exports LoadedPackage
+├── internal/
+│   └── pkgtype/
+│       └── pkgtype.go             # LoadedPackage type (shared by source, archive, top-level)
 ├── manifest/
 │   ├── manifest.go                # types, parse, validate, compile
 │   ├── infer.go                   # inferAccessMode, inferVerb, inferToolName, inferToolDescription
@@ -327,7 +330,7 @@ source dir + toolbox.devpkg.json
 toolbox-pack [flags] <dir>
 
 Reads toolbox.devpkg.json from <dir>, validates, compiles, and produces:
-  - <name>.toolbox.pkg          (zstd-compressed tar archive)
+  - <name>-<sha256>.toolbox.pkg  (zstd-compressed tar archive)
   - toolbox.pkg.json            (external manifest with sha256)
 
 Flags:
@@ -345,8 +348,8 @@ Flags:
 
 ```bash
 $ toolbox-pack ./my-tools --output-dir ./dist
-Packed google-workspace.toolbox.pkg (145.2 KB)
-Wrote toolbox.pkg.json (sha256: a1b2c3d4...)
+Packed google-workspace-a1b2c3d4e5f6.toolbox.pkg (145.2 KB)
+Wrote toolbox.pkg.json (sha256: a1b2c3d4e5f6...)
 ```
 
 ### 6.4 Implementation
@@ -356,7 +359,7 @@ func main() {
     // Parse flags
     // LoadSourcePackage(dir) → LoadedPackage
     // archive.Pack(loadedPkg.Files, loadedPkg.Package)
-    // Write <name>.toolbox.pkg
+    // Write <name>-<sha256>.toolbox.pkg
     // Write toolbox.pkg.json with sha256
 }
 ```
@@ -484,20 +487,20 @@ testutil/fixtures/toolbox.pkgs/calc/
   toolbox.devpkg.json           # source manifest (renamed)
   tools/...
 testutil/fixtures/toolbox.archives/calc/
-  calc.toolbox.pkg              # pre-packed archive
+  calc-<sha256>.toolbox.pkg     # pre-packed archive
   toolbox.pkg.json              # external manifest with sha256
 ```
 
 ## 10. Open questions
 
-1. **Should `LoadedPackage` stay in the top-level `packaging` or move to a shared internal package?**
-   Both `source` and `archive` need to return it. Currently defined in `packaging`. If it stays there, `source` and `archive` would import their parent — which is fine for subdirectories of the same Go module but creates a circular reference concern if `packaging` also imports `source`. Resolution: `packaging` top-level imports `source` and `archive`. `source` and `archive` return `tooldef.Package` + `fs.FS` and the top-level wraps them into `LoadedPackage`. This avoids circular imports.
+1. **~~Should `LoadedPackage` stay in the top-level `packaging` or move to a shared internal package?~~ Resolved: `LoadedPackage` differs enough from `tool.Package` to stay its own type, placed in a shared internal package.**
+   `LoadedPackage` has `Files fs.FS`, `Dir string`, and `Executables map[string]string` beyond what `tool.Package` carries — it can't be a simple type alias. Since both `source` and `archive` need to return it while `packaging` top-level imports both of them, we'll put `LoadedPackage` in `packaging/internal/pkgtype` (or similar) to avoid circular imports. Subpackages import the internal type; the top-level re-exports it.
 
 2. **~~Should `ResolvedTools()` move off `LoadedPackage`?~~ Resolved: keep `Executables` on `LoadedPackage`, not on `tooldef.Package`.**
    Currently `LoadedPackage.ResolvedTools()` re-reads `toolbox.pkg.json` from disk to get the executables map for `TSWasmToolDef`. With the archive format there's no source dir to re-read from. The fix: add an `Executables map[string]string` field to `LoadedPackage`. Both the source loader and archive loader populate it from the manifest during loading. `ResolvedTools()` then uses `p.Executables` instead of re-reading from disk, and the data still ends up on `TSWasmToolDef` where it belongs. `tooldef.Package` stays clean as the static, runtime-agnostic definition — executables are a runtime-specific concern that belongs on the loaded/resolved side.
 
-3. **Archive file naming: `<name>.toolbox.pkg` or flat `package.toolbox.pkg`?**
-   Using the package name makes it clear which package the archive is for when multiple archives are in the same directory. The plan assumes `<name>.toolbox.pkg`.
+3. **~~Archive file naming: `<name>.toolbox.pkg` or flat `package.toolbox.pkg`?~~ Resolved: `<name>-<sha256>.toolbox.pkg`.**
+   Embedding the sha256 in the filename makes archives content-addressable and avoids collisions when multiple versions exist in the same directory. The external `toolbox.pkg.json` still contains the `sha256` field for programmatic verification.
 
 4. **~~Should `packaging/archive` include WASM binaries from `executables` in the archive?~~ Resolved: yes, delegate file collection to runtime-specific logic.**
    The archive must be self-contained. Different runtimes need different files packed (TS-only packages need just TS sources, wasmer packages also need WASM binaries). Rather than hardcoding this in `archive.Pack`, delegate file collection to runtime-aware objects so each runtime type defines which files belong in the archive. The pack step collects tool entries + additional globs for all runtimes, and additionally includes executable paths for wasmer runtimes.
@@ -508,5 +511,5 @@ testutil/fixtures/toolbox.archives/calc/
 6. **~~Should the `toolbox-pack` CLI live at `packaging/cmd/toolbox-pack` or at the repo root `cmd/toolbox-pack`?~~ Resolved: `cmd/toolbox-pack`.**
    Follows standard Go convention. Still gets its own `go.mod` for dependency isolation.
 
-7. **Backward compatibility period.**
-   Should we support reading both `toolbox.pkg.json` (old source name) and `toolbox.devpkg.json` (new source name) during a transition period? Or rename in one shot? The plan assumes a clean rename since this is pre-1.0.
+7. **~~Backward compatibility period.~~ Resolved: no backwards compat — clean rename in one shot.**
+   Update all test fixtures in `testutil/fixtures/toolbox.pkgs/` and the `/tmp/google-workspace` testbed directory. No transition period needed since this is pre-1.0.

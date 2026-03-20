@@ -3,8 +3,10 @@ module github.com/solidarity-ai/toolbox
 go 1.26.1
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/evanw/esbuild v0.27.4
 	github.com/fastschema/qjs v0.0.6
+	github.com/google/go-cmp v0.7.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
@@ -12,7 +14,6 @@ require (
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
@@ -31,6 +32,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/fastschema/qjs => /home/mackross/dev/qjs
-
-replace github.com/microsoft/typescript-go => /home/mackross/dev/vendor/typescript-go
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260320153605-72e008f61600

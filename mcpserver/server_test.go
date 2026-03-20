@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -89,7 +90,7 @@ func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 	requireTSWasmerArtifacts(t)
 
 	builder := toolset.New()
-	if err := builder.AddFromDir("/tmp/toolpkg-gws"); err != nil {
+	if err := builder.AddFromDir(gwsFixtureDir()); err != nil {
 		t.Fatalf("add external package dir: %v", err)
 	}
 
@@ -114,7 +115,7 @@ func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testing.T) {
 	requireTSWasmerArtifacts(t)
 
-	srcDir := "/tmp/toolpkg-gws"
+	srcDir := gwsFixtureDir()
 	dstDir := filepath.Join(t.TempDir(), "toolpkg-gws")
 	if err := copyPackageDir(srcDir, dstDir); err != nil {
 		t.Fatalf("copy package dir: %v", err)
@@ -167,8 +168,8 @@ func requireTSWasmerArtifacts(t *testing.T) {
 	t.Helper()
 
 	paths := []string{
-		"/tmp/toolpkg-gws/toolbox.pkg.json",
-		"/tmp/toolpkg-gws/dist/gwc.wasm",
+		filepath.Join(gwsFixtureDir(), "toolbox.pkg.json"),
+		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
 		filepath.Join("..", "wasmersandbox", "target", "debug", "wasmersandbox"),
 	}
 
@@ -177,6 +178,14 @@ func requireTSWasmerArtifacts(t *testing.T) {
 			t.Skipf("tswasmer artifacts not ready: missing %s", p)
 		}
 	}
+}
+
+func gwsFixtureDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("mcpserver_test: runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
 }
 
 func readFile(t *testing.T, path string) string {

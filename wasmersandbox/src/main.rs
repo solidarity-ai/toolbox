@@ -48,7 +48,7 @@ fn run() -> Result<()> {
         .context("create tokio runtime")?;
     let _guard = tokio_runtime.enter();
 
-    {
+    let run_result = {
         let mut runner = WasiRunner::new();
         runner
             .with_args(guest_args.iter().map(String::as_str))
@@ -59,18 +59,16 @@ fn run() -> Result<()> {
         if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
             let proxy = proxy_fs::ProxyFs::connect(&socket_path)
                 .context("connect to VFS proxy")?;
-            runner.with_mount("/".to_string(), Arc::new(proxy));
+            runner.with_mount("/work".to_string(), Arc::new(proxy));
         }
 
-        runner
-            .run_wasm(
-                RuntimeOrEngine::Engine(engine),
-                "tool",
-                module,
-                module_hash,
-            )
-            .context("run wasm module")?;
-    }
+        runner.run_wasm(
+            RuntimeOrEngine::Engine(engine),
+            "tool",
+            module,
+            module_hash,
+        )
+    };
 
     let mut stdout = String::new();
     stdout_rx
@@ -84,6 +82,8 @@ fn run() -> Result<()> {
 
     print!("{stdout}");
     eprint!("{stderr}");
+
+    run_result.context("run wasm module")?;
 
     Ok(())
 }

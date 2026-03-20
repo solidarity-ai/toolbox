@@ -37,11 +37,18 @@ type ResolvedTool struct {
 	Description string
 	Package     *Package
 	TS          *TSToolDef
+	TSWasm      *TSWasmToolDef
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke
 // seam. It points at one tool entry file inside a package-shaped filesystem.
 type TSToolDef struct {
-	Entry string
-	Files fs.FS
+	Entry       string
+	Files       fs.FS
+	PackageRoot string
+}
+
+type TSWasmToolDef struct {
+	TSToolDef
+	Executables map[string]string
 }

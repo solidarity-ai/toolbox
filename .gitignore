@@ -30,3 +30,6 @@ go.work.sum
 # .idea/
 # .vscode/
 .bg-shell
+
+# Rust sandbox build output
+wasmersandbox/target/

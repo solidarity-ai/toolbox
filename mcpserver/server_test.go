@@ -1,7 +1,8 @@
 package mcpserver_test
 
 import (
-	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,12 +84,12 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	}
 }
 
-func TestMCPServerRoutesExecThroughTSWasmerForLoadedPackage(t *testing.T) {
-	dir := filepath.Join("..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
+func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
+	requireTSWasmerArtifacts(t)
 
 	builder := toolset.New()
-	if err := builder.AddFromDir(dir); err != nil {
-		t.Fatalf("add package dir: %v", err)
+	if err := builder.AddFromDir("/tmp/toolpkg-gws"); err != nil {
+		t.Fatalf("add external package dir: %v", err)
 	}
 
 	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
@@ -98,34 +99,145 @@ func TestMCPServerRoutesExecThroughTSWasmerForLoadedPackage(t *testing.T) {
 	}
 
 	structured := mcptest.StructuredMap(t, result)
-	raw, ok := structured["result"].(string)
-	if !ok {
-		t.Fatalf("expected string result, got %#v", structured["result"])
+	if got := structured["tool"]; got != "users.list" {
+		t.Fatalf("expected tool users.list, got %#v", got)
+	}
+	if got := structured["result"]; got != "wasm-ada@example.com" {
+		t.Fatalf("expected parsed tool result, got %#v", got)
+	}
+}
+
+// TODO: Move these copied-package Wasmer integration checks out of the default
+// MCP test file once we have a better home for them, either in toolpkg-gws
+// itself or in dedicated WASIX/Wasm runtime integration tests.
+func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testing.T) {
+	requireTSWasmerArtifacts(t)
+
+	srcDir := "/tmp/toolpkg-gws"
+	dstDir := filepath.Join(t.TempDir(), "toolpkg-gws")
+	if err := copyDir(srcDir, dstDir); err != nil {
+		t.Fatalf("copy package dir: %v", err)
 	}
 
-	var decoded struct {
-		Runtime string   `json:"runtime"`
-		Binary  string   `json:"binary"`
-		Args    []string `json:"args"`
+	if err := os.WriteFile(
+		filepath.Join(dstDir, "tools", "users.list.ts"),
+		[]byte(strings.ReplaceAll(readFile(t, filepath.Join(srcDir, "tools", "users.list.ts")), `"gwc"`, `"gwc2"`)),
+		0o644,
+	); err != nil {
+		t.Fatalf("rewrite tool source: %v", err)
 	}
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
+
+	if err := os.WriteFile(
+		filepath.Join(dstDir, "toolbox.pkg.json"),
+		[]byte(strings.ReplaceAll(
+			readFile(t, filepath.Join(srcDir, "toolbox.pkg.json")),
+			`"gwc": "dist/gwc.wasm"`,
+			`"gwc2": "dist/gwc2.wasm"`,
+		)),
+		0o644,
+	); err != nil {
+		t.Fatalf("rewrite package manifest: %v", err)
 	}
-	if decoded.Runtime != "tswasmer-stub" {
-		t.Fatalf("expected runtime tswasmer-stub, got %q", decoded.Runtime)
+
+	srcWasm := filepath.Join(srcDir, "dist", "gwc.wasm")
+	dstWasm := filepath.Join(dstDir, "dist", "gwc2.wasm")
+	if err := copyFile(srcWasm, dstWasm); err != nil {
+		t.Fatalf("copy renamed wasm: %v", err)
 	}
-	if decoded.Binary != "gwc" {
-		t.Fatalf("expected binary gwc, got %q", decoded.Binary)
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(dstDir); err != nil {
+		t.Fatalf("add copied package dir: %v", err)
 	}
-	wantArgs := []string{"users", "list", "--format", "json"}
-	if len(decoded.Args) != len(wantArgs) {
-		t.Fatalf("expected args %v, got %v", wantArgs, decoded.Args)
+
+	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	result := h.CallTool("users.list", map[string]any{})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
 	}
-	for i := range wantArgs {
-		if decoded.Args[i] != wantArgs[i] {
-			t.Fatalf("expected args %v, got %v", wantArgs, decoded.Args)
+
+	structured := mcptest.StructuredMap(t, result)
+	if got := structured["result"]; got != "wasm-ada@example.com" {
+		t.Fatalf("expected parsed tool result, got %#v", got)
+	}
+}
+
+func requireTSWasmerArtifacts(t *testing.T) {
+	t.Helper()
+
+	paths := []string{
+		"/tmp/toolpkg-gws/toolbox.pkg.json",
+		"/tmp/toolpkg-gws/dist/gwc.wasm",
+		filepath.Join("..", "wasmersandbox", "target", "debug", "wasmersandbox"),
+	}
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			t.Skipf("tswasmer artifacts not ready: missing %s", p)
 		}
 	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func copyDir(src string, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0o755)
+		}
+
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+
+		return copyFile(path, target)
+	})
+}
+
+func copyFile(src string, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+
+	return out.Close()
 }
 
 func assertContains(t *testing.T, values []string, want string) {

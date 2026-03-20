@@ -98,6 +98,42 @@ func baseLoadPackageTestCases() []loadPackageTestCase {
 			},
 		},
 		{
+			name: "wasmer runtime allows executables",
+			mode: ValidationModeDev,
+			manifest: `{
+  "name": "google-workspace",
+  "runtime": "typescript+wasmer-sandbox",
+  "executables": {
+    "gwc": "dist/gwc.wasm"
+  },
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`,
+			wantPackage: tooldef.Package{
+				Name:    "google-workspace",
+				Runtime: tooldef.RuntimeTypeScriptWasmerSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+				},
+			},
+		},
+		{
+			name: "typescript runtime rejects executables",
+			mode: ValidationModeDev,
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "executables": {
+    "gwc": "dist/gwc.wasm"
+  },
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`,
+			wantErr: `executables`,
+		},
+		{
 			name: "valid dist",
 			mode: ValidationModeDist,
 			manifest: `{
@@ -124,7 +160,7 @@ func baseLoadPackageTestCases() []loadPackageTestCase {
     { "entry_ts": "tools/calc.add.ts" }
   ]
 }`,
-			wantErr: `minLength`,
+			wantErr: `"name"`,
 		},
 		{
 			name: "missing runtime",
@@ -135,7 +171,7 @@ func baseLoadPackageTestCases() []loadPackageTestCase {
     { "entry_ts": "tools/calc.add.ts" }
   ]
 }`,
-			wantErr: `enum`,
+			wantErr: `"runtime"`,
 		},
 		{
 			name: "missing idempotent warns in dev",

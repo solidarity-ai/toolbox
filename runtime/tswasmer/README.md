@@ -7,7 +7,7 @@
 It owns:
 - shaping `exec(...)` requests from TypeScript tools
 - calling the Rust `wasmersandbox` runtime
-- decoding the normalized sandbox result
+- returning normalized `stdout` / `stderr` / `exitCode` results to the TS tool layer
 
 ## Who depends on this package
 
@@ -20,3 +20,10 @@ Uses `runtime/tswasmer` when a TypeScript tool calls into the wasmer sandbox pat
 - toolset resolution
 - package fetching
 - sandbox internals
+
+## Current scope
+
+The current implementation is intentionally narrow:
+- `exec("<binary>", ...)` maps to `<package-root>/dist/<binary>.wasm`
+- the Rust host binary is expected at `wasmersandbox/target/debug/wasmersandbox`
+- general asset lookup and package-mounted executables are deferred

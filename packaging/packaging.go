@@ -23,9 +23,10 @@ var resolvedToolboxPkgDevSchema = mustResolveSchema(toolboxPkgDevSchemaJSON)
 var resolvedToolboxPkgDistSchema = mustResolveSchema(toolboxPkgDistSchemaJSON)
 
 type packageManifest struct {
-	Name    string                `json:"name"`
-	Runtime tooldef.ToolRuntime   `json:"runtime"`
-	Tools   []packageManifestTool `json:"tools"`
+	Name        string                `json:"name"`
+	Runtime     tooldef.ToolRuntime   `json:"runtime"`
+	Executables map[string]string     `json:"executables"`
+	Tools       []packageManifestTool `json:"tools"`
 }
 
 type packageManifestTool struct {
@@ -65,6 +66,7 @@ type LoadResult struct {
 type LoadedPackage struct {
 	Package tooldef.Package
 	Files   fs.FS
+	Dir     string
 }
 
 // LoadPackageFromDir loads a source package rooted at dir.
@@ -110,6 +112,7 @@ func LoadSourcePackageWithMode(dir string, mode ValidationMode) (LoadedPackage, 
 	return LoadedPackage{
 		Package: result.Package,
 		Files:   os.DirFS(dir),
+		Dir:     dir,
 	}, nil
 }
 
@@ -140,6 +143,7 @@ func LoadBuiltPackageWithMode(dir string, mode ValidationMode) (LoadedPackage, e
 	return LoadedPackage{
 		Package: result.Package,
 		Files:   os.DirFS(dir),
+		Dir:     dir,
 	}, nil
 }
 
@@ -147,6 +151,14 @@ func loadSourcePackageFromFile(manifestPath string, mode ValidationMode) (LoadRe
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return LoadResult{}, err
+	}
+
+	var sourceInstance map[string]any
+	if err := json.Unmarshal(raw, &sourceInstance); err != nil {
+		return LoadResult{}, fmt.Errorf("read %s: %w", manifestPath, err)
+	}
+	if err := resolvedToolboxPkgDevSchema.Validate(sourceInstance); err != nil {
+		return LoadResult{}, fmt.Errorf("validate source package %s: %w", manifestPath, err)
 	}
 
 	var manifest packageManifest
@@ -259,16 +271,39 @@ func inferVerb(entryTS string) string {
 
 func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 	tools := make([]tooldef.ResolvedTool, 0, len(p.Package.Tools))
+	var manifest packageManifest
+	if p.Package.Runtime == tooldef.RuntimeTypeScriptWasmerSandbox {
+		raw, err := os.ReadFile(filepath.Join(p.Dir, "toolbox.pkg.json"))
+		if err != nil {
+			panic(fmt.Errorf("read toolbox.pkg.json for %s: %w", p.Dir, err))
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			panic(fmt.Errorf("read toolbox.pkg.json for %s: %w", p.Dir, err))
+		}
+	}
 	for _, pkgTool := range p.Package.Tools {
-		tools = append(tools, tooldef.ResolvedTool{
+		resolved := tooldef.ResolvedTool{
 			Name:        inferToolName(pkgTool.EntryTS),
 			Description: inferToolDescription(pkgTool.EntryTS),
 			Package:     &p.Package,
-			TS: &tooldef.TSToolDef{
-				Entry: pkgTool.EntryTS,
-				Files: p.Files,
-			},
-		})
+		}
+
+		baseDef := tooldef.TSToolDef{
+			Entry:       pkgTool.EntryTS,
+			Files:       p.Files,
+			PackageRoot: p.Dir,
+		}
+
+		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasmerSandbox {
+			resolved.TSWasm = &tooldef.TSWasmToolDef{
+				TSToolDef:   baseDef,
+				Executables: manifest.Executables,
+			}
+		} else {
+			resolved.TS = &baseDef
+		}
+
+		tools = append(tools, resolved)
 	}
 	return tools
 }

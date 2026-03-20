@@ -1,10 +1,17 @@
 package tswasmer
 
-import "encoding/json"
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+)
 
 type Request struct {
-	Binary string
-	Args   []string
+	WasmPath string
+	Args     []string
 }
 
 type Result struct {
@@ -14,23 +21,42 @@ type Result struct {
 }
 
 func Run(request Request) (Result, error) {
-	payload := struct {
-		Runtime string   `json:"runtime"`
-		Binary  string   `json:"binary"`
-		Args    []string `json:"args"`
-	}{
-		Runtime: "tswasmer-stub",
-		Binary:  request.Binary,
-		Args:    append([]string(nil), request.Args...),
+	if request.WasmPath == "" {
+		return Result{}, fmt.Errorf("missing wasm path")
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return Result{}, err
+	cmd := exec.Command(resolveHostBinaryPath(), append([]string{request.WasmPath}, request.Args...)...)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	result := Result{
+		Stdout: stdout.String(),
+		Stderr: stderr.String(),
 	}
 
-	return Result{
-		Stdout:   string(data),
-		ExitCode: 0,
-	}, nil
+	if err == nil {
+		return result, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+		return result, nil
+	}
+
+	return Result{}, fmt.Errorf("run wasmersandbox: %w", err)
+}
+
+func resolveHostBinaryPath() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "wasmersandbox"
+	}
+
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasmersandbox", "target", "debug", "wasmersandbox"))
 }

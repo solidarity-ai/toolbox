@@ -2,6 +2,7 @@ package invoke
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/runtime/tswasmer"
@@ -16,6 +17,9 @@ import (
 func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any) (string, error) {
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
+			if tool.TSWasm != nil {
+				return runTSWasmTool(tool, args)
+			}
 			if tool.TS != nil {
 				return runTSTool(tool, args)
 			}
@@ -28,32 +32,30 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 }
 
 func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
-	if tool.Package == nil {
-		return "", fmt.Errorf("tool %s has no package runtime", tool.Name)
-	}
+	return quickts.Run(*tool.TS, args)
+}
 
-	switch tool.Package.Runtime {
-	case tooldef.RuntimeTypeScriptSandbox:
-		return quickts.Run(*tool.TS, args)
-	case tooldef.RuntimeTypeScriptWasmerSandbox:
-		return quickts.RunWithHost(*tool.TS, args, quickts.Host{
-			Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
-				result, err := tswasmer.Run(tswasmer.Request{
-					Binary: binary,
-					Args:   execArgs,
-				})
-				if err != nil {
-					return quickts.ExecResult{}, err
-				}
+func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
+	return quickts.RunWithHost(tool.TSWasm.TSToolDef, args, quickts.Host{
+		Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
+			relativePath, ok := tool.TSWasm.Executables[binary]
+			if !ok {
+				return quickts.ExecResult{}, fmt.Errorf("tool %s does not declare executable %q", tool.Name, binary)
+			}
 
-				return quickts.ExecResult{
-					Stdout:   result.Stdout,
-					Stderr:   result.Stderr,
-					ExitCode: result.ExitCode,
-				}, nil
-			},
-		})
-	default:
-		return "", fmt.Errorf("unsupported runtime for tool %s: %q", tool.Name, tool.Package.Runtime)
-	}
+			result, err := tswasmer.Run(tswasmer.Request{
+				WasmPath: filepath.Join(tool.TSWasm.PackageRoot, relativePath),
+				Args:     execArgs,
+			})
+			if err != nil {
+				return quickts.ExecResult{}, err
+			}
+
+			return quickts.ExecResult{
+				Stdout:   result.Stdout,
+				Stderr:   result.Stderr,
+				ExitCode: result.ExitCode,
+			}, nil
+		},
+	})
 }

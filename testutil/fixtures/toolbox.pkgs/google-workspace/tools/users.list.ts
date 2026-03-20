@@ -12,5 +12,8 @@ export const metadata = {
 
 export default async function tool(params: Record<string, never>, ctx: unknown) {
   const result = await exec("gwc", ["users", "list", "--format", "json"]);
-  return result.stdout;
+  const payload = JSON.parse(result.stdout) as {
+    users: Array<{ primaryEmail: string }>;
+  };
+  return payload.users[0]?.primaryEmail ?? "";
 }

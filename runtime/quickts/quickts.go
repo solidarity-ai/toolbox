@@ -28,7 +28,9 @@ type ExecResult struct {
 }
 
 type Host struct {
-	Exec func(binary string, args []string) (ExecResult, error)
+	Exec      func(binary string, args []string) (ExecResult, error)
+	ReadFile  func(path string) (string, error)
+	WriteFile func(path string, data string) error
 }
 
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
@@ -90,32 +92,71 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string,
 }
 
 func installHost(rt *qjs.Runtime, host Host) error {
-	if host.Exec == nil {
-		return nil
-	}
-
 	ctx := rt.Context()
-	jsExec, err := qjs.FuncToJS(ctx, func(binary string, args []string) (string, error) {
-		result, err := host.Exec(binary, args)
-		if err != nil {
-			return "", err
-		}
 
-		data, err := json.Marshal(result)
+	if host.Exec != nil {
+		jsExec, err := qjs.FuncToJS(ctx, func(binary string, args []string) (string, error) {
+			result, err := host.Exec(binary, args)
+			if err != nil {
+				return "", err
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				return "", fmt.Errorf("marshal exec result: %w", err)
+			}
+			return string(data), nil
+		})
 		if err != nil {
-			return "", fmt.Errorf("marshal exec result: %w", err)
+			return fmt.Errorf("bind exec: %w", err)
 		}
-		return string(data), nil
-	})
-	if err != nil {
-		return fmt.Errorf("bind exec: %w", err)
+		ctx.Global().SetPropertyStr("__toolboxExec", jsExec)
+		if _, err := rt.Eval("__toolbox_host.js", qjs.Code(`globalThis.exec = (binary, args) => JSON.parse(__toolboxExec(binary, args));`)); err != nil {
+			return fmt.Errorf("load host imports: %w", err)
+		}
 	}
 
-	ctx.Global().SetPropertyStr("__toolboxExec", jsExec)
-	if _, err := rt.Eval("__toolbox_host.js", qjs.Code(`globalThis.exec = (binary, args) => JSON.parse(__toolboxExec(binary, args));`)); err != nil {
-		return fmt.Errorf("load host imports: %w", err)
+	if host.ReadFile != nil || host.WriteFile != nil {
+		if err := installFS(rt, host); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func installFS(rt *qjs.Runtime, host Host) error {
+	ctx := rt.Context()
+
+	if host.ReadFile != nil {
+		fn, err := qjs.FuncToJS(ctx, host.ReadFile)
+		if err != nil {
+			return fmt.Errorf("bind readFile: %w", err)
+		}
+		ctx.Global().SetPropertyStr("__toolboxReadFile", fn)
+	}
+
+	if host.WriteFile != nil {
+		fn, err := qjs.FuncToJS(ctx, func(path string, data string) (int, error) {
+			return 0, host.WriteFile(path, data)
+		})
+		if err != nil {
+			return fmt.Errorf("bind writeFile: %w", err)
+		}
+		ctx.Global().SetPropertyStr("__toolboxWriteFile", fn)
+	}
+
+	fsShim := `globalThis.fs = {`
+	if host.ReadFile != nil {
+		fsShim += `readFileSync: (path, opts) => __toolboxReadFile(path),`
+	}
+	if host.WriteFile != nil {
+		fsShim += `writeFileSync: (path, data) => { __toolboxWriteFile(path, typeof data === 'string' ? data : new TextDecoder().decode(data)); },`
+	}
+	fsShim += `};`
+
+	if _, err := rt.Eval("__toolbox_fs.js", qjs.Code(fsShim)); err != nil {
+		return fmt.Errorf("load fs shim: %w", err)
+	}
 	return nil
 }
 

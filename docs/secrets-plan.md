@@ -49,8 +49,10 @@ Keys are flat strings with `/`-delimited namespacing (e.g. `system/ca_cert`, `te
 func NewLocalSecretStore(storePath string, identityPath string) *LocalSecretStore
 ```
 
-- `storePath` — path to the age-encrypted store file on disk. If the file does not exist, the store starts empty and creates it on first `Set`.
+- `storePath` — path to the age-encrypted store file on disk. If empty, defaults to `$XDG_CONFIG_HOME/toolbox/secrets` (falling back to `~/.config/toolbox/secrets`). If the file does not exist, the store starts empty and creates it on first `Set`.
 - `identityPath` — path to the age identity file (private key). If empty, defaults to `$XDG_CONFIG_HOME/age/keys.txt` (falling back to `~/.config/age/keys.txt`), matching the `age` CLI convention.
+
+Both defaults use Go's `os.UserConfigDir()` which reads `$XDG_CONFIG_HOME` on Linux/BSDs and falls back to `~/.config` when unset. On macOS it returns `~/Library/Application Support`, on Windows `%AppData%`.
 
 The constructor does not perform I/O. All I/O is deferred to first access (lazy unlock).
 

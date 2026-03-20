@@ -170,12 +170,12 @@ func requireTSWasmerArtifacts(t *testing.T) {
 	paths := []string{
 		filepath.Join(gwsFixtureDir(), "toolbox.pkg.json"),
 		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
-		filepath.Join("..", "wasmersandbox", "target", "debug", "wasmersandbox"),
+		filepath.Join("..", "wasixcli", "target", "debug", "wasixcli"),
 	}
 
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
-			t.Skipf("tswasmer artifacts not ready: missing %s", p)
+			t.Skipf("tswasixcli artifacts not ready: missing %s", p)
 		}
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/solidarity-ai/toolbox/runtime/tswasmer"
+	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
@@ -16,9 +16,9 @@ import (
 // it. Verifies both the guest stdout and the written file from the Go side.
 func TestWASMGuestFileRoundTrip(t *testing.T) {
 	wasmPath := fixtureWasmPath(t)
-	hostBinary := tswasmer.ResolveHostBinaryPathForTest()
+	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasmersandbox binary not built: %v", err)
+		t.Skipf("wasixcli binary not built: %v", err)
 	}
 	if _, err := os.Stat(wasmPath); err != nil {
 		t.Skipf("vfs-guest.wasm not found: %v", err)
@@ -38,12 +38,12 @@ func TestWASMGuestFileRoundTrip(t *testing.T) {
 	go srv.Serve()
 	t.Cleanup(func() { srv.Close() })
 
-	result, err := tswasmer.Run(tswasmer.Request{
+	result, err := tswasixcli.Run(tswasixcli.Request{
 		WasmPath:    wasmPath,
 		VFSSockPath: sockPath,
 	})
 	if err != nil {
-		t.Fatalf("tswasmer.Run: %v", err)
+		t.Fatalf("tswasixcli.Run: %v", err)
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("guest exited %d: stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)

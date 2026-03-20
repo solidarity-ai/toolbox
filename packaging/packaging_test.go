@@ -123,7 +123,7 @@ func baseLoadPackageTestCases() []loadPackageTestCase {
 			mode: ValidationModeDev,
 			manifest: `{
   "name": "google-workspace",
-  "runtime": "typescript+wasmer-sandbox",
+  "runtime": "typescript+wasix-cli",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },
@@ -133,7 +133,7 @@ func baseLoadPackageTestCases() []loadPackageTestCase {
 }`,
 			wantPackage: tooldef.Package{
 				Name:    "google-workspace",
-				Runtime: tooldef.RuntimeTypeScriptWasmerSandbox,
+				Runtime: tooldef.RuntimeTypeScriptWasixCLI,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
 				},

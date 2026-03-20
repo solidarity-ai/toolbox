@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
-	"github.com/solidarity-ai/toolbox/runtime/tswasmer"
+	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
@@ -84,7 +84,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				return quickts.ExecResult{}, fmt.Errorf("tool %s does not declare executable %q", tool.Name, binary)
 			}
 
-			result, err := tswasmer.Run(tswasmer.Request{
+			result, err := tswasixcli.Run(tswasixcli.Request{
 				WasmPath:    filepath.Join(tool.TSWasm.PackageRoot, relativePath),
 				Args:        execArgs,
 				VFSSockPath: sockPath,

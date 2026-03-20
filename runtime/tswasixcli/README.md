@@ -1,18 +1,18 @@
-# runtime/tswasmer
+# runtime/tswasixcli
 
 ## Purpose
 
-`runtime/tswasmer` is the Go-side adapter for the typescript+wasmer-sandbox path.
+`runtime/tswasixcli` is the Go-side adapter for the typescript+wasix-cli path.
 
 It owns:
 - shaping `exec(...)` requests from TypeScript tools
-- calling the Rust `wasmersandbox` runtime
+- calling the Rust `wasixcli` runtime
 - returning normalized `stdout` / `stderr` / `exitCode` results to the TS tool layer
 
 ## Who depends on this package
 
 ### `invoke`
-Uses `runtime/tswasmer` when a TypeScript tool calls into the wasmer sandbox path.
+Uses `runtime/tswasixcli` when a TypeScript tool calls into the wasix-cli path.
 
 ## What this package does not own
 
@@ -25,5 +25,5 @@ Uses `runtime/tswasmer` when a TypeScript tool calls into the wasmer sandbox pat
 
 The current implementation is intentionally narrow:
 - `exec("<binary>", ...)` maps to `<package-root>/dist/<binary>.wasm`
-- the Rust host binary is expected at `wasmersandbox/target/debug/wasmersandbox`
+- the Rust host binary is expected at `wasixcli/target/debug/wasixcli`
 - general asset lookup and package-mounted executables are deferred

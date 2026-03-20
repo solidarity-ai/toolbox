@@ -251,8 +251,8 @@ func TestGuestWriteWorkflow(t *testing.T) {
 
 	// Step 2: Guest reads the pre-populated file via proxy.
 	resp := c.call(t, Request{
-		Op:   OpOpen,
-		Path: "/config.json",
+		Op:       OpOpen,
+		Path:     "/config.json",
 		OpenOpts: &OpenOpts{Read: true},
 	})
 	if resp.Err != ErrOK {
@@ -284,8 +284,8 @@ func TestGuestWriteWorkflow(t *testing.T) {
 		{"/output/log.txt", "line 1\nline 2\nline 3\n"},
 	} {
 		resp = c.call(t, Request{
-			Op:   OpOpen,
-			Path: file.path,
+			Op:       OpOpen,
+			Path:     file.path,
 			OpenOpts: &OpenOpts{Read: true, Write: true, Create: true},
 		})
 		if resp.Err != ErrOK {
@@ -319,8 +319,8 @@ func TestGuestWriteWorkflow(t *testing.T) {
 
 	// Step 6: Guest reads result back via proxy to verify.
 	resp = c.call(t, Request{
-		Op:   OpOpen,
-		Path: "/output/result.json",
+		Op:       OpOpen,
+		Path:     "/output/result.json",
 		OpenOpts: &OpenOpts{Read: true},
 	})
 	if resp.Err != ErrOK {

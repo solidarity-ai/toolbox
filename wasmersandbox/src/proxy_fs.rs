@@ -184,7 +184,7 @@ impl Conn {
     }
 
     fn call(&self, req: &WireRequest) -> virtual_fs::Result<WireResponse> {
-        let data = rmp_serde::to_vec(req).map_err(|_| FsError::IOError)?;
+        let data = rmp_serde::to_vec_named(req).map_err(|_| FsError::IOError)?;
         let mut stream = self.stream.lock().map_err(|_| FsError::IOError)?;
 
         // Write length-prefixed frame.

@@ -1,0 +1,14 @@
+{
+  "name": "vfs-test",
+  "runtime": "typescript+wasmer-sandbox",
+  "executables": {
+    "vfs-guest": "dist/vfs-guest.wasm"
+  },
+  "tools": [
+    {
+      "entry_ts": "tools/vfs-test.run.ts",
+      "idempotent": true,
+      "accessMode": "canDestruct"
+    }
+  ]
+}

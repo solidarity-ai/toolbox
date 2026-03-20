@@ -10,7 +10,7 @@
     },
     "runtime": {
       "type": "string",
-      "enum": ["typescript-sandbox", "typescript+wasix-cli"]
+      "enum": ["typescript-sandbox", "typescript+wasix-sandbox"]
     },
     "additionalTypeScriptGlobs": {
       "type": "array",

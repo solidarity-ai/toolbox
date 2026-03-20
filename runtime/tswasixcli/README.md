@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`runtime/tswasixcli` is the Go-side adapter for the typescript+wasix-cli path.
+`runtime/tswasixcli` is the Go-side adapter for the typescript+wasix-sandbox path.
 
 It owns:
 - shaping `exec(...)` requests from TypeScript tools
@@ -12,7 +12,7 @@ It owns:
 ## Who depends on this package
 
 ### `invoke`
-Uses `runtime/tswasixcli` when a TypeScript tool calls into the wasix-cli path.
+Uses `runtime/tswasixcli` when a TypeScript tool calls into the wasix sandbox path.
 
 ## What this package does not own
 

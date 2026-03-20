@@ -11,16 +11,10 @@ import (
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
-// TestWASMGuestReadsFromVFS is an end-to-end integration test that:
-//  1. Starts a Go VFS server and pre-populates /input.txt
-//  2. Runs a real WASI guest binary (vfs-guest.wasm) via wasmersandbox
-//  3. The guest reads /input.txt from the VFS proxy and prints the contents
-//  4. Verifies the guest stdout contains the expected data
-//
-// The guest binary was compiled from wasm-src/main.rs with:
-//
-//	cargo build --release --target wasm32-wasip1
-func TestWASMGuestReadsFromVFS(t *testing.T) {
+// TestWASMGuestFileRoundTrip runs a real WASI guest binary that reads
+// /work/input.txt from the VFS proxy and writes /work/output.txt back through
+// it. Verifies both the guest stdout and the written file from the Go side.
+func TestWASMGuestFileRoundTrip(t *testing.T) {
 	wasmPath := fixtureWasmPath(t)
 	hostBinary := tswasmer.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
@@ -30,7 +24,6 @@ func TestWASMGuestReadsFromVFS(t *testing.T) {
 		t.Skipf("vfs-guest.wasm not found: %v", err)
 	}
 
-	// Start VFS server and pre-populate.
 	memFS := vfs.NewMemFS()
 	if err := memFS.WriteFile("/input.txt", []byte("hello from go")); err != nil {
 		t.Fatalf("pre-populate: %v", err)
@@ -45,7 +38,6 @@ func TestWASMGuestReadsFromVFS(t *testing.T) {
 	go srv.Serve()
 	t.Cleanup(func() { srv.Close() })
 
-	// Run the WASM guest.
 	result, err := tswasmer.Run(tswasmer.Request{
 		WasmPath:    wasmPath,
 		VFSSockPath: sockPath,
@@ -56,10 +48,17 @@ func TestWASMGuestReadsFromVFS(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("guest exited %d: stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
 	}
+	if result.Stdout != "ok" {
+		t.Fatalf("expected stdout 'ok', got %q", result.Stdout)
+	}
 
-	// The guest reads /input.txt and prints "got: <contents>" to stdout.
-	if result.Stdout != "got: hello from go" {
-		t.Fatalf("expected stdout 'got: hello from go', got %q", result.Stdout)
+	// Verify the guest wrote /output.txt visible from the Go side.
+	output, err := memFS.ReadAll("/output.txt")
+	if err != nil {
+		t.Fatalf("ReadAll /output.txt: %v", err)
+	}
+	if string(output) != "got: hello from go" {
+		t.Fatalf("expected 'got: hello from go', got %q", string(output))
 	}
 }
 

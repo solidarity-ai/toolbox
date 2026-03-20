@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use futures::future::BoxFuture;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,21 @@ use wasmer_wasix::virtual_fs::{
     self, DirEntry, FileOpener, FileType, FsError, Metadata, OpenOptions, OpenOptionsConfig,
     ReadDir, VirtualFile,
 };
+
+#[allow(dead_code)]
+mod optional_bytes {
+    use super::*;
+    pub fn serialize<S: Serializer>(val: &Option<Vec<u8>>, s: S) -> std::result::Result<S::Ok, S::Error> {
+        match val {
+            Some(bytes) => serde_bytes::serialize(bytes.as_slice(), s),
+            None => s.serialize_none(),
+        }
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Option<Vec<u8>>, D::Error> {
+        let opt: Option<serde_bytes::ByteBuf> = Option::deserialize(d)?;
+        Ok(opt.map(|b| b.into_vec()))
+    }
+}
 
 // Op tags — must match Go side.
 const OP_READLINK: i32 = 1;
@@ -51,7 +66,7 @@ struct WireRequest {
     open_opts: Option<WireOpenOpts>,
     #[serde(skip_serializing_if = "is_zero_u64")]
     handle: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", with = "optional_bytes")]
     data: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "is_zero_i64")]
     len: i64,
@@ -88,7 +103,7 @@ struct WireResponse {
     meta: Option<WireMetadata>,
     #[serde(default)]
     handle: u64,
-    #[serde(default)]
+    #[serde(default, with = "serde_bytes")]
     data: Vec<u8>,
     #[serde(default)]
     pos: i64,

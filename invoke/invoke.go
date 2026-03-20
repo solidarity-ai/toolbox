@@ -38,9 +38,29 @@ func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
 	return quickts.Run(*tool.TS, args)
 }
 
+// RunWithVFS is like Run but accepts an existing MemFS for the shared VFS.
+// This allows callers to pre-populate files before execution and inspect
+// files written by the WASM guest afterwards.
+func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[string]any, memFS *vfs.MemFS) (string, error) {
+	for _, tool := range resolved.Tools() {
+		if tool.Name == toolName {
+			if tool.TSWasm != nil {
+				return runTSWasmToolWithVFS(tool, args, memFS)
+			}
+			if tool.TS != nil {
+				return runTSTool(tool, args)
+			}
+			return "", fmt.Errorf("tool %s has no executable", tool.Name)
+		}
+	}
+	return "", fmt.Errorf("unknown tool: %s", toolName)
+}
+
 func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
-	// Create a shared VFS for this execution.
-	memFS := vfs.NewMemFS()
+	return runTSWasmToolWithVFS(tool, args, vfs.NewMemFS())
+}
+
+func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS *vfs.MemFS) (string, error) {
 	sockPath, cleanup, err := startVFSServer(memFS)
 	if err != nil {
 		return "", fmt.Errorf("start vfs server: %w", err)

@@ -36,11 +36,22 @@ type Host struct {
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
 // already runnable as a JS module and hides QuickJS behind this package.
 func Run(def tooldef.TSToolDef, args map[string]any) (string, error) {
-	return RunWithHost(def, args, Host{})
+	return RunWithHost(def, args, Host{}, nil)
+}
+
+// RunWithSession is like Run but accepts a session pointer for caching.
+func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession) (string, error) {
+	return RunWithHost(def, args, Host{}, session)
 }
 
 // RunWithHost is the same minimal runtime seam with optional host imports.
-func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string, error) {
+// If *session is non-nil the TypeScript checker reuses it for incremental
+// checking. On first call the created session is written back through the pointer.
+func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession) (string, error) {
+	var checkSession *toolbox.CheckSession
+	if session != nil {
+		checkSession = *session
+	}
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return "", fmt.Errorf("marshal args: %w", err)
@@ -51,11 +62,14 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host) (string,
 		return "", err
 	}
 
-	diagnostics, _, err := toolbox.Check(context.Background(), toolbox.CheckInput{
+	diagnostics, checkSession, err := toolbox.Check(context.Background(), toolbox.CheckInput{
 		Files:            files,
 		Entry:            runnerTSFile,
 		CurrentDirectory: "/",
-	}, nil)
+	}, checkSession)
+	if session != nil {
+		*session = checkSession
+	}
 	if err != nil {
 		// TODO: Normalize checker/runtime errors into an LLM-friendly shape instead
 		// of returning raw compiler/library text.

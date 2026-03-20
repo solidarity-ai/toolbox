@@ -14,11 +14,11 @@ secrets/
   local.go            # LocalSecretStore — age-encrypted file-backed store
   local_test.go       # Tests for LocalSecretStore
 
-testutils/
+testutil/
   secrets.go          # TestSecretStore — plaintext in-memory implementation
 ```
 
-`testutils/` does not exist yet. It will be created as part of this work.
+`testutil/` already exists at the repo level (contains `mcptest/`, `servicetest/`, `tooltest/`, `fixtures/`). The secrets test helper will be added there.
 
 ---
 
@@ -153,9 +153,9 @@ type LocalSecretStore struct {
 ## TestSecretStore Design
 
 ```go
-// testutils/secrets.go
+// testutil/secrets.go
 
-package testutils
+package testutil
 
 type TestSecretStore struct {
     mu   sync.RWMutex
@@ -219,7 +219,7 @@ flowchart TD
   S --> age[filippo.io/age]
 ```
 
-The `testutils` package depends on `secrets` (to implement the interface).
+The `testutil` package depends on `secrets` (to implement the interface).
 
 ---
 

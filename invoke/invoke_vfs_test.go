@@ -18,11 +18,12 @@ import (
 //
 //  1. Go pre-populates /input.txt in the MemFS
 //  2. invoke.RunWithVFS loads the vfs-test tool package
-//  3. The TS entry calls exec("vfs-guest", [])
-//  4. invoke wires up the VFS server, passes the socket to wasmersandbox
-//  5. The WASM guest reads /input.txt via ProxyFs and writes /output.txt
-//  6. The TS entry returns the guest's stdout ("ok")
-//  7. Go verifies /output.txt is visible in the MemFS with correct contents
+//  3. The TS entry calls exec("vfs-guest", []) — WASM guest reads
+//     /work/input.txt via ProxyFs and writes /work/output.txt
+//  4. The TS entry calls fs.readFileSync("/output.txt") to read the file
+//     the WASM guest wrote, via the same shared MemFS
+//  5. The TS entry returns the file contents as the tool result
+//  6. Go verifies the result matches what the WASM guest wrote
 func TestVFSRoundTripThroughInvoke(t *testing.T) {
 	hostBinary := tswasmer.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
@@ -34,38 +35,28 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 		t.Skipf("vfs-guest.wasm not found: %v", err)
 	}
 
-	// Load the vfs-test tool package.
 	loaded, err := packaging.LoadSourcePackage(fixtureDir)
 	if err != nil {
 		t.Fatalf("load vfs-test package: %v", err)
 	}
 	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
 
-	// Pre-populate the VFS with input data.
 	memFS := vfs.NewMemFS()
 	if err := memFS.WriteFile("/input.txt", []byte("hello from go")); err != nil {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	// Run the tool through invoke — this exercises the full path:
-	// TS (quickts) → exec host import → tswasmer → wasmersandbox → ProxyFs → VFS server
+	// Run the tool through invoke — full path:
+	// TS (quickts) → exec → tswasmer → wasmersandbox → ProxyFs → VFS server
+	// then TS reads the written file back via fs.readFileSync → MemFS
 	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
 
-	// The TS entry returns the WASM guest's stdout.
-	if result != "ok" {
-		t.Fatalf("expected tool result 'ok', got %q", result)
-	}
-
-	// The WASM guest wrote /output.txt — verify it from the Go side.
-	output, err := memFS.ReadAll("/output.txt")
-	if err != nil {
-		t.Fatalf("ReadAll /output.txt: %v", err)
-	}
-	if string(output) != "got: hello from go" {
-		t.Fatalf("expected 'got: hello from go', got %q", string(output))
+	// The TS tool reads /output.txt via fs.readFileSync and returns it.
+	if result != "got: hello from go" {
+		t.Fatalf("expected 'got: hello from go', got %q", result)
 	}
 }
 

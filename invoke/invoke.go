@@ -68,6 +68,16 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 	defer cleanup()
 
 	return quickts.RunWithHost(tool.TSWasm.TSToolDef, args, quickts.Host{
+		ReadFile: func(path string) (string, error) {
+			data, err := memFS.ReadAll(path)
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		},
+		WriteFile: func(path string, data string) error {
+			return memFS.WriteFile(path, []byte(data))
+		},
 		Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
 			relativePath, ok := tool.TSWasm.Executables[binary]
 			if !ok {

@@ -1,6 +1,7 @@
 package packaging
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/microsoft/typescript-go/toolbox"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -110,9 +112,11 @@ func LoadSourcePackageWithMode(dir string, mode ValidationMode) (LoadedPackage, 
 	if err != nil {
 		return LoadedPackage{}, err
 	}
+	files := newSourceFS(os.DirFS(dir), dir, result.Package)
+	enrichToolMetadata(files, &result.Package)
 	return LoadedPackage{
 		Package: result.Package,
-		Files:   newSourceFS(os.DirFS(dir), dir, result.Package),
+		Files:   files,
 		Dir:     dir,
 	}, nil
 }
@@ -284,10 +288,15 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 		}
 	}
 	for _, pkgTool := range p.Package.Tools {
+		description := pkgTool.Description
+		if description == "" {
+			description = inferToolDescription(pkgTool.EntryTS)
+		}
 		resolved := tooldef.ResolvedTool{
-			Name:        inferToolName(pkgTool.EntryTS),
-			Description: inferToolDescription(pkgTool.EntryTS),
-			Package:     &p.Package,
+			Name:         inferToolName(pkgTool.EntryTS),
+			Description:  description,
+			ParamsSchema: pkgTool.ParamsSchema,
+			Package:      &p.Package,
 		}
 
 		baseDef := tooldef.TSToolDef{
@@ -308,6 +317,25 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 		tools = append(tools, resolved)
 	}
 	return tools
+}
+
+func enrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
+	for i := range pkg.Tools {
+		tool := &pkg.Tools[i]
+		meta, err := toolbox.ExtractToolMetadata(context.Background(), toolbox.ExtractInput{
+			Files: files,
+			Entry: tool.EntryTS,
+		})
+		if err != nil {
+			continue
+		}
+		if meta.Description != "" {
+			tool.Description = meta.Description
+		}
+		if meta.ParamsSchema != nil {
+			tool.ParamsSchema = meta.ParamsSchema
+		}
+	}
 }
 
 func inferToolName(entryTS string) string {

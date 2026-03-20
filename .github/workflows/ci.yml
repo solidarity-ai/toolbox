@@ -28,7 +28,10 @@ jobs:
       - name: Cache Rust build
         uses: actions/cache@v4
         with:
-          path: wasmersandbox/target
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasmersandbox/target
           key: rust-${{ runner.os }}-${{ hashFiles('wasmersandbox/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
 

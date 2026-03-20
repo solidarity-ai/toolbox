@@ -79,7 +79,18 @@ type PkgTool struct {
 
 ### 2.2 Existing types preserved
 
-`tooldef.Package`, `tooldef.PackageTool`, `tooldef.ResolvedTool`, and `LoadedPackage` remain unchanged. `manifest.Compile` produces a `tooldef.Package` just as `compilePackage` does today.
+`tooldef.Package`, `tooldef.PackageTool`, `tooldef.ResolvedTool` remain unchanged. `manifest.Compile` produces a `tooldef.Package` just as `compilePackage` does today.
+
+`LoadedPackage` gains one new field — `Executables` — so that `ResolvedTools()` no longer needs to re-read the manifest from disk:
+
+```go
+type LoadedPackage struct {
+    Package     tooldef.Package
+    Files       fs.FS
+    Dir         string
+    Executables map[string]string // populated from manifest; used by ResolvedTools() for TSWasmToolDef
+}
+```
 
 ### 2.3 Validation types (stay in `manifest`)
 
@@ -481,8 +492,8 @@ testutil/fixtures/toolbox.archives/calc/
 1. **Should `LoadedPackage` stay in the top-level `packaging` or move to a shared internal package?**
    Both `source` and `archive` need to return it. Currently defined in `packaging`. If it stays there, `source` and `archive` would import their parent — which is fine for subdirectories of the same Go module but creates a circular reference concern if `packaging` also imports `source`. Resolution: `packaging` top-level imports `source` and `archive`. `source` and `archive` return `tooldef.Package` + `fs.FS` and the top-level wraps them into `LoadedPackage`. This avoids circular imports.
 
-2. **Should `ResolvedTools()` move off `LoadedPackage`?**
-   Currently `LoadedPackage.ResolvedTools()` re-reads `toolbox.pkg.json` from disk for wasmer executables. With the archive format, executables should be in the manifest. Consider moving `Executables` onto `tooldef.Package` so `ResolvedTools()` doesn't need a separate file read. This would simplify the archive path and remove the re-read hack.
+2. **~~Should `ResolvedTools()` move off `LoadedPackage`?~~ Resolved: keep `Executables` on `LoadedPackage`, not on `tooldef.Package`.**
+   Currently `LoadedPackage.ResolvedTools()` re-reads `toolbox.pkg.json` from disk to get the executables map for `TSWasmToolDef`. With the archive format there's no source dir to re-read from. The fix: add an `Executables map[string]string` field to `LoadedPackage`. Both the source loader and archive loader populate it from the manifest during loading. `ResolvedTools()` then uses `p.Executables` instead of re-reading from disk, and the data still ends up on `TSWasmToolDef` where it belongs. `tooldef.Package` stays clean as the static, runtime-agnostic definition — executables are a runtime-specific concern that belongs on the loaded/resolved side.
 
 3. **Archive file naming: `<name>.toolbox.pkg` or flat `package.toolbox.pkg`?**
    Using the package name makes it clear which package the archive is for when multiple archives are in the same directory. The plan assumes `<name>.toolbox.pkg`.

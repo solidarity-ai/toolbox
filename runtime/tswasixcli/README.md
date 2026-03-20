@@ -25,5 +25,5 @@ Uses `runtime/tswasixcli` when a TypeScript tool calls into the wasix sandbox pa
 
 The current implementation is intentionally narrow:
 - `exec("<binary>", ...)` maps to `<package-root>/dist/<binary>.wasm`
-- the Rust host binary is expected at `wasixcli/target/debug/wasixcli`
+- the Rust host binary is expected at `wasixcli-sandbox/target/debug/wasixcli-sandbox`
 - general asset lookup and package-mounted executables are deferred

@@ -54,16 +54,16 @@ func Run(request Request) (Result, error) {
 		return result, nil
 	}
 
-	return Result{}, fmt.Errorf("run wasixcli: %w", err)
+	return Result{}, fmt.Errorf("run wasixcli-sandbox: %w", err)
 }
 
 func resolveHostBinaryPath() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return "wasixcli"
+		return "wasixcli-sandbox"
 	}
 
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasixcli", "target", "debug", "wasixcli"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasixcli-sandbox", "target", "debug", "wasixcli-sandbox"))
 }
 
 // ResolveHostBinaryPathForTest exposes the host binary path for integration tests.

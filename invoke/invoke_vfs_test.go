@@ -27,7 +27,7 @@ import (
 func TestVFSRoundTripThroughInvoke(t *testing.T) {
 	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasixcli binary not built: %v", err)
+		t.Skipf("wasixcli-sandbox binary not built: %v", err)
 	}
 
 	fixtureDir := vfsTestFixtureDir(t)

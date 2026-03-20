@@ -235,6 +235,135 @@ func TestErrorOnNotFound(t *testing.T) {
 	}
 }
 
+// TestGuestWriteWorkflow simulates a WASM guest that creates a directory,
+// writes files into it, reads them back over the proxy, and then verifies
+// everything is visible from the Go MemFS side. This is the integration test
+// for the full VFS round-trip — the same sequence of operations that the Rust
+// ProxyFs would perform on behalf of a WASIX guest.
+func TestGuestWriteWorkflow(t *testing.T) {
+	sockPath, memFS := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	// Step 1: Go side pre-populates a config file the guest will read.
+	if err := memFS.WriteFile("/config.json", []byte(`{"key":"value"}`)); err != nil {
+		t.Fatalf("pre-populate: %v", err)
+	}
+
+	// Step 2: Guest reads the pre-populated file via proxy.
+	resp := c.call(t, Request{
+		Op:   OpOpen,
+		Path: "/config.json",
+		OpenOpts: &OpenOpts{Read: true},
+	})
+	if resp.Err != ErrOK {
+		t.Fatalf("open config: err=%d", resp.Err)
+	}
+	configHandle := resp.Handle
+
+	resp = c.call(t, Request{Op: OpFileRead, Handle: configHandle, Len: 4096})
+	if resp.Err != ErrOK {
+		t.Fatalf("read config: err=%d", resp.Err)
+	}
+	if string(resp.Data) != `{"key":"value"}` {
+		t.Fatalf("config mismatch: %q", string(resp.Data))
+	}
+	c.call(t, Request{Op: OpFileClose, Handle: configHandle})
+
+	// Step 3: Guest creates an output directory.
+	resp = c.call(t, Request{Op: OpCreateDir, Path: "/output"})
+	if resp.Err != ErrOK {
+		t.Fatalf("create /output: err=%d", resp.Err)
+	}
+
+	// Step 4: Guest writes two output files.
+	for _, file := range []struct {
+		path    string
+		content string
+	}{
+		{"/output/result.json", `{"status":"ok","count":42}`},
+		{"/output/log.txt", "line 1\nline 2\nline 3\n"},
+	} {
+		resp = c.call(t, Request{
+			Op:   OpOpen,
+			Path: file.path,
+			OpenOpts: &OpenOpts{Read: true, Write: true, Create: true},
+		})
+		if resp.Err != ErrOK {
+			t.Fatalf("open %s: err=%d", file.path, resp.Err)
+		}
+		h := resp.Handle
+
+		resp = c.call(t, Request{Op: OpFileWrite, Handle: h, Data: []byte(file.content)})
+		if resp.Err != ErrOK {
+			t.Fatalf("write %s: err=%d", file.path, resp.Err)
+		}
+		if resp.N != len(file.content) {
+			t.Fatalf("write %s: expected %d bytes, got %d", file.path, len(file.content), resp.N)
+		}
+
+		c.call(t, Request{Op: OpFileClose, Handle: h})
+	}
+
+	// Step 5: Guest lists the output directory via proxy.
+	resp = c.call(t, Request{Op: OpReadDir, Path: "/output"})
+	if resp.Err != ErrOK {
+		t.Fatalf("readdir /output: err=%d", resp.Err)
+	}
+	if len(resp.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(resp.Entries))
+	}
+	// Entries are sorted alphabetically.
+	if resp.Entries[0].Name != "log.txt" || resp.Entries[1].Name != "result.json" {
+		t.Fatalf("unexpected entries: %v, %v", resp.Entries[0].Name, resp.Entries[1].Name)
+	}
+
+	// Step 6: Guest reads result back via proxy to verify.
+	resp = c.call(t, Request{
+		Op:   OpOpen,
+		Path: "/output/result.json",
+		OpenOpts: &OpenOpts{Read: true},
+	})
+	if resp.Err != ErrOK {
+		t.Fatalf("reopen result: err=%d", resp.Err)
+	}
+	resultHandle := resp.Handle
+	resp = c.call(t, Request{Op: OpFileRead, Handle: resultHandle, Len: 4096})
+	if resp.Err != ErrOK {
+		t.Fatalf("reread result: err=%d", resp.Err)
+	}
+	if string(resp.Data) != `{"status":"ok","count":42}` {
+		t.Fatalf("result mismatch: %q", string(resp.Data))
+	}
+	c.call(t, Request{Op: OpFileClose, Handle: resultHandle})
+
+	// Step 7: Verify from the Go side — this is what invoke would do after
+	// WASM execution completes to harvest output files.
+	resultData, err := memFS.ReadAll("/output/result.json")
+	if err != nil {
+		t.Fatalf("Go-side ReadAll result: %v", err)
+	}
+	if string(resultData) != `{"status":"ok","count":42}` {
+		t.Fatalf("Go-side result mismatch: %q", string(resultData))
+	}
+
+	logData, err := memFS.ReadAll("/output/log.txt")
+	if err != nil {
+		t.Fatalf("Go-side ReadAll log: %v", err)
+	}
+	if string(logData) != "line 1\nline 2\nline 3\n" {
+		t.Fatalf("Go-side log mismatch: %q", string(logData))
+	}
+
+	// Step 8: Verify the full directory listing from Go side.
+	entries, err := memFS.ReadDir("/output")
+	if err != nil {
+		t.Fatalf("Go-side ReadDir: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("Go-side expected 2 entries, got %d", len(entries))
+	}
+}
+
 func TestFileSetLen(t *testing.T) {
 	sockPath, memFS := startTestServer(t)
 	c := dialServer(t, sockPath)

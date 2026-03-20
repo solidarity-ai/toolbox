@@ -1,0 +1,14 @@
+{
+  "name": "http-client",
+  "runtime": "ts+wasip2-sandbox",
+  "executables": {
+    "http-client": "dist/http-client.wasm"
+  },
+  "tools": [
+    {
+      "entry_ts": "tools/http-client.fetch.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

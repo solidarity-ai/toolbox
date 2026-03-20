@@ -23,10 +23,11 @@ var resolvedToolboxPkgDevSchema = mustResolveSchema(toolboxPkgDevSchemaJSON)
 var resolvedToolboxPkgDistSchema = mustResolveSchema(toolboxPkgDistSchemaJSON)
 
 type packageManifest struct {
-	Name        string                `json:"name"`
-	Runtime     tooldef.ToolRuntime   `json:"runtime"`
-	Executables map[string]string     `json:"executables"`
-	Tools       []packageManifestTool `json:"tools"`
+	Name                      string                `json:"name"`
+	Runtime                   tooldef.ToolRuntime   `json:"runtime"`
+	AdditionalTypeScriptGlobs []string              `json:"additionalTypeScriptGlobs"`
+	Executables               map[string]string     `json:"executables"`
+	Tools                     []packageManifestTool `json:"tools"`
 }
 
 type packageManifestTool struct {
@@ -111,7 +112,7 @@ func LoadSourcePackageWithMode(dir string, mode ValidationMode) (LoadedPackage, 
 	}
 	return LoadedPackage{
 		Package: result.Package,
-		Files:   os.DirFS(dir),
+		Files:   newSourceFS(os.DirFS(dir), dir, result.Package),
 		Dir:     dir,
 	}, nil
 }
@@ -142,7 +143,7 @@ func LoadBuiltPackageWithMode(dir string, mode ValidationMode) (LoadedPackage, e
 	}
 	return LoadedPackage{
 		Package: result.Package,
-		Files:   os.DirFS(dir),
+		Files:   newSourceFS(os.DirFS(dir), dir, result.Package),
 		Dir:     dir,
 	}, nil
 }
@@ -203,9 +204,10 @@ func loadBuiltPackageFromFile(compiledPath string, mode ValidationMode) (LoadRes
 
 func compilePackage(manifest packageManifest) tooldef.Package {
 	pkg := tooldef.Package{
-		Name:    manifest.Name,
-		Runtime: manifest.Runtime,
-		Tools:   make([]tooldef.PackageTool, len(manifest.Tools)),
+		Name:                      manifest.Name,
+		Runtime:                   manifest.Runtime,
+		AdditionalTypeScriptGlobs: append([]string(nil), manifest.AdditionalTypeScriptGlobs...),
+		Tools:                     make([]tooldef.PackageTool, len(manifest.Tools)),
 	}
 	for i, tool := range manifest.Tools {
 		accessMode := inferAccessMode(tool.EntryTS)

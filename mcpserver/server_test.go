@@ -1,6 +1,7 @@
 package mcpserver_test
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -115,7 +116,7 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 
 	srcDir := "/tmp/toolpkg-gws"
 	dstDir := filepath.Join(t.TempDir(), "toolpkg-gws")
-	if err := copyDir(srcDir, dstDir); err != nil {
+	if err := copyPackageDir(srcDir, dstDir); err != nil {
 		t.Fatalf("copy package dir: %v", err)
 	}
 
@@ -188,27 +189,76 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func copyDir(src string, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+type sourcePackageManifest struct {
+	AdditionalTypeScriptGlobs []string          `json:"additionalTypeScriptGlobs"`
+	Executables               map[string]string `json:"executables"`
+	Tools                     []struct {
+		EntryTS string `json:"entry_ts"`
+	} `json:"tools"`
+}
+
+func copyPackageDir(src string, dst string) error {
+	manifestPath := filepath.Join(src, "toolbox.pkg.json")
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+
+	var manifest sourcePackageManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(manifestPath, filepath.Join(dst, "toolbox.pkg.json")); err != nil {
+		return err
+	}
+
+	seen := map[string]struct{}{}
+	copyRel := func(rel string) error {
+		if _, ok := seen[rel]; ok {
+			return nil
+		}
+		seen[rel] = struct{}{}
+		return copyFile(filepath.Join(src, rel), filepath.Join(dst, rel))
+	}
+
+	for _, tool := range manifest.Tools {
+		if err := copyRel(tool.EntryTS); err != nil {
+			return err
+		}
+	}
+	for _, path := range manifest.Executables {
+		if err := copyRel(path); err != nil {
+			return err
+		}
+	}
+	for _, pattern := range manifest.AdditionalTypeScriptGlobs {
+		matches, err := filepath.Glob(filepath.Join(src, pattern))
 		if err != nil {
 			return err
 		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
+		for _, match := range matches {
+			info, err := os.Lstat(match)
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			rel, err := filepath.Rel(src, match)
+			if err != nil {
+				return err
+			}
+			if err := copyRel(rel); err != nil {
+				return err
+			}
 		}
-		if rel == "." {
-			return os.MkdirAll(dst, 0o755)
-		}
+	}
 
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-
-		return copyFile(path, target)
-	})
+	return nil
 }
 
 func copyFile(src string, dst string) error {

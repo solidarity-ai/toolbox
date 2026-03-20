@@ -29,11 +29,11 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 		return "", err
 	}
 
-	diagnostics, err := toolbox.Check(context.Background(), toolbox.CheckInput{
+	diagnostics, _, err := toolbox.Check(context.Background(), toolbox.CheckInput{
 		Files:            files,
 		Entry:            "__codemode_run.ts",
 		CurrentDirectory: "/",
-	})
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("typescript check failed: %w", err)
 	}

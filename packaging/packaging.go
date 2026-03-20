@@ -274,7 +274,7 @@ func inferVerb(entryTS string) string {
 func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 	tools := make([]tooldef.ResolvedTool, 0, len(p.Package.Tools))
 	var manifest packageManifest
-	if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixCLI {
+	if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox {
 		raw, err := os.ReadFile(filepath.Join(p.Dir, "toolbox.pkg.json"))
 		if err != nil {
 			panic(fmt.Errorf("read toolbox.pkg.json for %s: %w", p.Dir, err))
@@ -296,7 +296,7 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			PackageRoot: p.Dir,
 		}
 
-		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixCLI {
+		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox {
 			resolved.TSWasm = &tooldef.TSWasmToolDef{
 				TSToolDef:   baseDef,
 				Executables: manifest.Executables,

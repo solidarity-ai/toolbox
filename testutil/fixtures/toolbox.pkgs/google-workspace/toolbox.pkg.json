@@ -1,6 +1,6 @@
 {
   "name": "google-workspace",
-  "runtime": "typescript+wasix-cli",
+  "runtime": "typescript+wasix-sandbox",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },

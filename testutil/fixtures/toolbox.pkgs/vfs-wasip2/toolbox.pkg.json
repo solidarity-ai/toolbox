@@ -1,0 +1,14 @@
+{
+  "name": "vfs-wasip2",
+  "runtime": "typescript+wasip2-sandbox",
+  "executables": {
+    "vfs-guest": "dist/vfs-guest.wasm"
+  },
+  "tools": [
+    {
+      "entry_ts": "tools/vfs-wasip2.run.ts",
+      "idempotent": true,
+      "accessMode": "canDestruct"
+    }
+  ]
+}

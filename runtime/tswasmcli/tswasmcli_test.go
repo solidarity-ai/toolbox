@@ -39,6 +39,18 @@ func TestWasip2CLIRunsHTTPClientWasm(t *testing.T) {
 	}
 }
 
+func TestRunRejectsMissingRuntime(t *testing.T) {
+	_, err := tswasmcli.Run(tswasmcli.Request{
+		WasmPath: "/dummy.wasm",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing runtime")
+	}
+	if !strings.Contains(err.Error(), "missing runtime") {
+		t.Fatalf("expected 'missing runtime' error, got: %v", err)
+	}
+}
+
 func requireWasip2Artifacts(t *testing.T) {
 	t.Helper()
 

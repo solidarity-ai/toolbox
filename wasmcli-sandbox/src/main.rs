@@ -1,4 +1,5 @@
 mod proxy_fs;
+mod proxy_wasi_fs;
 mod wasix;
 mod wasip2;
 

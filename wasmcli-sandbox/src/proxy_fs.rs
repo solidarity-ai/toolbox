@@ -28,52 +28,52 @@ mod optional_bytes {
 }
 
 // Op tags — must match Go side.
-const OP_READLINK: i32 = 1;
-const OP_READ_DIR: i32 = 2;
-const OP_CREATE_DIR: i32 = 3;
-const OP_REMOVE_DIR: i32 = 4;
-const OP_RENAME: i32 = 5;
-const OP_METADATA: i32 = 6;
-const OP_SYMLINK_METADATA: i32 = 7;
-const OP_REMOVE_FILE: i32 = 8;
-const OP_OPEN: i32 = 9;
+pub(crate) const OP_READLINK: i32 = 1;
+pub(crate) const OP_READ_DIR: i32 = 2;
+pub(crate) const OP_CREATE_DIR: i32 = 3;
+pub(crate) const OP_REMOVE_DIR: i32 = 4;
+pub(crate) const OP_RENAME: i32 = 5;
+pub(crate) const OP_METADATA: i32 = 6;
+pub(crate) const OP_SYMLINK_METADATA: i32 = 7;
+pub(crate) const OP_REMOVE_FILE: i32 = 8;
+pub(crate) const OP_OPEN: i32 = 9;
 
-const OP_FILE_READ: i32 = 20;
-const OP_FILE_WRITE: i32 = 21;
-const OP_FILE_SEEK: i32 = 22;
-const OP_FILE_FLUSH: i32 = 23;
-const OP_FILE_CLOSE: i32 = 24;
-const OP_FILE_SET_LEN: i32 = 25;
+pub(crate) const OP_FILE_READ: i32 = 20;
+pub(crate) const OP_FILE_WRITE: i32 = 21;
+pub(crate) const OP_FILE_SEEK: i32 = 22;
+pub(crate) const OP_FILE_FLUSH: i32 = 23;
+pub(crate) const OP_FILE_CLOSE: i32 = 24;
+pub(crate) const OP_FILE_SET_LEN: i32 = 25;
 
 // Error codes — must match Go side.
-const ERR_OK: i32 = 0;
-const ERR_NOT_FOUND: i32 = 1;
-const ERR_ALREADY_EXISTS: i32 = 2;
-const ERR_NOT_DIR: i32 = 4;
-const ERR_NOT_FILE: i32 = 5;
-const ERR_NOT_EMPTY: i32 = 6;
-const ERR_IO: i32 = 7;
-const ERR_UNSUPPORTED: i32 = 9;
+pub(crate) const ERR_OK: i32 = 0;
+pub(crate) const ERR_NOT_FOUND: i32 = 1;
+pub(crate) const ERR_ALREADY_EXISTS: i32 = 2;
+pub(crate) const ERR_NOT_DIR: i32 = 4;
+pub(crate) const ERR_NOT_FILE: i32 = 5;
+pub(crate) const ERR_NOT_EMPTY: i32 = 6;
+pub(crate) const ERR_IO: i32 = 7;
+pub(crate) const ERR_UNSUPPORTED: i32 = 9;
 
 #[derive(Serialize)]
-struct WireRequest {
-    op: i32,
+pub(crate) struct WireRequest {
+    pub(crate) op: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<String>,
+    pub(crate) path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    to_path: Option<String>,
+    pub(crate) to_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    open_opts: Option<WireOpenOpts>,
+    pub(crate) open_opts: Option<WireOpenOpts>,
     #[serde(skip_serializing_if = "is_zero_u64")]
-    handle: u64,
+    pub(crate) handle: u64,
     #[serde(skip_serializing_if = "Option::is_none", with = "optional_bytes")]
-    data: Option<Vec<u8>>,
+    pub(crate) data: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "is_zero_i64")]
-    len: i64,
+    pub(crate) len: i64,
     #[serde(skip_serializing_if = "is_zero_i32")]
-    seek_from: i32,
+    pub(crate) seek_from: i32,
     #[serde(skip_serializing_if = "is_zero_i64")]
-    seek_pos: i64,
+    pub(crate) seek_pos: i64,
 }
 
 fn is_zero_u64(v: &u64) -> bool { *v == 0 }
@@ -81,54 +81,54 @@ fn is_zero_i64(v: &i64) -> bool { *v == 0 }
 fn is_zero_i32(v: &i32) -> bool { *v == 0 }
 
 #[derive(Serialize)]
-struct WireOpenOpts {
-    read: bool,
-    write: bool,
-    create: bool,
-    create_new: bool,
-    append: bool,
-    truncate: bool,
+pub(crate) struct WireOpenOpts {
+    pub(crate) read: bool,
+    pub(crate) write: bool,
+    pub(crate) create: bool,
+    pub(crate) create_new: bool,
+    pub(crate) append: bool,
+    pub(crate) truncate: bool,
 }
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
-struct WireResponse {
+pub(crate) struct WireResponse {
     #[serde(default)]
-    err: i32,
+    pub(crate) err: i32,
     #[serde(default)]
-    target: String,
+    pub(crate) target: String,
     #[serde(default)]
-    entries: Vec<WireDirEntry>,
+    pub(crate) entries: Vec<WireDirEntry>,
     #[serde(default)]
-    meta: Option<WireMetadata>,
+    pub(crate) meta: Option<WireMetadata>,
     #[serde(default)]
-    handle: u64,
+    pub(crate) handle: u64,
     #[serde(default, with = "serde_bytes")]
-    data: Vec<u8>,
+    pub(crate) data: Vec<u8>,
     #[serde(default)]
-    pos: i64,
+    pub(crate) pos: i64,
     #[serde(default)]
-    n: i32,
+    pub(crate) n: i32,
 }
 
 #[derive(Deserialize)]
-struct WireDirEntry {
-    name: String,
-    meta: WireMetadata,
+pub(crate) struct WireDirEntry {
+    pub(crate) name: String,
+    pub(crate) meta: WireMetadata,
 }
 
 #[derive(Deserialize)]
-struct WireMetadata {
-    is_dir: bool,
-    is_file: bool,
-    len: u64,
-    accessed: u64,
-    created: u64,
-    modified: u64,
+pub(crate) struct WireMetadata {
+    pub(crate) is_dir: bool,
+    pub(crate) is_file: bool,
+    pub(crate) len: u64,
+    pub(crate) accessed: u64,
+    pub(crate) created: u64,
+    pub(crate) modified: u64,
 }
 
 impl WireRequest {
-    fn path_op(op: i32, path: &Path) -> Self {
+    pub(crate) fn path_op(op: i32, path: &Path) -> Self {
         Self {
             op,
             path: Some(path.to_string_lossy().into_owned()),
@@ -142,7 +142,7 @@ impl WireRequest {
         }
     }
 
-    fn handle_op(op: i32, handle: u64) -> Self {
+    pub(crate) fn handle_op(op: i32, handle: u64) -> Self {
         Self {
             op,
             path: None,
@@ -155,6 +155,18 @@ impl WireRequest {
             seek_pos: 0,
         }
     }
+}
+
+pub(crate) fn wire_io_err(code: i32) -> std::io::Error {
+    let kind = match code {
+        ERR_NOT_FOUND => std::io::ErrorKind::NotFound,
+        ERR_ALREADY_EXISTS => std::io::ErrorKind::AlreadyExists,
+        ERR_NOT_DIR | ERR_NOT_FILE => std::io::ErrorKind::InvalidInput,
+        ERR_NOT_EMPTY => std::io::ErrorKind::InvalidInput,
+        ERR_UNSUPPORTED => std::io::ErrorKind::Unsupported,
+        _ => std::io::ErrorKind::Other,
+    };
+    std::io::Error::new(kind, format!("vfs error code {code}"))
 }
 
 fn wire_err(code: i32) -> FsError {
@@ -185,12 +197,12 @@ fn wire_metadata(m: &WireMetadata) -> Metadata {
 }
 
 /// A thread-safe UDS connection that serializes access.
-struct Conn {
+pub(crate) struct Conn {
     stream: Mutex<UnixStream>,
 }
 
 impl Conn {
-    fn new(path: &str) -> Result<Self> {
+    pub(crate) fn new(path: &str) -> Result<Self> {
         let stream = UnixStream::connect(path)
             .with_context(|| format!("connect to VFS socket {}", path))?;
         Ok(Self {
@@ -199,35 +211,44 @@ impl Conn {
     }
 
     fn call(&self, req: &WireRequest) -> virtual_fs::Result<WireResponse> {
-        let data = rmp_serde::to_vec_named(req).map_err(|_| FsError::IOError)?;
-        let mut stream = self.stream.lock().map_err(|_| FsError::IOError)?;
+        self.raw_call(req).map_err(|_| FsError::IOError)
+    }
+
+    pub(crate) fn raw_call(&self, req: &WireRequest) -> std::io::Result<WireResponse> {
+        let data = rmp_serde::to_vec_named(req)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let mut stream = self.stream.lock()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "lock poisoned"))?;
 
         // Write length-prefixed frame.
         let len_bytes = (data.len() as u32).to_be_bytes();
-        stream.write_all(&len_bytes).map_err(|_| FsError::IOError)?;
-        stream.write_all(&data).map_err(|_| FsError::IOError)?;
+        stream.write_all(&len_bytes)?;
+        stream.write_all(&data)?;
 
         // Read response frame.
         let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).map_err(|_| FsError::IOError)?;
+        stream.read_exact(&mut len_buf)?;
         let resp_len = u32::from_be_bytes(len_buf) as usize;
         let mut resp_buf = vec![0u8; resp_len];
-        stream.read_exact(&mut resp_buf).map_err(|_| FsError::IOError)?;
+        stream.read_exact(&mut resp_buf)?;
 
-        let resp: WireResponse =
-            rmp_serde::from_slice(&resp_buf).map_err(|_| FsError::IOError)?;
+        let resp: WireResponse = rmp_serde::from_slice(&resp_buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         if resp.err != ERR_OK {
-            return Err(wire_err(resp.err));
+            return Err(wire_io_err(resp.err));
         }
         Ok(resp)
     }
 }
 
+/// Public alias for shared proxy connections.
+pub(crate) type ProxyConn = Conn;
+
 /// ProxyFs implements `virtual_fs::FileSystem` by forwarding all operations
 /// over a UDS connection to the Go VFS server.
 #[derive(Debug)]
 pub struct ProxyFs {
-    conn: Arc<Conn>,
+    pub(crate) conn: Arc<Conn>,
 }
 
 impl std::fmt::Debug for Conn {

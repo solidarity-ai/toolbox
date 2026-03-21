@@ -364,6 +364,211 @@ func TestGuestWriteWorkflow(t *testing.T) {
 	}
 }
 
+// ── Nested directory edge-case tests ──────────────────────────────────
+
+func TestNestedDirReadDirOnlyListsDirectChildren(t *testing.T) {
+	sockPath, memFS := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	memFS.CreateDir("/a")
+	memFS.WriteFile("/a/one.txt", []byte("1"))
+	memFS.CreateDir("/a/b")
+	memFS.WriteFile("/a/b/two.txt", []byte("2"))
+	memFS.CreateDir("/a/b/c")
+	memFS.WriteFile("/a/b/c/three.txt", []byte("3"))
+
+	resp := c.call(t, Request{Op: OpReadDir, Path: "/a"})
+	if resp.Err != ErrOK {
+		t.Fatalf("readdir /a: err=%d", resp.Err)
+	}
+	names := make(map[string]bool)
+	for _, e := range resp.Entries {
+		names[e.Name] = true
+	}
+	if !names["one.txt"] {
+		t.Fatal("expected one.txt in /a listing")
+	}
+	if !names["b"] {
+		t.Fatal("expected subdir b in /a listing")
+	}
+	if names["two.txt"] {
+		t.Fatal("two.txt should not appear in /a listing (it's in /a/b)")
+	}
+	if names["c"] {
+		t.Fatal("c should not appear in /a listing (it's in /a/b)")
+	}
+}
+
+func TestNestedDirCreateFileWithoutParentFails(t *testing.T) {
+	sockPath, _ := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	// Try to create a file in a directory that doesn't exist.
+	resp := c.call(t, Request{
+		Op:       OpOpen,
+		Path:     "/nonexistent/file.txt",
+		OpenOpts: &OpenOpts{Write: true, Create: true},
+	})
+	if resp.Err == ErrOK {
+		t.Fatal("expected error when creating file without parent dir")
+	}
+}
+
+func TestNestedDirDeepPathRoundTrip(t *testing.T) {
+	sockPath, memFS := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	// Create deeply nested structure: /a/b/c/d/file.txt
+	for _, dir := range []string{"/a", "/a/b", "/a/b/c", "/a/b/c/d"} {
+		resp := c.call(t, Request{Op: OpCreateDir, Path: dir})
+		if resp.Err != ErrOK {
+			t.Fatalf("create %s: err=%d", dir, resp.Err)
+		}
+	}
+
+	// Write a file at the deepest level.
+	resp := c.call(t, Request{
+		Op:       OpOpen,
+		Path:     "/a/b/c/d/deep.txt",
+		OpenOpts: &OpenOpts{Read: true, Write: true, Create: true},
+	})
+	if resp.Err != ErrOK {
+		t.Fatalf("open deep file: err=%d", resp.Err)
+	}
+	handle := resp.Handle
+
+	resp = c.call(t, Request{Op: OpFileWrite, Handle: handle, Data: []byte("deep content")})
+	if resp.Err != ErrOK {
+		t.Fatalf("write deep file: err=%d", resp.Err)
+	}
+	c.call(t, Request{Op: OpFileClose, Handle: handle})
+
+	// Verify from Go side.
+	data, err := memFS.ReadAll("/a/b/c/d/deep.txt")
+	if err != nil {
+		t.Fatalf("ReadAll deep: %v", err)
+	}
+	if string(data) != "deep content" {
+		t.Fatalf("expected 'deep content', got %q", string(data))
+	}
+
+	// ReadDir at each level should show correct children.
+	resp = c.call(t, Request{Op: OpReadDir, Path: "/a/b/c"})
+	if resp.Err != ErrOK {
+		t.Fatalf("readdir /a/b/c: err=%d", resp.Err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].Name != "d" {
+		t.Fatalf("expected [d], got %v", resp.Entries)
+	}
+
+	resp = c.call(t, Request{Op: OpReadDir, Path: "/a/b/c/d"})
+	if resp.Err != ErrOK {
+		t.Fatalf("readdir /a/b/c/d: err=%d", resp.Err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].Name != "deep.txt" {
+		t.Fatalf("expected [deep.txt], got %v", resp.Entries)
+	}
+}
+
+func TestRemoveDirWithNestedContentsFails(t *testing.T) {
+	sockPath, _ := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	c.call(t, Request{Op: OpCreateDir, Path: "/parent"})
+	c.call(t, Request{Op: OpCreateDir, Path: "/parent/child"})
+
+	resp := c.call(t, Request{Op: OpRemoveDir, Path: "/parent"})
+	if resp.Err != ErrNotEmpty {
+		t.Fatalf("expected ErrNotEmpty, got err=%d", resp.Err)
+	}
+}
+
+func TestRenameDirectoryMovesChildren(t *testing.T) {
+	sockPath, memFS := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	memFS.CreateDir("/src")
+	memFS.WriteFile("/src/file.txt", []byte("data"))
+	memFS.CreateDir("/src/sub")
+	memFS.WriteFile("/src/sub/nested.txt", []byte("nested"))
+
+	resp := c.call(t, Request{Op: OpRename, Path: "/src", ToPath: "/dst"})
+	if resp.Err != ErrOK {
+		t.Fatalf("rename: err=%d", resp.Err)
+	}
+
+	// Old paths should be gone.
+	resp = c.call(t, Request{Op: OpMetadata, Path: "/src"})
+	if resp.Err != ErrNotFound {
+		t.Fatalf("expected /src gone, got err=%d", resp.Err)
+	}
+
+	// New paths should exist.
+	data, err := memFS.ReadAll("/dst/file.txt")
+	if err != nil {
+		t.Fatalf("ReadAll /dst/file.txt: %v", err)
+	}
+	if string(data) != "data" {
+		t.Fatalf("expected 'data', got %q", string(data))
+	}
+
+	nested, err := memFS.ReadAll("/dst/sub/nested.txt")
+	if err != nil {
+		t.Fatalf("ReadAll /dst/sub/nested.txt: %v", err)
+	}
+	if string(nested) != "nested" {
+		t.Fatalf("expected 'nested', got %q", string(nested))
+	}
+}
+
+func TestNestedMetadataReturnsCorrectType(t *testing.T) {
+	sockPath, memFS := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	memFS.CreateDir("/dir")
+	memFS.WriteFile("/dir/file.txt", []byte("abc"))
+
+	// Dir metadata
+	resp := c.call(t, Request{Op: OpMetadata, Path: "/dir"})
+	if resp.Err != ErrOK {
+		t.Fatalf("metadata /dir: err=%d", resp.Err)
+	}
+	if !resp.Meta.IsDir {
+		t.Fatal("expected /dir to be a directory")
+	}
+	if resp.Meta.IsFile {
+		t.Fatal("expected /dir not to be a file")
+	}
+
+	// File metadata
+	resp = c.call(t, Request{Op: OpMetadata, Path: "/dir/file.txt"})
+	if resp.Err != ErrOK {
+		t.Fatalf("metadata /dir/file.txt: err=%d", resp.Err)
+	}
+	if !resp.Meta.IsFile {
+		t.Fatal("expected /dir/file.txt to be a file")
+	}
+	if resp.Meta.Len != 3 {
+		t.Fatalf("expected len=3, got %d", resp.Meta.Len)
+	}
+}
+
+func TestReadDirOnNestedEmptyDir(t *testing.T) {
+	sockPath, _ := startTestServer(t)
+	c := dialServer(t, sockPath)
+
+	c.call(t, Request{Op: OpCreateDir, Path: "/parent"})
+	c.call(t, Request{Op: OpCreateDir, Path: "/parent/empty"})
+
+	resp := c.call(t, Request{Op: OpReadDir, Path: "/parent/empty"})
+	if resp.Err != ErrOK {
+		t.Fatalf("readdir /parent/empty: err=%d", resp.Err)
+	}
+	if len(resp.Entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(resp.Entries))
+	}
+}
+
 func TestFileSetLen(t *testing.T) {
 	sockPath, memFS := startTestServer(t)
 	c := dialServer(t, sockPath)

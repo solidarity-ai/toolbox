@@ -38,6 +38,9 @@ jobs:
       - name: Build wasmcli-sandbox
         run: cargo build --manifest-path wasmcli-sandbox/Cargo.toml
 
+      - name: Rust tests
+        run: cargo test --manifest-path wasmcli-sandbox/Cargo.toml
+
       - name: Go fmt check
         run: test -z "$(gofmt -l .)"
 

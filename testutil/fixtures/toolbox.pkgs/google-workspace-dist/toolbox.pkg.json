@@ -1,0 +1,12 @@
+{
+  "name": "google-workspace",
+  "runtime": "typescript+wasix-sandbox",
+  "sha256": "c918d5851830e3898fa751fcd45acb2c50633cabbe400c105fa034f251b650ce",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

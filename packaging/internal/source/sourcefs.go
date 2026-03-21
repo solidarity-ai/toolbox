@@ -1,4 +1,4 @@
-package packaging
+package source
 
 import (
 	"io/fs"
@@ -9,16 +9,6 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
-
-func newSourceFS(base fs.FS, dir string, pkg tooldef.Package) fs.FS {
-	files := allowedTypeScriptFiles(dir, pkg)
-	dirs := allowedDirectories(files)
-	return sourceFS{
-		base:  base,
-		files: files,
-		dirs:  dirs,
-	}
-}
 
 type sourceFS struct {
 	base  fs.FS

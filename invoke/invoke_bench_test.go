@@ -248,7 +248,7 @@ func warmUpWASMCache(b *testing.B, wasmPath string) {
 // Go → TS (QuickJS) → exec → wasixcli-sandbox → ProxyFs → VFS server,
 // then TS reads the written file back via fs.readFileSync → MemFS.
 func benchFullRoundTrip(b *testing.B, fixtureDir string) {
-	loaded, err := packaging.LoadSourcePackage(fixtureDir)
+	loaded, err := packaging.LoadDev(fixtureDir)
 	if err != nil {
 		b.Fatalf("load vfs-test package: %v", err)
 	}

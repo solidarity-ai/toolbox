@@ -86,6 +86,19 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	}
 }
 
+// TestMCPServerListsToolsFromDistArchivePackage verifies that a dist archive
+// package can be loaded and its tools are visible through the MCP server.
+// TODO: extend to call the tool once the TS runtime supports in-memory fs.FS.
+func TestMCPServerListsToolsFromDistArchivePackage(t *testing.T) {
+	ts := tooltest.CalcDistToolset(t)
+	h := mcptest.NewHarness(t, mcpserver.New(ts))
+	names := h.ToolNames()
+
+	assertContains(t, names, "calc.add")
+	assertContains(t, names, "calc.sub")
+	assertContains(t, names, "calc.asyncAdd")
+}
+
 func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 	requireTSWasmerArtifacts(t)
 
@@ -130,9 +143,9 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 	}
 
 	if err := os.WriteFile(
-		filepath.Join(dstDir, "toolbox.pkg.json"),
+		filepath.Join(dstDir, "toolbox.devpkg.json"),
 		[]byte(strings.ReplaceAll(
-			readFile(t, filepath.Join(srcDir, "toolbox.pkg.json")),
+			readFile(t, filepath.Join(srcDir, "toolbox.devpkg.json")),
 			`"gwc": "dist/gwc.wasm"`,
 			`"gwc2": "dist/gwc2.wasm"`,
 		)),
@@ -168,7 +181,7 @@ func requireTSWasmerArtifacts(t *testing.T) {
 	t.Helper()
 
 	paths := []string{
-		filepath.Join(gwsFixtureDir(), "toolbox.pkg.json"),
+		filepath.Join(gwsFixtureDir(), "toolbox.devpkg.json"),
 		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
 		filepath.Join("..", "wasixcli-sandbox", "target", "debug", "wasixcli-sandbox"),
 	}
@@ -207,7 +220,7 @@ type sourcePackageManifest struct {
 }
 
 func copyPackageDir(src string, dst string) error {
-	manifestPath := filepath.Join(src, "toolbox.pkg.json")
+	manifestPath := filepath.Join(src, "toolbox.devpkg.json")
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return err
@@ -221,7 +234,7 @@ func copyPackageDir(src string, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
-	if err := copyFile(manifestPath, filepath.Join(dst, "toolbox.pkg.json")); err != nil {
+	if err := copyFile(manifestPath, filepath.Join(dst, "toolbox.devpkg.json")); err != nil {
 		return err
 	}
 

@@ -5,3 +5,5 @@ use (
 	./devtools
 	./cmd/toolbox-pack
 )
+
+replace github.com/solidarity-ai/toolbox v0.0.0-20260321144313-a0f540464d2c => .

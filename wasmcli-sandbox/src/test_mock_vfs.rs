@@ -361,7 +361,15 @@ impl MockState {
 pub struct MockVfsServer {
     state: Arc<Mutex<MockState>>,
     socket_path: PathBuf,
+    _dir: tempfile::TempDir,
     _listener_thread: std::thread::JoinHandle<()>,
+}
+
+impl Drop for MockVfsServer {
+    fn drop(&mut self) {
+        // Remove the socket file to break the listener loop.
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
 }
 
 impl MockVfsServer {
@@ -374,8 +382,6 @@ impl MockVfsServer {
 
         let state_clone = Arc::clone(&state);
         let thread = std::thread::spawn(move || {
-            // Keep dir alive so socket path stays valid.
-            let _dir = dir;
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
@@ -390,6 +396,7 @@ impl MockVfsServer {
         Self {
             state,
             socket_path,
+            _dir: dir,
             _listener_thread: thread,
         }
     }

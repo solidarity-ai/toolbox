@@ -119,34 +119,46 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
     }
 }
 
-/// Download all files from VFS proxy into a host directory.
+/// Download all files from VFS proxy into a host directory (recursive).
 fn sync_from_proxy(conn: &proxy_fs::Conn, host_dir: &std::path::Path) -> Result<()> {
+    sync_from_proxy_dir(conn, "/", host_dir)
+}
+
+fn sync_from_proxy_dir(conn: &proxy_fs::Conn, vfs_dir: &str, host_dir: &std::path::Path) -> Result<()> {
     use std::path::Path;
-    let resp = conn.raw_call(&proxy_fs::WireRequest::path_op(proxy_fs::OP_READ_DIR, Path::new("/")))
-        .context("read VFS root")?;
+    let resp = conn.raw_call(&proxy_fs::WireRequest::path_op(proxy_fs::OP_READ_DIR, Path::new(vfs_dir)))
+        .with_context(|| format!("read VFS dir {vfs_dir}"))?;
     for entry in &resp.entries {
-        if entry.meta.is_file {
-            let file_resp = conn.raw_call(&{
-                let mut req = proxy_fs::WireRequest {
-                    op: proxy_fs::OP_OPEN,
-                    path: Some(format!("/{}", entry.name)),
-                    to_path: None,
-                    open_opts: Some(proxy_fs::WireOpenOpts {
-                        read: true,
-                        write: false,
-                        create: false,
-                        create_new: false,
-                        append: false,
-                        truncate: false,
-                    }),
-                    handle: 0,
-                    data: None,
-                    len: 0,
-                    seek_from: 0,
-                    seek_pos: 0,
-                };
-                req
-            }).context("open VFS file")?;
+        let vfs_path = if vfs_dir == "/" {
+            format!("/{}", entry.name)
+        } else {
+            format!("{}/{}", vfs_dir, entry.name)
+        };
+
+        if entry.meta.is_dir {
+            let sub_host_dir = host_dir.join(&entry.name);
+            std::fs::create_dir_all(&sub_host_dir)
+                .with_context(|| format!("create dir {}", entry.name))?;
+            sync_from_proxy_dir(conn, &vfs_path, &sub_host_dir)?;
+        } else if entry.meta.is_file {
+            let file_resp = conn.raw_call(&proxy_fs::WireRequest {
+                op: proxy_fs::OP_OPEN,
+                path: Some(vfs_path.clone()),
+                to_path: None,
+                open_opts: Some(proxy_fs::WireOpenOpts {
+                    read: true,
+                    write: false,
+                    create: false,
+                    create_new: false,
+                    append: false,
+                    truncate: false,
+                }),
+                handle: 0,
+                data: None,
+                len: 0,
+                seek_from: 0,
+                seek_pos: 0,
+            }).with_context(|| format!("open VFS file {vfs_path}"))?;
 
             let mut data = Vec::new();
             loop {
@@ -170,18 +182,35 @@ fn sync_from_proxy(conn: &proxy_fs::Conn, host_dir: &std::path::Path) -> Result<
     Ok(())
 }
 
-/// Upload all files from a host directory back to the VFS proxy.
+/// Upload all files from a host directory back to the VFS proxy (recursive).
 #[allow(dead_code)]
 fn sync_to_proxy(conn: &proxy_fs::Conn, host_dir: &std::path::Path) -> Result<()> {
+    sync_to_proxy_dir(conn, host_dir, "/")
+}
+
+fn sync_to_proxy_dir(conn: &proxy_fs::Conn, host_dir: &std::path::Path, vfs_prefix: &str) -> Result<()> {
     for entry in std::fs::read_dir(host_dir).context("read host dir")? {
         let entry = entry?;
-        if entry.file_type()?.is_file() {
-            let name = entry.file_name().to_string_lossy().into_owned();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let vfs_path = if vfs_prefix == "/" {
+            format!("/{name}")
+        } else {
+            format!("{vfs_prefix}/{name}")
+        };
+
+        if entry.file_type()?.is_dir() {
+            // Create directory on proxy, then recurse.
+            let _ = conn.raw_call(&proxy_fs::WireRequest::path_op(
+                proxy_fs::OP_CREATE_DIR,
+                std::path::Path::new(&vfs_path),
+            ));
+            sync_to_proxy_dir(conn, &entry.path(), &vfs_path)?;
+        } else if entry.file_type()?.is_file() {
             let data = std::fs::read(entry.path())?;
 
             let open_resp = conn.raw_call(&proxy_fs::WireRequest {
                 op: proxy_fs::OP_OPEN,
-                path: Some(format!("/{name}")),
+                path: Some(vfs_path.clone()),
                 to_path: None,
                 open_opts: Some(proxy_fs::WireOpenOpts {
                     read: false,
@@ -196,7 +225,7 @@ fn sync_to_proxy(conn: &proxy_fs::Conn, host_dir: &std::path::Path) -> Result<()
                 len: 0,
                 seek_from: 0,
                 seek_pos: 0,
-            }).context("open VFS file for write")?;
+            }).with_context(|| format!("open VFS file {vfs_path} for write"))?;
 
             let mut req = proxy_fs::WireRequest::handle_op(proxy_fs::OP_FILE_WRITE, open_resp.handle);
             req.data = Some(data);
@@ -229,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_from_skips_directories() {
+    fn sync_from_creates_subdirectories() {
         let server = MockVfsServer::start();
         server.add_dir("/subdir");
         server.add_file("/file.txt", b"data");
@@ -239,7 +268,7 @@ mod tests {
         sync_from_proxy(&conn, host_dir.path()).unwrap();
 
         assert!(host_dir.path().join("file.txt").exists());
-        assert!(!host_dir.path().join("subdir").exists());
+        assert!(host_dir.path().join("subdir").is_dir());
     }
 
     #[test]
@@ -315,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_to_skips_directories() {
+    fn sync_to_creates_subdirectories() {
         let server = MockVfsServer::start();
         let conn = proxy_fs::Conn::new(server.socket_path()).unwrap();
         let host_dir = tempfile::tempdir().unwrap();
@@ -325,7 +354,7 @@ mod tests {
         sync_to_proxy(&conn, host_dir.path()).unwrap();
 
         assert_eq!(server.read_file("/file.txt").unwrap(), b"data");
-        assert!(!server.exists("/subdir"));
+        assert!(server.exists("/subdir"));
     }
 
     #[test]
@@ -413,5 +442,143 @@ mod tests {
     fn run_with_empty_bytes_returns_error() {
         let result = run(b"", &[]);
         assert!(result.is_err());
+    }
+
+    // ── nested directory sync tests ────────────────────────────────────
+
+    #[test]
+    fn sync_from_downloads_nested_files() {
+        let server = MockVfsServer::start();
+        server.add_dir("/sub");
+        server.add_file("/sub/nested.txt", b"nested content");
+        server.add_file("/top.txt", b"top");
+        let conn = proxy_fs::Conn::new(server.socket_path()).unwrap();
+        let host_dir = tempfile::tempdir().unwrap();
+
+        sync_from_proxy(&conn, host_dir.path()).unwrap();
+
+        // Top-level file should be downloaded.
+        assert_eq!(std::fs::read(host_dir.path().join("top.txt")).unwrap(), b"top");
+        // Nested file should also be downloaded.
+        assert!(
+            host_dir.path().join("sub").join("nested.txt").exists(),
+            "nested file should be synced from proxy"
+        );
+        assert_eq!(
+            std::fs::read(host_dir.path().join("sub").join("nested.txt")).unwrap(),
+            b"nested content"
+        );
+    }
+
+    #[test]
+    fn sync_to_uploads_nested_files() {
+        let server = MockVfsServer::start();
+        let conn = proxy_fs::Conn::new(server.socket_path()).unwrap();
+        let host_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(host_dir.path().join("sub")).unwrap();
+        std::fs::write(host_dir.path().join("sub").join("nested.txt"), b"from host nested").unwrap();
+        std::fs::write(host_dir.path().join("top.txt"), b"from host top").unwrap();
+
+        sync_to_proxy(&conn, host_dir.path()).unwrap();
+
+        assert_eq!(server.read_file("/top.txt").unwrap(), b"from host top");
+        // Nested file should also be uploaded.
+        assert_eq!(
+            server.read_file("/sub/nested.txt").unwrap_or_default(),
+            b"from host nested",
+            "nested file should be synced to proxy"
+        );
+    }
+
+    // ── concurrent access tests ────────────────────────────────────────
+
+    #[test]
+    fn concurrent_reads_on_shared_conn() {
+        let server = MockVfsServer::start();
+        for i in 0..10 {
+            server.add_file(&format!("/file{i}.txt"), format!("data{i}").as_bytes());
+        }
+        let conn = std::sync::Arc::new(proxy_fs::Conn::new(server.socket_path()).unwrap());
+
+        let handles: Vec<_> = (0..10).map(|i| {
+            let conn = std::sync::Arc::clone(&conn);
+            std::thread::spawn(move || {
+                let resp = conn.raw_call(&proxy_fs::WireRequest::path_op(
+                    proxy_fs::OP_METADATA,
+                    std::path::Path::new(&format!("/file{i}.txt")),
+                )).unwrap();
+                let meta = resp.meta.unwrap();
+                assert!(meta.is_file);
+                assert_eq!(meta.len, 5); // "dataN" is 5 bytes
+            })
+        }).collect();
+
+        for h in handles {
+            h.join().expect("thread panicked");
+        }
+    }
+
+    #[test]
+    fn concurrent_writes_on_shared_conn() {
+        let server = MockVfsServer::start();
+        let conn = std::sync::Arc::new(proxy_fs::Conn::new(server.socket_path()).unwrap());
+
+        let handles: Vec<_> = (0..10).map(|i| {
+            let conn = std::sync::Arc::clone(&conn);
+            std::thread::spawn(move || {
+                // Each thread creates its own file.
+                let path = format!("/concurrent{i}.txt");
+                let data = format!("thread{i}");
+                let open_resp = conn.raw_call(&proxy_fs::WireRequest {
+                    op: proxy_fs::OP_OPEN,
+                    path: Some(path),
+                    to_path: None,
+                    open_opts: Some(proxy_fs::WireOpenOpts {
+                        read: false, write: true, create: true,
+                        create_new: false, append: false, truncate: false,
+                    }),
+                    handle: 0, data: None, len: 0, seek_from: 0, seek_pos: 0,
+                }).unwrap();
+
+                let mut req = proxy_fs::WireRequest::handle_op(proxy_fs::OP_FILE_WRITE, open_resp.handle);
+                req.data = Some(data.into_bytes());
+                conn.raw_call(&req).unwrap();
+
+                conn.raw_call(&proxy_fs::WireRequest::handle_op(proxy_fs::OP_FILE_CLOSE, open_resp.handle)).unwrap();
+            })
+        }).collect();
+
+        for h in handles {
+            h.join().expect("thread panicked");
+        }
+
+        // Verify all files were written.
+        for i in 0..10 {
+            let data = server.read_file(&format!("/concurrent{i}.txt"));
+            assert!(data.is_some(), "file /concurrent{i}.txt should exist");
+            assert_eq!(data.unwrap(), format!("thread{i}").into_bytes());
+        }
+    }
+
+    // ── connection drop tests ──────────────────────────────────────────
+
+    #[test]
+    fn new_conn_after_server_shutdown_fails() {
+        let server = MockVfsServer::start();
+        let path = server.socket_path().to_string();
+
+        // Verify connection works while server is up.
+        let conn = proxy_fs::Conn::new(&path).unwrap();
+        assert!(conn.raw_call(&proxy_fs::WireRequest::path_op(
+            proxy_fs::OP_METADATA, std::path::Path::new("/")
+        )).is_ok());
+        drop(conn);
+
+        // Drop the server.
+        drop(server);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // New connections should fail.
+        assert!(proxy_fs::Conn::new(&path).is_err(), "connect after server shutdown should fail");
     }
 }

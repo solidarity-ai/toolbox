@@ -32,4 +32,7 @@ go.work.sum
 .bg-shell
 
 # Rust sandbox build output
-wasixcli-sandbox/target/
+wasmcli-sandbox/target/
+
+# Test fixture build output
+testutil/fixtures/toolbox.pkgs/*/wasm-src/target/

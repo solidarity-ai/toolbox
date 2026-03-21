@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
@@ -36,12 +36,13 @@ func TestWASMGuestFileRoundTrip(t *testing.T) {
 	go srv.Serve()
 	t.Cleanup(func() { srv.Close() })
 
-	result, err := tswasixcli.Run(tswasixcli.Request{
+	result, err := tswasmcli.Run(tswasmcli.Request{
 		WasmPath:    wasmPath,
+		Runtime:     "wasix-cli",
 		VFSSockPath: sockPath,
 	})
 	if err != nil {
-		t.Fatalf("tswasixcli.Run: %v", err)
+		t.Fatalf("tswasmcli.Run: %v", err)
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("guest exited %d: stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)

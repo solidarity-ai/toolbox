@@ -1,6 +1,6 @@
 {
   "name": "http-client",
-  "runtime": "ts+wasip2-sandbox",
+  "runtime": "typescript+wasip2-sandbox",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },

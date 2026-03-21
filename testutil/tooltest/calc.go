@@ -60,6 +60,28 @@ func calcDistFixtureDir() string {
 	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc-dist")
 }
 
+// VFSTestDistToolset loads the vfs-test-dist golden fixture (archive) into a resolved toolset.
+func VFSTestDistToolset(t testing.TB) toolset.ResolvedToolset {
+	t.Helper()
+
+	distDir := vfsTestDistFixtureDir()
+	builder := toolset.New()
+	archivePath := filepath.Join(distDir, "vfs-test.toolbox.pkg")
+	manifestPath := filepath.Join(distDir, packaging.PkgManifestFilename)
+	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
+		t.Fatalf("add vfs-test-dist archive: %v", err)
+	}
+	return builder.Resolve()
+}
+
+func vfsTestDistFixtureDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("tooltest: runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "vfs-test-dist")
+}
+
 func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
 	t.Helper()
 

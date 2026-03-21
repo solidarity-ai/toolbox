@@ -1,7 +1,10 @@
 {
   "name": "vfs-test",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "15de64e060425f9dcafe029e5d7b970d94d3a3decf26a96602c974b3b9063a98",
+  "sha256": "49b375151af9db62e986c383c5c39ad40e27b4666cd9f75ddad911bfa0e0d4bd",
+  "executables": {
+    "vfs-guest": "dist/vfs-guest.wasm"
+  },
   "tools": [
     {
       "entry_ts": "tools/vfs-test.run.ts",

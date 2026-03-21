@@ -9,6 +9,7 @@ import (
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
@@ -57,6 +58,40 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 	// The TS tool reads /output.txt via fs.readFileSync and returns it.
 	if result != "got: hello from go" {
 		t.Fatalf("expected 'got: hello from go', got %q", result)
+	}
+}
+
+// TestVFSRoundTripThroughInvokeFromDistArchive is the same as
+// TestVFSRoundTripThroughInvoke but loads the package from a dist archive
+// instead of a source directory, verifying the archive pipeline works
+// end-to-end with the WASM/VFS execution path.
+func TestVFSRoundTripThroughInvokeFromDistArchive(t *testing.T) {
+	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
+	if _, err := os.Stat(hostBinary); err != nil {
+		t.Skipf("wasixcli-sandbox binary not built: %v", err)
+	}
+
+	// The WASM binary lives alongside the source fixture, not in the archive.
+	// Check it exists before proceeding.
+	srcFixtureDir := vfsTestFixtureDir(t)
+	if _, err := os.Stat(filepath.Join(srcFixtureDir, "dist", "vfs-guest.wasm")); err != nil {
+		t.Skipf("vfs-guest.wasm not found: %v", err)
+	}
+
+	resolved := tooltest.VFSTestDistToolset(t)
+
+	memFS := vfs.NewMemFS()
+	if err := memFS.WriteFile("/input.txt", []byte("hello from go via dist")); err != nil {
+		t.Fatalf("pre-populate: %v", err)
+	}
+
+	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
+	if err != nil {
+		t.Fatalf("invoke.RunWithVFS: %v", err)
+	}
+
+	if result != "got: hello from go via dist" {
+		t.Fatalf("expected 'got: hello from go via dist', got %q", result)
 	}
 }
 

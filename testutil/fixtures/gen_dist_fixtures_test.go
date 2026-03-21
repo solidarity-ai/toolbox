@@ -1,16 +1,22 @@
 package fixtures
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/solidarity-ai/toolbox/packaging"
 )
 
 // TestDistGoldens verifies that packing each source fixture produces output
-// identical to the committed golden dist fixtures. When GENERATE_DIST_FIXTURES=1
+// matching the committed golden dist fixtures. When GENERATE_DIST_FIXTURES=1
 // is set, it overwrites the goldens instead (use this to regenerate after changes).
+//
+// The manifest is compared byte-for-byte (JSON is deterministic).
+// The archive is compared semantically: golden archive must load successfully
+// and its package metadata must match what a fresh pack produces.
 func TestDistGoldens(t *testing.T) {
 	generate := os.Getenv("GENERATE_DIST_FIXTURES") != ""
 
@@ -20,7 +26,6 @@ func TestDistGoldens(t *testing.T) {
 		goldenDir := filepath.Join(filepath.Dir(srcDir), distName)
 
 		t.Run(distName, func(t *testing.T) {
-			// Pack to a temp dir
 			tmpDir := t.TempDir()
 			result, err := packaging.Pack(srcDir, tmpDir)
 			if err != nil {
@@ -28,7 +33,6 @@ func TestDistGoldens(t *testing.T) {
 			}
 
 			if generate {
-				// Overwrite goldens
 				if err := os.MkdirAll(goldenDir, 0o755); err != nil {
 					t.Fatalf("mkdir %s: %v", goldenDir, err)
 				}
@@ -38,33 +42,33 @@ func TestDistGoldens(t *testing.T) {
 				return
 			}
 
-			// Compare against committed goldens
+			// Load golden archive and fresh archive, compare package metadata
+			// (ignoring sha256 since tar timestamps make archives non-deterministic)
 			goldenArchive := filepath.Join(goldenDir, filepath.Base(result.ArchivePath))
 			goldenManifest := filepath.Join(goldenDir, packaging.PkgManifestFilename)
+			goldenLoaded, err := packaging.LoadArchive(goldenArchive, goldenManifest)
+			if err != nil {
+				t.Fatalf("load golden archive: %v", err)
+			}
+			freshLoaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath)
+			if err != nil {
+				t.Fatalf("load fresh archive: %v", err)
+			}
 
-			assertFilesEqual(t, "archive", goldenArchive, result.ArchivePath)
-			assertFilesEqual(t, "manifest", goldenManifest, result.ManifestPath)
+			goldenPkg := goldenLoaded.Package
+			goldenPkg.SHA256 = ""
+			freshPkg := freshLoaded.Package
+			freshPkg.SHA256 = ""
+
+			goldenJSON, _ := json.Marshal(goldenPkg)
+			freshJSON, _ := json.Marshal(freshPkg)
+			if diff := cmp.Diff(string(goldenJSON), string(freshJSON)); diff != "" {
+				t.Fatalf("package metadata mismatch (-golden +fresh):\n%s", diff)
+			}
 		})
 	}
 }
 
-func assertFilesEqual(t *testing.T, label, goldenPath, actualPath string) {
-	t.Helper()
-
-	golden, err := os.ReadFile(goldenPath)
-	if err != nil {
-		t.Fatalf("read golden %s %s: %v", label, goldenPath, err)
-	}
-	actual, err := os.ReadFile(actualPath)
-	if err != nil {
-		t.Fatalf("read actual %s %s: %v", label, actualPath, err)
-	}
-
-	if string(golden) != string(actual) {
-		t.Fatalf("%s mismatch for %s: golden %d bytes vs actual %d bytes — regenerate with GENERATE_DIST_FIXTURES=1",
-			label, filepath.Base(goldenPath), len(golden), len(actual))
-	}
-}
 
 func copyOrFail(t *testing.T, src, dst string) {
 	t.Helper()

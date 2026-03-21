@@ -10,7 +10,8 @@ import (
 )
 
 type Request struct {
-	WasmPath    string
+	WasmPath    string // Path to WASM file on disk (mutually exclusive with WasmBytes).
+	WasmBytes   []byte // WASM binary content piped via stdin (mutually exclusive with WasmPath).
 	Args        []string
 	VFSSockPath string // Unix socket for shared VFS proxy (optional).
 }
@@ -22,14 +23,23 @@ type Result struct {
 }
 
 func Run(request Request) (Result, error) {
-	if request.WasmPath == "" {
-		return Result{}, fmt.Errorf("missing wasm path")
+	if request.WasmPath == "" && len(request.WasmBytes) == 0 {
+		return Result{}, fmt.Errorf("missing wasm path or bytes")
 	}
 
-	cmd := exec.Command(resolveHostBinaryPath(), append([]string{request.WasmPath}, request.Args...)...)
+	wasmArg := request.WasmPath
+	if len(request.WasmBytes) > 0 {
+		wasmArg = "-"
+	}
+
+	cmd := exec.Command(resolveHostBinaryPath(), append([]string{wasmArg}, request.Args...)...)
 
 	if request.VFSSockPath != "" {
 		cmd.Env = append(cmd.Environ(), "TOOLBOX_VFS_SOCK="+request.VFSSockPath)
+	}
+
+	if len(request.WasmBytes) > 0 {
+		cmd.Stdin = bytes.NewReader(request.WasmBytes)
 	}
 
 	var stdout bytes.Buffer

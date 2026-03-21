@@ -28,11 +28,19 @@ fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     let wasm_path = args
         .next()
-        .context("usage: wasixcli-sandbox <wasm-path> [args...]")?;
+        .context("usage: wasixcli-sandbox <wasm-path | -> [args...]")?;
     let guest_args: Vec<String> = args.collect();
 
-    let wasm_bytes =
-        fs::read(&wasm_path).with_context(|| format!("read wasm from {}", wasm_path))?;
+    // Read WASM bytes from stdin when path is "-", otherwise from file.
+    let wasm_bytes = if wasm_path == "-" {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut buf)
+            .context("read wasm from stdin")?;
+        buf
+    } else {
+        fs::read(&wasm_path).with_context(|| format!("read wasm from {}", wasm_path))?
+    };
 
     let mut features = Features::new();
     features.exceptions(true);

@@ -13,10 +13,9 @@ import (
 
 // LoadedPackage is a fully loaded source package with its filesystem.
 type LoadedPackage struct {
-	Package     tooldef.Package
-	Executables map[string]string
-	Files       fs.FS
-	Dir         string
+	Package tooldef.Package
+	Files   fs.FS
+	Dir     string
 }
 
 // LoadDir loads a source package from dir by reading toolbox.devpkg.json.
@@ -58,10 +57,9 @@ func LoadDirWithMode(dir string, mode manifest.ValidationMode) (LoadDirResult, e
 	enrichToolMetadata(files, &pkg)
 
 	loaded := LoadedPackage{
-		Package:     pkg,
-		Executables: dev.Executables,
-		Files:       files,
-		Dir:         dir,
+		Package: pkg,
+		Files:   files,
+		Dir:     dir,
 	}
 
 	return LoadDirResult{
@@ -94,7 +92,7 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox {
 			resolved.TSWasm = &tooldef.TSWasmToolDef{
 				TSToolDef:   baseDef,
-				Executables: p.Executables,
+				Executables: p.Package.Executables,
 			}
 		} else {
 			resolved.TS = &baseDef

@@ -101,6 +101,7 @@ func Compile(dev DevManifest) tooldef.Package {
 		Name:                      dev.Name,
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
+		Executables:               dev.Executables,
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
 	}
 	for i, tool := range dev.Tools {

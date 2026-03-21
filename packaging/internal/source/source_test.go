@@ -49,8 +49,9 @@ func TestLoadDir(t *testing.T) {
   ]
 }`,
 			wantPackage: tooldef.Package{
-				Name:    "google-workspace",
-				Runtime: tooldef.RuntimeTypeScriptWasixSandbox,
+				Name:        "google-workspace",
+				Runtime:     tooldef.RuntimeTypeScriptWasixSandbox,
+				Executables: map[string]string{"gwc": "dist/gwc.wasm"},
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
 				},
@@ -158,10 +159,10 @@ func TestLoadDirExecutables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDir() error: %v", err)
 	}
-	if loaded.Executables == nil {
+	if loaded.Package.Executables == nil {
 		t.Fatalf("expected non-nil Executables")
 	}
-	if got := loaded.Executables["gwc"]; got != "dist/gwc.wasm" {
+	if got := loaded.Package.Executables["gwc"]; got != "dist/gwc.wasm" {
 		t.Fatalf("expected executable gwc=dist/gwc.wasm, got %q", got)
 	}
 }

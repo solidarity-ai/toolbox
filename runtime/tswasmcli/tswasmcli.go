@@ -1,4 +1,4 @@
-package tswasixcli
+package tswasmcli
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ type Request struct {
 	WasmPath    string // Path to WASM file on disk (mutually exclusive with WasmBytes).
 	WasmBytes   []byte // WASM binary content piped via stdin (mutually exclusive with WasmPath).
 	Args        []string
+	Runtime     string // "wasix-cli" or "wasip2-cli" (required).
 	VFSSockPath string // Unix socket for shared VFS proxy (optional).
 }
 
@@ -27,12 +28,19 @@ func Run(request Request) (Result, error) {
 		return Result{}, fmt.Errorf("missing wasm path or bytes")
 	}
 
+	if request.Runtime == "" {
+		return Result{}, fmt.Errorf("missing runtime")
+	}
+
 	wasmArg := request.WasmPath
 	if len(request.WasmBytes) > 0 {
 		wasmArg = "-"
 	}
 
-	cmd := exec.Command(resolveHostBinaryPath(), append([]string{wasmArg}, request.Args...)...)
+	cmdArgs := []string{"--runtime", request.Runtime, wasmArg}
+	cmdArgs = append(cmdArgs, request.Args...)
+
+	cmd := exec.Command(resolveHostBinaryPath(), cmdArgs...)
 
 	if request.VFSSockPath != "" {
 		cmd.Env = append(cmd.Environ(), "TOOLBOX_VFS_SOCK="+request.VFSSockPath)
@@ -64,16 +72,16 @@ func Run(request Request) (Result, error) {
 		return result, nil
 	}
 
-	return Result{}, fmt.Errorf("run wasixcli-sandbox: %w", err)
+	return Result{}, fmt.Errorf("run wasmcli-sandbox: %w", err)
 }
 
 func resolveHostBinaryPath() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return "wasixcli-sandbox"
+		return "wasmcli-sandbox"
 	}
 
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasixcli-sandbox", "target", "debug", "wasixcli-sandbox"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "wasmcli-sandbox", "target", "debug", "wasmcli-sandbox"))
 }
 
 // ResolveHostBinaryPathForTest exposes the host binary path for integration tests.

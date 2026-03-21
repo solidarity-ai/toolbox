@@ -89,7 +89,8 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			PackageRoot: p.Dir,
 		}
 
-		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox {
+		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox ||
+			p.Package.Runtime == tooldef.RuntimeTypeScriptWasip2Sandbox {
 			resolved.TSWasm = &tooldef.TSWasmToolDef{
 				TSToolDef:   baseDef,
 				Executables: p.Package.Executables,

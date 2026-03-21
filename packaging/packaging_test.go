@@ -133,6 +133,29 @@ func TestPackRoundTripAllFixtures(t *testing.T) {
 	}
 }
 
+func TestLoadDevWasip2Runtime(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
+  "name": "http-client",
+  "runtime": "typescript+wasip2-sandbox",
+  "executables": { "http-client": "dist/http-client.wasm" },
+  "tools": [
+    { "entry_ts": "tools/http-client.fetch.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "http-client.fetch.ts"), "export default function() {}")
+
+	loaded, err := packaging.LoadDev(dir)
+	if err != nil {
+		t.Fatalf("LoadDev() error: %v", err)
+	}
+	if loaded.Package.Runtime != tooldef.RuntimeTypeScriptWasip2Sandbox {
+		t.Fatalf("expected runtime=typescript+wasip2-sandbox, got %q", loaded.Package.Runtime)
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

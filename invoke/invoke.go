@@ -10,7 +10,7 @@ import (
 
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
-	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
@@ -108,8 +108,9 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				return quickts.ExecResult{}, fmt.Errorf("tool %s does not declare executable %q", tool.Name, binary)
 			}
 
-			req := tswasixcli.Request{
+			req := tswasmcli.Request{
 				Args:        execArgs,
+				Runtime:     runtimeFlag(tool.Package.Runtime),
 				VFSSockPath: sockPath,
 			}
 
@@ -123,7 +124,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				req.WasmBytes = wasmBytes
 			}
 
-			result, err := tswasixcli.Run(req)
+			result, err := tswasmcli.Run(req)
 			if err != nil {
 				return quickts.ExecResult{}, err
 			}
@@ -159,4 +160,13 @@ func startVFSServer(memFS *vfs.MemFS) (string, func(), error) {
 	}
 
 	return sockPath, cleanup, nil
+}
+
+func runtimeFlag(rt tooldef.ToolRuntime) string {
+	switch rt {
+	case tooldef.RuntimeTypeScriptWasip2Sandbox:
+		return "wasip2-cli"
+	default:
+		return "wasix-cli"
+	}
 }

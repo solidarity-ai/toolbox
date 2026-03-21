@@ -31,12 +31,12 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            wasixcli-sandbox/target
-          key: rust-${{ runner.os }}-${{ hashFiles('wasixcli-sandbox/Cargo.lock') }}
+            wasmcli-sandbox/target
+          key: rust-${{ runner.os }}-${{ hashFiles('wasmcli-sandbox/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
 
-      - name: Build wasixcli-sandbox
-        run: cargo build --manifest-path wasixcli-sandbox/Cargo.toml
+      - name: Build wasmcli-sandbox
+        run: cargo build --manifest-path wasmcli-sandbox/Cargo.toml
 
       - name: Go fmt check
         run: test -z "$(gofmt -l .)"

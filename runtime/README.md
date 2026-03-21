@@ -8,7 +8,7 @@ A runtime receives a prepared execution request and runs it inside a sandbox or 
 
 Current planned runtimes:
 - `runtime/quickjs` — TypeScript/JavaScript tool execution
-- `runtime/tswasixcli` — typescript+wasix-sandbox execution via the Rust host
+- `runtime/tswasmcli` — WASM sandbox execution (wasix-cli, wasip2-cli) via the Rust host
 
 ## Who depends on this package area
 

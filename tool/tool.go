@@ -18,6 +18,8 @@ const RuntimeTypeScriptSandbox ToolRuntime = "typescript-sandbox"
 
 const RuntimeTypeScriptWasixSandbox ToolRuntime = "typescript+wasix-sandbox"
 
+const RuntimeTypeScriptWasip2Sandbox ToolRuntime = "typescript+wasip2-sandbox"
+
 type AccessMode string
 
 const (

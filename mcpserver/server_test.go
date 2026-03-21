@@ -327,6 +327,59 @@ func copyFile(src string, dst string) error {
 	return out.Close()
 }
 
+func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
+	requireTSWasip2Artifacts(t)
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(httpClientFixtureDir()); err != nil {
+		t.Fatalf("add http-client package dir: %v", err)
+	}
+
+	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	result := h.CallTool("http-client.fetch", map[string]any{})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+
+	structured := mcptest.StructuredMap(t, result)
+	if got := structured["tool"]; got != "http-client.fetch" {
+		t.Fatalf("expected tool http-client.fetch, got %#v", got)
+	}
+	resultStr, ok := structured["result"].(string)
+	if !ok {
+		t.Fatalf("expected string result, got %#v", structured["result"])
+	}
+	if !strings.Contains(resultStr, "Status: 200 OK") {
+		t.Fatalf("expected result to contain 'Status: 200 OK', got:\n%s", resultStr)
+	}
+	if !strings.Contains(resultStr, "httpbin.org") {
+		t.Fatalf("expected result to contain 'httpbin.org', got:\n%s", resultStr)
+	}
+}
+
+func requireTSWasip2Artifacts(t *testing.T) {
+	t.Helper()
+
+	paths := []string{
+		filepath.Join(httpClientFixtureDir(), "toolbox.pkg.json"),
+		filepath.Join(httpClientFixtureDir(), "dist", "http-client.wasm"),
+		filepath.Join("..", "wasmcli-sandbox", "target", "debug", "wasmcli-sandbox"),
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			t.Skipf("wasip2 artifacts not ready: missing %s", p)
+		}
+	}
+}
+
+func httpClientFixtureDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("mcpserver_test: runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "http-client")
+}
+
 func assertContains(t *testing.T, values []string, want string) {
 	t.Helper()
 	for _, v := range values {

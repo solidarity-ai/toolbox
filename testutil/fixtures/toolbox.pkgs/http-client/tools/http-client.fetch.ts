@@ -5,7 +5,7 @@ declare function exec(
 
 export const params = {};
 export const metadata = {
-  description: "Make an HTTPS GET request via a Go WASM binary",
+  description: "Fetch a URL via HTTP GET using a wasip2 WASM component",
   idempotent: true,
   accessMode: "readOnly",
 };

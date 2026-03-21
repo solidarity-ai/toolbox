@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
+use wasmtime::{Cache, CacheConfig, Config, Engine, Store};
 use wasmtime::component::{Component, Linker, ResourceTable};
-use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, pipe::MemoryOutputPipe};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
@@ -32,6 +32,11 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
     let mut config = Config::new();
     config.wasm_component_model(true);
     config.async_support(false);
+
+    // Enable compilation caching so repeated runs skip recompilation.
+    if let Ok(cache) = Cache::new(CacheConfig::new()) {
+        config.cache(Some(cache));
+    }
 
     let engine = Engine::new(&config).context("create wasmtime engine")?;
     let component = Component::new(&engine, wasm_bytes).context("compile wasm component")?;

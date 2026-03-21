@@ -16,6 +16,6 @@ tokio = { version = "1.50.0", features = ["rt-multi-thread", "io-util"] }
 wasmer = { version = "6.1.0", features = ["cranelift", "sys"] }
 wasmer-types = "6.1.0"
 wasmer-wasix = { version = "0.601.0", default-features = false, features = ["sys"] }
-wasmtime = { version = "33", features = ["component-model"] }
+wasmtime = { version = "33", features = ["component-model", "cache"] }
 wasmtime-wasi = "33"
 wasmtime-wasi-http = "33"

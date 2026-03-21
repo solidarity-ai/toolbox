@@ -19,3 +19,7 @@ wasmer-wasix = { version = "0.601.0", default-features = false, features = ["sys
 wasmtime = { version = "33", features = ["component-model", "cache"] }
 wasmtime-wasi = "33"
 wasmtime-wasi-http = "33"
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"

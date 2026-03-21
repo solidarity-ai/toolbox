@@ -58,16 +58,13 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
         .args(guest_args);
 
     // Mount the shared VFS if a socket path is provided.
-    // Connect to the VFS proxy and mount as /work via preopened_dir,
-    // using a dedicated connection for filesystem operations.
-    if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
+    // Single connection is reused for both sync-from and sync-back to
+    // guarantee ordered operations over the UDS.
+    let vfs = if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
         let proxy = proxy_fs::ProxyFs::connect(&socket_path)
             .context("connect to VFS proxy")?;
-        // Create a host-side directory backed by the VFS proxy.
-        // We use preopened_dir with /dev/shm for in-memory backing.
         let work_dir = std::path::PathBuf::from(format!("/dev/shm/toolbox-vfs-{}", std::process::id()));
         std::fs::create_dir_all(&work_dir).context("create /dev/shm work dir")?;
-        // Sync files from VFS proxy into the in-memory directory.
         sync_from_proxy(&proxy.conn, &work_dir).context("sync from VFS proxy")?;
         wasi_builder.preopened_dir(
             &work_dir,
@@ -75,7 +72,10 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
             DirPerms::all(),
             FilePerms::all(),
         ).context("preopen /work")?;
-    }
+        Some((proxy, work_dir))
+    } else {
+        None
+    };
 
     let state = WasmState {
         wasi: wasi_builder.build(),
@@ -95,13 +95,10 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
 
     let run_result = command.wasi_cli_run().call_run(&mut store);
 
-    // Sync files back to VFS proxy after execution.
-    if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
-        let proxy = proxy_fs::ProxyFs::connect(&socket_path)
-            .context("reconnect to VFS proxy for sync-back")?;
-        let work_dir = std::path::PathBuf::from(format!("/dev/shm/toolbox-vfs-{}", std::process::id()));
-        sync_to_proxy(&proxy.conn, &work_dir).context("sync to VFS proxy")?;
-        let _ = std::fs::remove_dir_all(&work_dir);
+    // Sync files back using the same connection.
+    if let Some((proxy, work_dir)) = &vfs {
+        sync_to_proxy(&proxy.conn, work_dir).context("sync to VFS proxy")?;
+        let _ = std::fs::remove_dir_all(work_dir);
     }
 
     let stdout = stdout_pipe.contents();

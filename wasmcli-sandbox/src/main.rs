@@ -3,6 +3,9 @@ mod proxy_wasi_fs;
 mod wasix;
 mod wasip2;
 
+#[cfg(test)]
+mod test_mock_vfs;
+
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::process;

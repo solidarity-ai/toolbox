@@ -1,14 +1,12 @@
 package invoke_test
 
 import (
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
-	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
@@ -26,17 +24,9 @@ import (
 //  5. The TS entry returns the file contents as the tool result
 //  6. Go verifies the result matches what the WASM guest wrote
 func TestVFSRoundTripThroughInvoke(t *testing.T) {
-	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
-	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasixcli-sandbox binary not built: %v", err)
-	}
+	tooltest.EnsureSandboxBinary(t)
 
-	fixtureDir := vfsTestFixtureDir(t)
-	if _, err := os.Stat(filepath.Join(fixtureDir, "dist", "vfs-guest.wasm")); err != nil {
-		t.Skipf("vfs-guest.wasm not found: %v", err)
-	}
-
-	loaded, err := packaging.LoadDev(fixtureDir)
+	loaded, err := packaging.LoadDev(vfsTestFixtureDir(t))
 	if err != nil {
 		t.Fatalf("load vfs-test package: %v", err)
 	}
@@ -47,36 +37,21 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	// Run the tool through invoke — full path:
-	// TS (quickts) → exec → tswasixcli → wasixcli → ProxyFs → VFS server
-	// then TS reads the written file back via fs.readFileSync → MemFS
 	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
 
-	// The TS tool reads /output.txt via fs.readFileSync and returns it.
 	if result != "got: hello from go" {
 		t.Fatalf("expected 'got: hello from go', got %q", result)
 	}
 }
 
-// TestVFSRoundTripThroughInvokeFromDistArchive is the same as
-// TestVFSRoundTripThroughInvoke but loads the package from a dist archive
-// instead of a source directory, verifying the archive pipeline works
-// end-to-end with the WASM/VFS execution path.
+// TestVFSRoundTripThroughInvokeFromDistArchive loads the vfs-test package from
+// a dist archive and runs the full VFS round-trip, verifying the archive
+// bundles WASM executables correctly.
 func TestVFSRoundTripThroughInvokeFromDistArchive(t *testing.T) {
-	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
-	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasixcli-sandbox binary not built: %v", err)
-	}
-
-	// The WASM binary lives alongside the source fixture, not in the archive.
-	// Check it exists before proceeding.
-	srcFixtureDir := vfsTestFixtureDir(t)
-	if _, err := os.Stat(filepath.Join(srcFixtureDir, "dist", "vfs-guest.wasm")); err != nil {
-		t.Skipf("vfs-guest.wasm not found: %v", err)
-	}
+	tooltest.EnsureSandboxBinary(t)
 
 	resolved := tooltest.VFSTestDistToolset(t)
 

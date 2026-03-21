@@ -11,6 +11,7 @@ import (
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
 	"github.com/vmihailenco/msgpack/v5"
@@ -20,10 +21,7 @@ import (
 // vfs-guest.wasm fixture is not available.
 func requireDeps(b *testing.B) string {
 	b.Helper()
-	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
-	if _, err := os.Stat(hostBinary); err != nil {
-		b.Fatalf("wasixcli-sandbox binary not built: %v", err)
-	}
+	tooltest.EnsureSandboxBinary(b)
 	fixtureDir := benchFixtureDir(b)
 	wasmPath := filepath.Join(fixtureDir, "dist", "vfs-guest.wasm")
 	if _, err := os.Stat(wasmPath); err != nil {

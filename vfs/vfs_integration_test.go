@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
@@ -15,13 +16,10 @@ import (
 // /work/input.txt from the VFS proxy and writes /work/output.txt back through
 // it. Verifies both the guest stdout and the written file from the Go side.
 func TestWASMGuestFileRoundTrip(t *testing.T) {
+	tooltest.EnsureSandboxBinary(t)
 	wasmPath := fixtureWasmPath(t)
-	hostBinary := tswasixcli.ResolveHostBinaryPathForTest()
-	if _, err := os.Stat(hostBinary); err != nil {
-		t.Skipf("wasixcli-sandbox binary not built: %v", err)
-	}
 	if _, err := os.Stat(wasmPath); err != nil {
-		t.Skipf("vfs-guest.wasm not found: %v", err)
+		t.Fatalf("vfs-guest.wasm not found: %v", err)
 	}
 
 	memFS := vfs.NewMemFS()

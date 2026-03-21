@@ -103,8 +103,9 @@ func Pack(loaded source.LoadedPackage, outDir string) (PackResult, error) {
 }
 
 // LoadArchive loads a package from a .toolbox.pkg archive file.
-// It verifies the sha256 from the external manifest and checks that
-// the internal manifest matches the external one (ignoring sha256).
+// It verifies the sha256 from the external manifest, checks that
+// the internal manifest matches the external one (ignoring sha256),
+// and validates the loaded package against the dist schema.
 func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error) {
 	// Read external manifest
 	externalRaw, err := os.ReadFile(manifestPath)
@@ -124,13 +125,12 @@ func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error)
 
 	// Verify sha256
 	if externalPkg.SHA256 == "" {
-		fmt.Fprintf(os.Stderr, "warning: external manifest %s has no sha256 — archive integrity not verified\n", manifestPath)
-	} else {
-		h := sha256.Sum256(archiveData)
-		actualHash := hex.EncodeToString(h[:])
-		if externalPkg.SHA256 != actualHash {
-			return source.LoadedPackage{}, fmt.Errorf("sha256 mismatch: manifest=%q, actual=%q", externalPkg.SHA256, actualHash)
-		}
+		return source.LoadedPackage{}, fmt.Errorf("external manifest %s missing sha256", manifestPath)
+	}
+	h := sha256.Sum256(archiveData)
+	actualHash := hex.EncodeToString(h[:])
+	if externalPkg.SHA256 != actualHash {
+		return source.LoadedPackage{}, fmt.Errorf("sha256 mismatch: manifest=%q, actual=%q", externalPkg.SHA256, actualHash)
 	}
 
 	// Decompress and extract to in-memory FS
@@ -149,6 +149,9 @@ func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error)
 	internalJSON, _ := json.Marshal(internalForCompare)
 	if string(externalJSON) != string(internalJSON) {
 		return source.LoadedPackage{}, fmt.Errorf("internal/external manifest mismatch: external name=%q, internal name=%q", externalPkg.Name, internalPkg.Name)
+	}
+	if _, err := manifest.ValidateCompiled(externalPkg, manifest.ValidationModeDist); err != nil {
+		return source.LoadedPackage{}, fmt.Errorf("validate archive manifest for distribution: %w", err)
 	}
 
 	return source.LoadedPackage{

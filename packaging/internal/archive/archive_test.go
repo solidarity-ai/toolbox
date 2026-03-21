@@ -2,6 +2,7 @@ package archive
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"io/fs"
 	"os"
@@ -146,6 +147,41 @@ func TestLoadArchiveVerifiesSHA256(t *testing.T) {
 	}
 }
 
+func TestLoadArchiveRequiresSHA256(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	raw, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	pkg, err := manifest.ParsePkg(raw)
+	if err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	pkg.SHA256 = ""
+	writePkgManifest(t, result.ManifestPath, pkg)
+
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err == nil {
+		t.Fatalf("expected missing sha256 error")
+	}
+	if !strings.Contains(err.Error(), "missing sha256") {
+		t.Fatalf("expected missing sha256 error, got: %v", err)
+	}
+}
+
 func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 	t.Parallel()
 
@@ -177,6 +213,30 @@ func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mismatch") {
 		t.Fatalf("expected mismatch error, got: %v", err)
+	}
+}
+
+func TestLoadArchiveValidatesDistManifest(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackageWithoutIdempotent(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err == nil {
+		t.Fatalf("expected dist validation error")
+	}
+	if !strings.Contains(err.Error(), "idempotent") {
+		t.Fatalf("expected dist validation error mentioning idempotent, got: %v", err)
 	}
 }
 
@@ -276,6 +336,31 @@ func setupTestPackage(t *testing.T) string {
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
 	return dir
+}
+
+func setupTestPackageWithoutIdempotent(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
+	return dir
+}
+
+func writePkgManifest(t *testing.T, path string, pkg any) {
+	t.Helper()
+	raw, err := json.MarshalIndent(pkg, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func mustWriteFile(t *testing.T, path string, contents string) {

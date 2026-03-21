@@ -86,17 +86,33 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	}
 }
 
-// TestMCPServerListsToolsFromDistArchivePackage verifies that a dist archive
-// package can be loaded and its tools are visible through the MCP server.
-// TODO: extend to call the tool once the TS runtime supports in-memory fs.FS.
-func TestMCPServerListsToolsFromDistArchivePackage(t *testing.T) {
-	ts := tooltest.CalcDistToolset(t)
-	h := mcptest.NewHarness(t, mcpserver.New(ts))
+func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcDistToolset(t)))
 	names := h.ToolNames()
 
 	assertContains(t, names, "calc.add")
 	assertContains(t, names, "calc.sub")
 	assertContains(t, names, "calc.asyncAdd")
+
+	result := h.CallTool("calc.add", map[string]any{
+		"a": 3,
+		"b": 7,
+	})
+	if result.IsError {
+		if len(result.Content) > 0 {
+			text, _ := mcp.AsTextContent(result.Content[0])
+			t.Fatalf("expected non-error result, got: %s", text.Text)
+		}
+		t.Fatalf("expected non-error result")
+	}
+
+	structured := mcptest.StructuredMap(t, result)
+	if got := structured["tool"]; got != "calc.add" {
+		t.Fatalf("expected tool calc.add, got %#v", got)
+	}
+	if got := structured["result"]; got != "10" {
+		t.Fatalf("expected result 10, got %#v", got)
+	}
 }
 
 func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {

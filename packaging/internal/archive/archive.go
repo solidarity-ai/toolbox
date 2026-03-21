@@ -133,7 +133,7 @@ func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error)
 		}
 	}
 
-	// Decompress and extract
+	// Decompress and extract to in-memory FS
 	archiveFS, internalPkg, err := extractArchive(archiveData)
 	if err != nil {
 		return source.LoadedPackage{}, fmt.Errorf("extract archive: %w", err)
@@ -212,28 +212,26 @@ func addBytesToTar(tw *tar.Writer, name string, data []byte) error {
 }
 
 // archiveMemFS is an in-memory fs.FS built from a tar archive.
+// It implements fs.FS, fs.ReadFileFS, fs.StatFS, and fs.ReadDirFS.
 type archiveMemFS struct {
 	files map[string][]byte
 	dirs  map[string]struct{}
 }
 
 func (a *archiveMemFS) Open(name string) (fs.File, error) {
-	name = strings.TrimPrefix(name, "./")
-	if name == "" {
-		name = "."
-	}
+	name = cleanName(name)
 	if _, ok := a.dirs[name]; ok {
-		return &archiveDir{name: name, fs: a}, nil
+		return &memDir{name: name, entries: a.dirEntries(name)}, nil
 	}
 	data, ok := a.files[name]
 	if !ok {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
-	return &archiveFile{name: name, data: data, reader: bytes.NewReader(data)}, nil
+	return &memFile{name: filepath.Base(name), data: data, reader: bytes.NewReader(data)}, nil
 }
 
 func (a *archiveMemFS) ReadFile(name string) ([]byte, error) {
-	name = strings.TrimPrefix(name, "./")
+	name = cleanName(name)
 	data, ok := a.files[name]
 	if !ok {
 		return nil, &fs.PathError{Op: "read", Path: name, Err: fs.ErrNotExist}
@@ -241,41 +239,156 @@ func (a *archiveMemFS) ReadFile(name string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
-type archiveFile struct {
+func (a *archiveMemFS) Stat(name string) (fs.FileInfo, error) {
+	name = cleanName(name)
+	if _, ok := a.dirs[name]; ok {
+		return &memFileInfo{name: filepath.Base(name), isDir: true}, nil
+	}
+	data, ok := a.files[name]
+	if !ok {
+		return nil, &fs.PathError{Op: "stat", Path: name, Err: fs.ErrNotExist}
+	}
+	return &memFileInfo{name: filepath.Base(name), size: int64(len(data))}, nil
+}
+
+func (a *archiveMemFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	name = cleanName(name)
+	if _, ok := a.dirs[name]; !ok {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrNotExist}
+	}
+	return a.dirEntries(name), nil
+}
+
+func (a *archiveMemFS) dirEntries(dir string) []fs.DirEntry {
+	var entries []fs.DirEntry
+	seen := map[string]struct{}{}
+
+	prefix := dir + "/"
+	if dir == "." {
+		prefix = ""
+	}
+
+	for name, data := range a.files {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(name, prefix)
+		if strings.Contains(rest, "/") {
+			continue
+		}
+		if _, ok := seen[rest]; ok {
+			continue
+		}
+		seen[rest] = struct{}{}
+		entries = append(entries, &memDirEntry{name: rest, size: int64(len(data))})
+	}
+	for name := range a.dirs {
+		if name == dir {
+			continue
+		}
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(name, prefix)
+		if strings.Contains(rest, "/") {
+			continue
+		}
+		if _, ok := seen[rest]; ok {
+			continue
+		}
+		seen[rest] = struct{}{}
+		entries = append(entries, &memDirEntry{name: rest, isDir: true})
+	}
+	return entries
+}
+
+func cleanName(name string) string {
+	name = strings.TrimPrefix(name, "./")
+	if name == "" {
+		return "."
+	}
+	return name
+}
+
+type memFile struct {
 	name   string
 	data   []byte
 	reader *bytes.Reader
 }
 
-func (f *archiveFile) Stat() (fs.FileInfo, error) {
-	return &archiveFileInfo{name: filepath.Base(f.name), size: int64(len(f.data))}, nil
+func (f *memFile) Stat() (fs.FileInfo, error) {
+	return &memFileInfo{name: f.name, size: int64(len(f.data))}, nil
 }
-func (f *archiveFile) Read(b []byte) (int, error) { return f.reader.Read(b) }
-func (f *archiveFile) Close() error               { return nil }
+func (f *memFile) Read(b []byte) (int, error) { return f.reader.Read(b) }
+func (f *memFile) Close() error               { return nil }
 
-type archiveDir struct {
-	name string
-	fs   *archiveMemFS
+type memDir struct {
+	name    string
+	entries []fs.DirEntry
+	offset  int
 }
 
-func (d *archiveDir) Stat() (fs.FileInfo, error) {
-	return &archiveFileInfo{name: filepath.Base(d.name), isDir: true}, nil
+func (d *memDir) Stat() (fs.FileInfo, error) {
+	return &memFileInfo{name: filepath.Base(d.name), isDir: true}, nil
 }
-func (d *archiveDir) Read([]byte) (int, error) { return 0, fmt.Errorf("is a directory") }
-func (d *archiveDir) Close() error             { return nil }
+func (d *memDir) Read([]byte) (int, error) { return 0, fmt.Errorf("is a directory") }
+func (d *memDir) Close() error             { return nil }
+func (d *memDir) ReadDir(n int) ([]fs.DirEntry, error) {
+	if n <= 0 {
+		entries := d.entries[d.offset:]
+		d.offset = len(d.entries)
+		return entries, nil
+	}
+	if d.offset >= len(d.entries) {
+		return nil, io.EOF
+	}
+	end := d.offset + n
+	if end > len(d.entries) {
+		end = len(d.entries)
+	}
+	entries := d.entries[d.offset:end]
+	d.offset = end
+	if d.offset >= len(d.entries) {
+		return entries, io.EOF
+	}
+	return entries, nil
+}
 
-type archiveFileInfo struct {
+type memFileInfo struct {
 	name  string
 	size  int64
 	isDir bool
 }
 
-func (fi *archiveFileInfo) Name() string       { return fi.name }
-func (fi *archiveFileInfo) Size() int64        { return fi.size }
-func (fi *archiveFileInfo) Mode() fs.FileMode  { return 0o644 }
-func (fi *archiveFileInfo) IsDir() bool        { return fi.isDir }
-func (fi *archiveFileInfo) Sys() any           { return nil }
-func (fi *archiveFileInfo) ModTime() time.Time { return time.Time{} }
+func (fi *memFileInfo) Name() string { return fi.name }
+func (fi *memFileInfo) Size() int64  { return fi.size }
+func (fi *memFileInfo) Mode() fs.FileMode {
+	if fi.isDir {
+		return fs.ModeDir | 0o755
+	}
+	return 0o644
+}
+func (fi *memFileInfo) IsDir() bool        { return fi.isDir }
+func (fi *memFileInfo) Sys() any           { return nil }
+func (fi *memFileInfo) ModTime() time.Time { return time.Time{} }
+
+type memDirEntry struct {
+	name  string
+	size  int64
+	isDir bool
+}
+
+func (de *memDirEntry) Name() string { return de.name }
+func (de *memDirEntry) IsDir() bool  { return de.isDir }
+func (de *memDirEntry) Type() fs.FileMode {
+	if de.isDir {
+		return fs.ModeDir
+	}
+	return 0
+}
+func (de *memDirEntry) Info() (fs.FileInfo, error) {
+	return &memFileInfo{name: de.name, size: de.size, isDir: de.isDir}, nil
+}
 
 func extractArchive(data []byte) (*archiveMemFS, tooldef.Package, error) {
 	zr, err := zstd.NewReader(bytes.NewReader(data))
@@ -315,7 +428,6 @@ func extractArchive(data []byte) (*archiveMemFS, tooldef.Package, error) {
 			}
 			memFS.files[name] = content
 
-			// Track directories
 			dir := filepath.Dir(name)
 			for dir != "." {
 				memFS.dirs[dir] = struct{}{}

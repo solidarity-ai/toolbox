@@ -69,7 +69,6 @@ func TestDistGoldens(t *testing.T) {
 	}
 }
 
-
 func copyOrFail(t *testing.T, src, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)

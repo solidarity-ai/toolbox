@@ -68,6 +68,9 @@ func allowedTypeScriptFiles(dir string, pkg tooldef.Package) map[string]struct{}
 	for _, tool := range pkg.Tools {
 		out[cleanFSPath(tool.EntryTS)] = struct{}{}
 	}
+	for _, execPath := range pkg.Executables {
+		out[cleanFSPath(execPath)] = struct{}{}
+	}
 	for _, glob := range pkg.AdditionalTypeScriptGlobs {
 		matches, err := doublestar.FilepathGlob(filepath.Join(dir, filepath.FromSlash(glob)))
 		if err != nil {

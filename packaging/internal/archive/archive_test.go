@@ -215,6 +215,55 @@ func TestArchiveContainsInternalManifest(t *testing.T) {
 	}
 }
 
+func TestPackBundlesExecutables(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "name": "wasm-pkg",
+  "runtime": "typescript+wasix-sandbox",
+  "executables": { "guest": "dist/guest.wasm" },
+  "tools": [
+    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "canDestruct" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "run.ts"), `export default function tool() { return "ok"; }`)
+	mustWriteFile(t, filepath.Join(dir, "dist", "guest.wasm"), "fake-wasm-binary")
+
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err != nil {
+		t.Fatalf("LoadArchive() error: %v", err)
+	}
+
+	// The WASM executable must be readable from the archive
+	content, err := fs.ReadFile(archiveLoaded.Files, "dist/guest.wasm")
+	if err != nil {
+		t.Fatalf("executable not found in archive: %v", err)
+	}
+	if string(content) != "fake-wasm-binary" {
+		t.Fatalf("executable content mismatch: got %q", string(content))
+	}
+
+	// The executables map must be present in the package
+	if archiveLoaded.Package.Executables == nil {
+		t.Fatalf("expected executables in loaded package")
+	}
+	if archiveLoaded.Package.Executables["guest"] != "dist/guest.wasm" {
+		t.Fatalf("expected executable guest=dist/guest.wasm, got %q", archiveLoaded.Package.Executables["guest"])
+	}
+}
+
 func setupTestPackage(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

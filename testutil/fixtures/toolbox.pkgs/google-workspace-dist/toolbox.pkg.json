@@ -1,7 +1,7 @@
 {
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "ec41d5755c774feab6a4285eea00b8a3cbb0b7a9762a593d2c494a8a67ae52a6",
+  "sha256": "2272e578501b1c428ae99d0b092d438afcc5a4e21ec0b23c5191b612f83112d9",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },

@@ -195,16 +195,15 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 
 func requireTSWasmerArtifacts(t *testing.T) {
 	t.Helper()
+	tooltest.EnsureSandboxBinary(t)
 
 	paths := []string{
 		filepath.Join(gwsFixtureDir(), "toolbox.devpkg.json"),
 		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
-		filepath.Join("..", "wasixcli-sandbox", "target", "debug", "wasixcli-sandbox"),
 	}
-
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
-			t.Skipf("tswasixcli artifacts not ready: missing %s", p)
+			t.Fatalf("fixture artifact missing: %s", p)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package invoke
 
 import (
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -107,8 +108,13 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				return quickts.ExecResult{}, fmt.Errorf("tool %s does not declare executable %q", tool.Name, binary)
 			}
 
+			wasmPath, err := resolveWasmPath(tool.TSWasm, relativePath)
+			if err != nil {
+				return quickts.ExecResult{}, fmt.Errorf("resolve wasm %q: %w", binary, err)
+			}
+
 			result, err := tswasixcli.Run(tswasixcli.Request{
-				WasmPath:    filepath.Join(tool.TSWasm.PackageRoot, relativePath),
+				WasmPath:    wasmPath,
 				Args:        execArgs,
 				VFSSockPath: sockPath,
 			})
@@ -147,4 +153,30 @@ func startVFSServer(memFS *vfs.MemFS) (string, func(), error) {
 	}
 
 	return sockPath, cleanup, nil
+}
+
+// resolveWasmPath returns a filesystem path to the WASM binary. When the
+// package was loaded from disk (PackageRoot is set), it joins the paths.
+// When loaded from an archive (PackageRoot is empty), it extracts the binary
+// from the in-memory Files to a temp file.
+func resolveWasmPath(def *tooldef.TSWasmToolDef, relativePath string) (string, error) {
+	if def.PackageRoot != "" {
+		return filepath.Join(def.PackageRoot, relativePath), nil
+	}
+	data, err := fs.ReadFile(def.Files, relativePath)
+	if err != nil {
+		return "", fmt.Errorf("read %s from archive fs: %w", relativePath, err)
+	}
+	tmp, err := os.CreateTemp("", "toolbox-wasm-*.wasm")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
 }

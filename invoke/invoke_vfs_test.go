@@ -35,7 +35,7 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 		t.Skipf("vfs-guest.wasm not found: %v", err)
 	}
 
-	loaded, err := packaging.LoadSourcePackage(fixtureDir)
+	loaded, err := packaging.LoadDev(fixtureDir)
 	if err != nil {
 		t.Fatalf("load vfs-test package: %v", err)
 	}

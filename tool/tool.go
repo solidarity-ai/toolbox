@@ -6,6 +6,7 @@ import "io/fs"
 type Package struct {
 	Name                      string        `json:"name"`
 	Runtime                   ToolRuntime   `json:"runtime"`
+	SHA256                    string        `json:"sha256,omitempty"`
 	AdditionalTypeScriptGlobs []string      `json:"additionalTypeScriptGlobs,omitempty"`
 	Tools                     []PackageTool `json:"tools"`
 }

@@ -15,7 +15,7 @@ type ResolvedToolset struct {
 // Builder incrementally assembles a toolset from source package directories.
 //
 // For now it only records loaded packages from
-// toolbox.pkg.json. Tool selection and binding come later.
+// toolbox.devpkg.json. Tool selection and binding come later.
 type Builder struct {
 	packages []packaging.LoadedPackage
 }
@@ -27,9 +27,19 @@ func New() *Builder {
 
 // AddFromDir loads a package rooted at dir.
 //
-// A directory is treated as a package iff it contains toolbox.pkg.json.
+// A directory is treated as a package iff it contains toolbox.devpkg.json.
 func (b *Builder) AddFromDir(dir string) error {
-	pkg, err := packaging.LoadSourcePackage(dir)
+	pkg, err := packaging.LoadDev(dir)
+	if err != nil {
+		return err
+	}
+	b.packages = append(b.packages, pkg)
+	return nil
+}
+
+// AddFromArchive loads a package from a .toolbox.pkg archive and its manifest.
+func (b *Builder) AddFromArchive(archivePath, manifestPath string) error {
+	pkg, err := packaging.LoadArchive(archivePath, manifestPath)
 	if err != nil {
 		return err
 	}

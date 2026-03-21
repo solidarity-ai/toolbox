@@ -9,6 +9,7 @@ require (
 	github.com/fastschema/qjs v0.0.6
 	github.com/google/go-cmp v0.7.0
 	github.com/google/jsonschema-go v0.4.2
+	github.com/klauspost/compress v1.18.5
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
 	github.com/vmihailenco/msgpack/v5 v5.4.1

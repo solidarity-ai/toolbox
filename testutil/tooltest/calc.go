@@ -38,10 +38,32 @@ func CalcToolset(t testing.TB) toolset.ResolvedToolset {
 	return builder.Resolve()
 }
 
+// CalcDistToolset loads the calc-dist golden fixture (archive) into a resolved toolset.
+func CalcDistToolset(t testing.TB) toolset.ResolvedToolset {
+	t.Helper()
+
+	distDir := calcDistFixtureDir()
+	builder := toolset.New()
+	archivePath := filepath.Join(distDir, "calc.toolbox.pkg")
+	manifestPath := filepath.Join(distDir, packaging.PkgManifestFilename)
+	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
+		t.Fatalf("add calc-dist archive: %v", err)
+	}
+	return builder.Resolve()
+}
+
+func calcDistFixtureDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("tooltest: runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc-dist")
+}
+
 func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
 	t.Helper()
 
-	pkg, err := packaging.LoadSourcePackage(calcFixtureDir())
+	pkg, err := packaging.LoadDev(calcFixtureDir())
 	if err != nil {
 		t.Fatalf("load calc package: %v", err)
 	}

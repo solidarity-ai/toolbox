@@ -1,4 +1,4 @@
-package packaging
+package packaging_test
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/packaging"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -16,7 +17,7 @@ type inferAccessModeTestCase struct {
 	wantWarnings int
 }
 
-func TestLoadPackageFromDirWithModeInfersAccessModeInDev(t *testing.T) {
+func TestLoadDevWithModeInfersAccessModeInDev(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range devAccessModeInferenceCases() {
@@ -25,22 +26,22 @@ func TestLoadPackageFromDirWithModeInfersAccessModeInDev(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			manifestPath := filepath.Join(dir, "toolbox.pkg.json")
+			manifestPath := filepath.Join(dir, packaging.DevManifestFilename)
 			if err := os.WriteFile(manifestPath, []byte(tt.manifest), 0o644); err != nil {
 				t.Fatalf("write manifest: %v", err)
 			}
 
-			result, err := LoadPackageFromDirWithMode(dir, ValidationModeDev)
+			result, err := packaging.LoadDevWithMode(dir, packaging.ValidationModeDev)
 			if err != nil {
 				t.Fatalf("load package dir: %v", err)
 			}
 			if len(result.Warnings) != tt.wantWarnings {
 				t.Fatalf("expected %d warnings, got %d", tt.wantWarnings, len(result.Warnings))
 			}
-			if len(result.Package.Tools) != 1 {
-				t.Fatalf("expected 1 tool, got %d", len(result.Package.Tools))
+			if len(result.Loaded.Package.Tools) != 1 {
+				t.Fatalf("expected 1 tool, got %d", len(result.Loaded.Package.Tools))
 			}
-			if got := result.Package.Tools[0].AccessMode; got != tt.wantMode {
+			if got := result.Loaded.Package.Tools[0].AccessMode; got != tt.wantMode {
 				t.Fatalf("expected inferred access mode %q, got %q", tt.wantMode, got)
 			}
 		})

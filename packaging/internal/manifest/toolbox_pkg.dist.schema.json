@@ -19,6 +19,9 @@
         "minLength": 1
       }
     },
+    "sha256": {
+      "type": "string"
+    },
     "executables": {
       "type": "object",
       "additionalProperties": {

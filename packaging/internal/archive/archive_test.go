@@ -1,0 +1,240 @@
+package archive
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/solidarity-ai/toolbox/packaging/internal/manifest"
+	"github.com/solidarity-ai/toolbox/packaging/internal/source"
+)
+
+func TestPack(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	// Archive file should exist
+	if _, err := os.Stat(result.ArchivePath); err != nil {
+		t.Fatalf("archive file not found: %v", err)
+	}
+
+	// External manifest should exist
+	if _, err := os.Stat(result.ManifestPath); err != nil {
+		t.Fatalf("external manifest not found: %v", err)
+	}
+
+	// Archive should have .toolbox.pkg extension
+	if filepath.Ext(result.ArchivePath) != ".pkg" {
+		if !strings.HasSuffix(result.ArchivePath, ".toolbox.pkg") {
+			t.Fatalf("expected .toolbox.pkg extension, got %q", result.ArchivePath)
+		}
+	}
+
+	// External manifest should have sha256
+	raw, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read external manifest: %v", err)
+	}
+	pkg, err := manifest.ParsePkg(raw)
+	if err != nil {
+		t.Fatalf("parse external manifest: %v", err)
+	}
+	if pkg.SHA256 == "" {
+		t.Fatalf("expected sha256 in external manifest")
+	}
+
+	// Verify sha256 matches actual archive
+	archiveData, err := os.ReadFile(result.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	h := sha256.Sum256(archiveData)
+	expectedHash := hex.EncodeToString(h[:])
+	if pkg.SHA256 != expectedHash {
+		t.Fatalf("sha256 mismatch: manifest=%q, actual=%q", pkg.SHA256, expectedHash)
+	}
+}
+
+func TestPackRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	// Load the archive back
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err != nil {
+		t.Fatalf("LoadArchive() error: %v", err)
+	}
+
+	// Package metadata should match
+	if loaded.Package.Name != archiveLoaded.Package.Name {
+		t.Fatalf("name mismatch: want %q, got %q", loaded.Package.Name, archiveLoaded.Package.Name)
+	}
+	if loaded.Package.Runtime != archiveLoaded.Package.Runtime {
+		t.Fatalf("runtime mismatch: want %q, got %q", loaded.Package.Runtime, archiveLoaded.Package.Runtime)
+	}
+	if len(archiveLoaded.Package.Tools) != len(loaded.Package.Tools) {
+		t.Fatalf("tools count mismatch: want %d, got %d", len(loaded.Package.Tools), len(archiveLoaded.Package.Tools))
+	}
+
+	// Files from the archive should be readable
+	content, err := fs.ReadFile(archiveLoaded.Files, "tools/calc.add.ts")
+	if err != nil {
+		t.Fatalf("read tool from archive: %v", err)
+	}
+	if !strings.Contains(string(content), "function") {
+		t.Fatalf("expected tool content, got %q", string(content))
+	}
+}
+
+func TestLoadArchiveVerifiesSHA256(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	// Tamper with the archive
+	archiveData, err := os.ReadFile(result.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	archiveData[len(archiveData)-1] ^= 0xFF
+	if err := os.WriteFile(result.ArchivePath, archiveData, 0o644); err != nil {
+		t.Fatalf("write tampered archive: %v", err)
+	}
+
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err == nil {
+		t.Fatalf("expected sha256 verification error")
+	}
+	if !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("expected sha256 error, got: %v", err)
+	}
+}
+
+func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	// Modify external manifest name to mismatch
+	raw, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	tampered := strings.Replace(string(raw), `"calc"`, `"tampered"`, 1)
+	if err := os.WriteFile(result.ManifestPath, []byte(tampered), 0o644); err != nil {
+		t.Fatalf("write tampered manifest: %v", err)
+	}
+
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err == nil {
+		t.Fatalf("expected manifest mismatch error")
+	}
+	if !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("expected mismatch error, got: %v", err)
+	}
+}
+
+func TestArchiveContainsInternalManifest(t *testing.T) {
+	t.Parallel()
+
+	dir := setupTestPackage(t)
+	loaded, err := source.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := Pack(loaded, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	if err != nil {
+		t.Fatalf("LoadArchive() error: %v", err)
+	}
+
+	// Internal manifest should be readable as a file
+	internalManifest, err := fs.ReadFile(archiveLoaded.Files, manifest.PkgManifestFilename)
+	if err != nil {
+		t.Fatalf("read internal manifest from archive: %v", err)
+	}
+
+	internalPkg, err := manifest.ParsePkg(internalManifest)
+	if err != nil {
+		t.Fatalf("parse internal manifest: %v", err)
+	}
+	if internalPkg.Name != "calc" {
+		t.Fatalf("expected internal manifest name=calc, got %q", internalPkg.Name)
+	}
+}
+
+func setupTestPackage(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
+	return dir
+}
+
+func mustWriteFile(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}

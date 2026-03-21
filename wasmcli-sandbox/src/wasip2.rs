@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::env;
+use tempfile::TempDir;
+use std::path::{Path, PathBuf};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, pipe::MemoryOutputPipe};
@@ -63,11 +66,10 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
     let vfs = if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
         let proxy = proxy_fs::ProxyFs::connect(&socket_path)
             .context("connect to VFS proxy")?;
-        let work_dir = std::path::PathBuf::from(format!("/dev/shm/toolbox-vfs-{}", std::process::id()));
-        std::fs::create_dir_all(&work_dir).context("create /dev/shm work dir")?;
-        sync_from_proxy(&proxy.conn, &work_dir).context("sync from VFS proxy")?;
+        let work_dir = create_work_dir().context("create host work dir")?;
+        sync_from_proxy(&proxy.conn, work_dir.path()).context("sync from VFS proxy")?;
         wasi_builder.preopened_dir(
-            &work_dir,
+            work_dir.path(),
             "/work",
             DirPerms::all(),
             FilePerms::all(),
@@ -97,8 +99,7 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
 
     // Sync files back using the same connection.
     if let Some((proxy, work_dir)) = &vfs {
-        sync_to_proxy(&proxy.conn, work_dir).context("sync to VFS proxy")?;
-        let _ = std::fs::remove_dir_all(work_dir);
+        sync_to_proxy(&proxy.conn, work_dir.path()).context("sync to VFS proxy")?;
     }
 
     let stdout = stdout_pipe.contents();
@@ -114,6 +115,13 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
         }
         Err(err) => Err(err).context("run wasm component"),
     }
+}
+
+fn create_work_dir() -> Result<TempDir> {
+    tempfile::Builder::new()
+        .prefix("toolbox-vfs-")
+        .tempdir()
+        .context("create temporary work dir")
 }
 
 /// Download all files from VFS proxy into a host directory (recursive).
@@ -182,6 +190,37 @@ fn sync_from_proxy_dir(conn: &proxy_fs::Conn, vfs_dir: &str, host_dir: &std::pat
 /// Upload all files from a host directory back to the VFS proxy (recursive).
 #[allow(dead_code)]
 fn sync_to_proxy(conn: &proxy_fs::Conn, host_dir: &std::path::Path) -> Result<()> {
+    let mut host_snapshot = HashMap::new();
+    collect_host_snapshot(host_dir, Path::new(""), &mut host_snapshot)?;
+
+    let mut proxy_snapshot = HashMap::new();
+    collect_proxy_snapshot(conn, "/", Path::new(""), &mut proxy_snapshot)?;
+
+    let mut stale_paths: Vec<(PathBuf, bool)> = proxy_snapshot
+        .iter()
+        .filter_map(|(path, is_dir)| match host_snapshot.get(path) {
+            Some(local_is_dir) if local_is_dir == is_dir => None,
+            _ => Some((path.clone(), *is_dir)),
+        })
+        .collect();
+
+    stale_paths.sort_by(|(a, a_is_dir), (b, b_is_dir)| {
+        b.components()
+            .count()
+            .cmp(&a.components().count())
+            .then_with(|| b_is_dir.cmp(a_is_dir))
+    });
+
+    for (path, is_dir) in stale_paths {
+        let vfs_path = rel_path_to_vfs(&path);
+        let req = if is_dir {
+            proxy_fs::WireRequest::path_op(proxy_fs::OP_REMOVE_DIR, Path::new(&vfs_path))
+        } else {
+            proxy_fs::WireRequest::path_op(proxy_fs::OP_REMOVE_FILE, Path::new(&vfs_path))
+        };
+        let _ = conn.raw_call(&req);
+    }
+
     sync_to_proxy_dir(conn, host_dir, "/")
 }
 
@@ -232,6 +271,57 @@ fn sync_to_proxy_dir(conn: &proxy_fs::Conn, host_dir: &std::path::Path, vfs_pref
         }
     }
     Ok(())
+}
+
+fn collect_host_snapshot(
+    host_dir: &Path,
+    rel_prefix: &Path,
+    snapshot: &mut HashMap<PathBuf, bool>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(host_dir).context("read host dir")? {
+        let entry = entry?;
+        let rel_path = rel_prefix.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            snapshot.insert(rel_path.clone(), true);
+            collect_host_snapshot(&entry.path(), &rel_path, snapshot)?;
+        } else if file_type.is_file() {
+            snapshot.insert(rel_path, false);
+        }
+    }
+    Ok(())
+}
+
+fn collect_proxy_snapshot(
+    conn: &proxy_fs::Conn,
+    vfs_dir: &str,
+    rel_prefix: &Path,
+    snapshot: &mut HashMap<PathBuf, bool>,
+) -> Result<()> {
+    let resp = conn
+        .raw_call(&proxy_fs::WireRequest::path_op(proxy_fs::OP_READ_DIR, Path::new(vfs_dir)))
+        .with_context(|| format!("read VFS dir {vfs_dir}"))?;
+
+    for entry in &resp.entries {
+        let rel_path = rel_prefix.join(&entry.name);
+        if entry.meta.is_dir {
+            snapshot.insert(rel_path.clone(), true);
+            let child_vfs_path = if vfs_dir == "/" {
+                format!("/{}", entry.name)
+            } else {
+                format!("{}/{}", vfs_dir, entry.name)
+            };
+            collect_proxy_snapshot(conn, &child_vfs_path, &rel_path, snapshot)?;
+        } else if entry.meta.is_file {
+            snapshot.insert(rel_path, false);
+        }
+    }
+
+    Ok(())
+}
+
+fn rel_path_to_vfs(path: &Path) -> String {
+    format!("/{}", path.to_string_lossy())
 }
 
 #[cfg(test)]
@@ -338,6 +428,43 @@ mod tests {
         sync_to_proxy(&conn, host_dir.path()).unwrap();
 
         assert_eq!(server.read_file("/output.txt").unwrap(), b"from host");
+    }
+
+    #[test]
+    fn sync_to_removes_deleted_files_and_dirs() {
+        let server = MockVfsServer::start();
+        server.add_dir("/stale");
+        server.add_file("/stale/file.txt", b"old");
+        server.add_file("/orphan.txt", b"orphan");
+        let conn = proxy_fs::Conn::new(server.socket_path()).unwrap();
+        let host_dir = tempfile::tempdir().unwrap();
+
+        sync_from_proxy(&conn, host_dir.path()).unwrap();
+        std::fs::remove_file(host_dir.path().join("orphan.txt")).unwrap();
+        std::fs::remove_file(host_dir.path().join("stale").join("file.txt")).unwrap();
+        std::fs::remove_dir(host_dir.path().join("stale")).unwrap();
+
+        sync_to_proxy(&conn, host_dir.path()).unwrap();
+
+        assert!(!server.exists("/orphan.txt"));
+        assert!(!server.exists("/stale"));
+    }
+
+    #[test]
+    fn sync_to_reflects_renames() {
+        let server = MockVfsServer::start();
+        server.add_dir("/old");
+        server.add_file("/old/file.txt", b"payload");
+        let conn = proxy_fs::Conn::new(server.socket_path()).unwrap();
+        let host_dir = tempfile::tempdir().unwrap();
+
+        sync_from_proxy(&conn, host_dir.path()).unwrap();
+        std::fs::rename(host_dir.path().join("old"), host_dir.path().join("new")).unwrap();
+
+        sync_to_proxy(&conn, host_dir.path()).unwrap();
+
+        assert!(!server.exists("/old"));
+        assert_eq!(server.read_file("/new/file.txt").unwrap(), b"payload");
     }
 
     #[test]

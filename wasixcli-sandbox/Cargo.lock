@@ -3518,6 +3518,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasixcli-sandbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "socket2 0.5.10",
+ "tokio",
+ "wasmer",
+ "wasmer-types",
+ "wasmer-wasix",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3951,22 +3967,6 @@ dependencies = [
  "wasmer",
  "wasmer-derive",
  "wasmer-types",
-]
-
-[[package]]
-name = "wasixcli-sandbox"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "socket2 0.5.10",
- "tokio",
- "wasmer",
- "wasmer-types",
- "wasmer-wasix",
 ]
 
 [[package]]

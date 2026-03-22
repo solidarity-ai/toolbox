@@ -1,7 +1,7 @@
 {
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "dac7c523b71c550955b29e27d9cfcbcec1e3250f8d4be841a7383cefe7ff9259",
+  "sha256": "23bd6626752b9e93bf27d78449beaf085e55d0253359b7096d9d3cca280f9cc8",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",

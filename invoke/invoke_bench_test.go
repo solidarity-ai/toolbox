@@ -10,7 +10,7 @@ import (
 
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
-	"github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/vfs"
@@ -149,9 +149,10 @@ func benchWASMGuestCold(b *testing.B, fixtureDir string) {
 		go srv.Serve()
 		b.StartTimer()
 
-		result, err := tswasixcli.Run(tswasixcli.Request{
+		result, err := tswasmcli.Run(tswasmcli.Request{
 			WasmPath:    wasmPath,
 			VFSSockPath: sockPath,
+			Runtime:     "wasix-cli",
 		})
 
 		b.StopTimer()
@@ -160,7 +161,7 @@ func benchWASMGuestCold(b *testing.B, fixtureDir string) {
 		b.StartTimer()
 
 		if err != nil {
-			b.Fatalf("tswasixcli.Run: %v", err)
+			b.Fatalf("tswasmcli.Run: %v", err)
 		}
 		if result.ExitCode != 0 {
 			b.Fatalf("guest exited %d: stderr=%q", result.ExitCode, result.Stderr)
@@ -192,9 +193,10 @@ func benchWASMGuestCached(b *testing.B, fixtureDir string) {
 		go srv.Serve()
 		b.StartTimer()
 
-		result, err := tswasixcli.Run(tswasixcli.Request{
+		result, err := tswasmcli.Run(tswasmcli.Request{
 			WasmPath:    wasmPath,
 			VFSSockPath: sockPath,
+			Runtime:     "wasix-cli",
 		})
 
 		b.StopTimer()
@@ -203,7 +205,7 @@ func benchWASMGuestCached(b *testing.B, fixtureDir string) {
 		b.StartTimer()
 
 		if err != nil {
-			b.Fatalf("tswasixcli.Run: %v", err)
+			b.Fatalf("tswasmcli.Run: %v", err)
 		}
 		if result.ExitCode != 0 {
 			b.Fatalf("guest exited %d: stderr=%q", result.ExitCode, result.Stderr)
@@ -230,12 +232,13 @@ func warmUpWASMCache(b *testing.B, wasmPath string) {
 		os.Remove(sockPath)
 	}()
 
-	result, err := tswasixcli.Run(tswasixcli.Request{
+	result, err := tswasmcli.Run(tswasmcli.Request{
 		WasmPath:    wasmPath,
 		VFSSockPath: sockPath,
+		Runtime:     "wasix-cli",
 	})
 	if err != nil {
-		b.Fatalf("warmup tswasixcli.Run: %v", err)
+		b.Fatalf("warmup tswasmcli.Run: %v", err)
 	}
 	if result.ExitCode != 0 {
 		b.Fatalf("warmup failed: stderr=%q", result.Stderr)

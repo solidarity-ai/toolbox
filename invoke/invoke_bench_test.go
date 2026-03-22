@@ -272,6 +272,47 @@ func benchFullRoundTrip(b *testing.B, fixtureDir string) {
 	}
 }
 
+// BenchmarkWasip2CLIVFSRoundTrip benchmarks the wasip2-cli invocation path
+// with VFS round-trip through the full invoke stack.
+func BenchmarkWasip2CLIVFSRoundTrip(b *testing.B) {
+	fixtureDir := vfsWasip2FixtureDirBench(b)
+	requireWasmArtifacts(b, fixtureDir)
+
+	loaded, err := packaging.LoadDev(fixtureDir)
+	if err != nil {
+		b.Fatalf("load vfs-wasip2 package: %v", err)
+	}
+	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+
+	b.ResetTimer()
+	for range b.N {
+		memFS := vfs.NewMemFS()
+		if err := memFS.WriteFile("/input.txt", []byte("hello from bench")); err != nil {
+			b.Fatalf("pre-populate: %v", err)
+		}
+		result, err := invoke.RunWithVFS(resolved, "vfs-wasip2.run", map[string]any{}, memFS)
+		if err != nil {
+			b.Fatalf("invoke.RunWithVFS: %v", err)
+		}
+		if result != "got: hello from bench" {
+			b.Fatalf("unexpected result: %q", result)
+		}
+	}
+}
+
+func requireWasmArtifacts(tb testing.TB, fixtureDir string) {
+	tb.Helper()
+	wasmGlob, _ := filepath.Glob(filepath.Join(fixtureDir, "dist", "*.wasm"))
+	if len(wasmGlob) == 0 {
+		tb.Skipf("wasm fixture not found in %s", fixtureDir)
+	}
+}
+
+func vfsWasip2FixtureDirBench(b *testing.B) string {
+	b.Helper()
+	return filepath.Join(mustRepoRoot(b), "testutil", "fixtures", "toolbox.pkgs", "vfs-wasip2")
+}
+
 // writeReq sends a framed msgpack request over the connection (same wire
 // format as vfs.writeFrame, which is unexported).
 func writeReq(b *testing.B, conn net.Conn, req vfs.Request) {

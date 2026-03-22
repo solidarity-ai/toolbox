@@ -12,11 +12,11 @@ Measured on AMD Ryzen AI 9 HX 370, Linux 6.19, 2026-03-22.
 
 | Benchmark | ms/op | ops/sec | B/op | allocs/op |
 |---|---:|---:|---:|---:|
-| VFSServerOnly | 0.07 | 15,262 | 5,333 | 102 |
-| WASMGuestCold (wasix) | 124 | 8.1 | 37,380 | 252 |
-| WASMGuestCached (wasix) | 117 | 8.5 | 36,523 | 251 |
-| FullRoundTrip (wasix) | 131 | 7.6 | 7,457,679 | 10,910 |
-| **Wasip2CLIVFSRoundTrip** | **27** | **37.3** | **4,939,251** | **6,755** |
+| VFSServerOnly | 0.07 | 14,926 | 5,335 | 102 |
+| WASMGuestCold (wasix) | 119 | 8.4 | 37,346 | 252 |
+| WASMGuestCached (wasix) | 14 | 73.3 | 36,827 | 251 |
+| FullRoundTrip (wasix) | 21 | 47.5 | 4,823,552 | 6,695 |
+| Wasip2CLIVFSRoundTrip | 26 | 38.3 | 4,936,272 | 6,755 |
 
 ### Raw output
 
@@ -25,18 +25,19 @@ goos: linux
 goarch: amd64
 cpu: AMD Ryzen AI 9 HX 370 w/ Radeon 890M
 
-BenchmarkVFSRoundTrip/VFSServerOnly-18         18508       65535 ns/op      5333 B/op      102 allocs/op
-BenchmarkVFSRoundTrip/WASMGuestCold-18             9   124083781 ns/op     37380 B/op      252 allocs/op
-BenchmarkVFSRoundTrip/WASMGuestCached-18           9   117142131 ns/op     36523 B/op      251 allocs/op
-BenchmarkVFSRoundTrip/FullRoundTrip-18             8   131016445 ns/op   7457679 B/op    10910 allocs/op
-BenchmarkWasip2CLIVFSRoundTrip-18                 43    26803046 ns/op   4939251 B/op     6755 allocs/op
+BenchmarkVFSRoundTrip/VFSServerOnly-18         17439       67029 ns/op      5335 B/op      102 allocs/op
+BenchmarkVFSRoundTrip/WASMGuestCold-18             9   118741145 ns/op     37346 B/op      252 allocs/op
+BenchmarkVFSRoundTrip/WASMGuestCached-18          84    13639727 ns/op     36827 B/op      251 allocs/op
+BenchmarkVFSRoundTrip/FullRoundTrip-18            49    21068685 ns/op   4823552 B/op     6695 allocs/op
+BenchmarkWasip2CLIVFSRoundTrip-18                 43    26108097 ns/op   4936272 B/op     6755 allocs/op
 ```
 
 ### Key takeaways
 
-- **Wasip2 VFS is ~5x faster** than wasix full round-trip (27ms vs 131ms) due to smaller component and Wasmtime's compilation cache.
+- **Wasix caching gives ~9x speedup**: cold 119ms → cached 14ms (Cranelift compilation → Module::deserialize).
+- **Wasix and wasip2 are comparable when cached**: wasix 21ms vs wasip2 26ms for full VFS round-trip.
 - **VFS server overhead is negligible** at 0.07ms — the bottleneck is WASM compilation/startup.
-- **Wasix cold vs cached** shows only marginal improvement (124ms → 117ms) because module deserialization is nearly as expensive as compilation on this platform.
+- **Cold compilation dominates**: 119ms for wasix (Cranelift), both runtimes are sub-30ms once cached.
 
 ## What each benchmark measures
 

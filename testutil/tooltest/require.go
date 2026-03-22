@@ -8,25 +8,25 @@ import (
 	"sync"
 	"testing"
 
-	tswasixcli "github.com/solidarity-ai/toolbox/runtime/tswasixcli"
+	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 )
 
 var buildOnce sync.Once
 var buildErr error
 
-// EnsureSandboxBinary builds the wasixcli-sandbox binary if it doesn't exist.
+// EnsureSandboxBinary builds the wasmcli-sandbox binary if it doesn't exist.
 // Safe to call from multiple tests concurrently — only builds once.
 func EnsureSandboxBinary(t testing.TB) {
 	t.Helper()
 
-	binaryPath := tswasixcli.ResolveHostBinaryPathForTest()
+	binaryPath := tswasmcli.ResolveHostBinaryPathForTest()
 	if _, err := os.Stat(binaryPath); err == nil {
 		return // already built
 	}
 
 	cargoManifest := sandboxCargoPath()
 	if _, err := os.Stat(cargoManifest); err != nil {
-		t.Fatalf("wasixcli-sandbox Cargo.toml not found at %s", cargoManifest)
+		t.Fatalf("wasmcli-sandbox Cargo.toml not found at %s", cargoManifest)
 	}
 
 	buildOnce.Do(func() {
@@ -36,7 +36,7 @@ func EnsureSandboxBinary(t testing.TB) {
 		buildErr = cmd.Run()
 	})
 	if buildErr != nil {
-		t.Fatalf("failed to build wasixcli-sandbox: %v", buildErr)
+		t.Fatalf("failed to build wasmcli-sandbox: %v", buildErr)
 	}
 }
 
@@ -45,5 +45,5 @@ func sandboxCargoPath() string {
 	if !ok {
 		panic("tooltest: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "..", "wasixcli-sandbox", "Cargo.toml")
+	return filepath.Join(filepath.Dir(file), "..", "..", "wasmcli-sandbox", "Cargo.toml")
 }

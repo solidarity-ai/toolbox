@@ -35,8 +35,15 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    let wasm_bytes = std::fs::read(&cli.wasm_path)
-        .with_context(|| format!("read wasm from {}", cli.wasm_path))?;
+    let wasm_bytes = if cli.wasm_path == "-" {
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
+            .context("read wasm from stdin")?;
+        buf
+    } else {
+        std::fs::read(&cli.wasm_path)
+            .with_context(|| format!("read wasm from {}", cli.wasm_path))?
+    };
 
     match cli.runtime.as_str() {
         "wasix-cli" => wasix::run(&wasm_bytes, &cli.args),

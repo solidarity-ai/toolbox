@@ -28,24 +28,32 @@ const (
 	AccessModeCanDestruct AccessMode = "canDestruct"
 )
 
+// ResourceParam is a resource parameter inferred from the tool entry path.
+type ResourceParam struct {
+	Name        string `json:"name"`         // e.g., "account_id"
+	BindingName string `json:"binding_name"` // canonical name for cross-package binding
+}
+
 type PackageTool struct {
-	EntryTS      string         `json:"entry_ts"`
-	Idempotent   *bool          `json:"idempotent,omitempty"`
-	AccessMode   AccessMode     `json:"accessMode,omitempty"`
-	Description  string         `json:"description,omitempty"`
-	ParamsSchema map[string]any `json:"paramsSchema,omitempty"`
+	EntryTS        string          `json:"entry_ts"`
+	Idempotent     *bool           `json:"idempotent,omitempty"`
+	AccessMode     AccessMode      `json:"accessMode,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	ParamsSchema   map[string]any  `json:"paramsSchema,omitempty"`
+	ResourceParams []ResourceParam `json:"resourceParams,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current
 // outside-in seams. It combines static package identity with the concrete
 // executable artifact for one visible tool.
 type ResolvedTool struct {
-	Name         string
-	Description  string
-	ParamsSchema map[string]any
-	Package      *Package
-	TS           *TSToolDef
-	TSWasm       *TSWasmToolDef
+	Name           string
+	Description    string
+	ParamsSchema   map[string]any
+	ResourceParams []ResourceParam
+	Package        *Package
+	TS             *TSToolDef
+	TSWasm         *TSWasmToolDef
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

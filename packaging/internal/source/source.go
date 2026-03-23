@@ -77,10 +77,11 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			description = manifest.InferToolName(pkgTool.EntryTS)
 		}
 		resolved := tooldef.ResolvedTool{
-			Name:         manifest.InferToolName(pkgTool.EntryTS),
-			Description:  description,
-			ParamsSchema: pkgTool.ParamsSchema,
-			Package:      &p.Package,
+			Name:           manifest.InferToolName(pkgTool.EntryTS),
+			Description:    description,
+			ParamsSchema:   pkgTool.ParamsSchema,
+			ResourceParams: pkgTool.ResourceParams,
+			Package:        &p.Package,
 		}
 
 		baseDef := tooldef.TSToolDef{

@@ -24,6 +24,8 @@ import (
 // - a stubbed SDK injected as global `tools`
 // - tool calls delegated to invoke
 func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
+	view := resolved.AgentView()
+
 	files, err := typecheckFiles(resolved, code)
 	if err != nil {
 		return "", err
@@ -57,7 +59,7 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 	defer jsInvoke.Free()
 	ctx.Global().SetPropertyStr("__invokeTool", jsInvoke)
 
-	if _, err := rt.Eval("__codemode_tools.js", qjs.Code(preludeForTools(resolved))); err != nil {
+	if _, err := rt.Eval("__codemode_tools.js", qjs.Code(preludeForTools(view))); err != nil {
 		return "", fmt.Errorf("load codemode tools: %w", err)
 	}
 
@@ -97,14 +99,18 @@ func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error
 	return fsoverlay.New(layers...), nil
 }
 
-func preludeForTools(resolved toolset.ResolvedToolset) string {
+// preludeForTools generates the JS runtime prelude that wires tool namespaces
+// to the __invokeTool global. It uses AgentView so only agent-visible tools
+// are exposed.
+func preludeForTools(view toolset.AgentView) string {
 	var b strings.Builder
 	b.WriteString("const __toolboxInvoke = globalThis.__invokeTool;\n")
 	b.WriteString("delete globalThis.__invokeTool;\n")
 	b.WriteString("globalThis.tools = {};\n")
 
 	seen := map[string]bool{}
-	tools := resolved.Tools()
+	tools := make([]toolset.AgentTool, len(view.Tools))
+	copy(tools, view.Tools)
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name < tools[j].Name
 	})
@@ -132,6 +138,9 @@ func preludeForTools(resolved toolset.ResolvedToolset) string {
 	return b.String()
 }
 
+// typecheckSDKSource generates TypeScript declarations for type checking.
+// Currently uses tool module imports for type inference. Will be refactored
+// to use AgentView.ParamTypes when TS metadata extraction is extended.
 func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 	var b strings.Builder
 	b.WriteString("declare function __invokeTool<T>(toolName: string, args: unknown): T;\n")

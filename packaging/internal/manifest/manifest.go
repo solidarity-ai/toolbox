@@ -110,9 +110,10 @@ func Compile(dev DevManifest) tooldef.Package {
 			accessMode = *tool.AccessMode
 		}
 		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:    tool.EntryTS,
-			Idempotent: tool.Idempotent,
-			AccessMode: accessMode,
+			EntryTS:        tool.EntryTS,
+			Idempotent:     tool.Idempotent,
+			AccessMode:     accessMode,
+			ResourceParams: InferResourceParams(tool.EntryTS),
 		}
 	}
 	return pkg

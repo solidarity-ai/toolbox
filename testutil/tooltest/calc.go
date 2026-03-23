@@ -35,7 +35,11 @@ func CalcToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromDir(calcFixtureDir()); err != nil {
 		t.Fatalf("add calc package dir: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve calc toolset: %v", err)
+	}
+	return resolved
 }
 
 // CalcDistToolset loads the calc-dist golden fixture (archive) into a resolved toolset.
@@ -49,7 +53,11 @@ func CalcDistToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
 		t.Fatalf("add calc-dist archive: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve calc-dist toolset: %v", err)
+	}
+	return resolved
 }
 
 func calcDistFixtureDir() string {
@@ -71,7 +79,11 @@ func VFSTestDistToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
 		t.Fatalf("add vfs-test-dist archive: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve vfs-test-dist toolset: %v", err)
+	}
+	return resolved
 }
 
 func vfsTestDistFixtureDir() string {

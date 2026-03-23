@@ -304,7 +304,7 @@ func requireWasmArtifacts(tb testing.TB, fixtureDir string) {
 	tb.Helper()
 	wasmGlob, _ := filepath.Glob(filepath.Join(fixtureDir, "dist", "*.wasm"))
 	if len(wasmGlob) == 0 {
-		tb.Skipf("wasm fixture not found in %s", fixtureDir)
+		tb.Fatalf("wasm fixture not found in %s — rebuild with: cargo build --target wasm32-wasip2 --release in the wasm-src directory", fixtureDir)
 	}
 }
 

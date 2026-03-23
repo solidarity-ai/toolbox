@@ -465,6 +465,88 @@ func TestParsePkg(t *testing.T) {
 	}
 }
 
+func TestInferResourceParams(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		entryTS string
+		want    []ResourceParam
+	}{
+		// Single resource: account.tickets.list -> account_id (list doesn't need ticket_id)
+		{"tools/account.tickets.list.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+		}},
+		// Single resource: account.tickets.get -> account_id, ticket_id (get needs deepest)
+		{"tools/account.tickets.get.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+			{Name: "ticket_id", BindingName: "ticket_id"},
+		}},
+		// Deep nesting: users.calendars.events.list -> user_id, calendar_id
+		{"tools/users.calendars.events.list.ts", []ResourceParam{
+			{Name: "user_id", BindingName: "user_id"},
+			{Name: "calendar_id", BindingName: "calendar_id"},
+		}},
+		// Deep nesting with get: users.calendars.events.get -> user_id, calendar_id, event_id
+		{"tools/users.calendars.events.get.ts", []ResourceParam{
+			{Name: "user_id", BindingName: "user_id"},
+			{Name: "calendar_id", BindingName: "calendar_id"},
+			{Name: "event_id", BindingName: "event_id"},
+		}},
+		// Flat tool: calc.add -> no resource params
+		{"tools/calc.add.ts", nil},
+		// Simple tool: users.list -> no parent resources (list at top level)
+		{"tools/users.list.ts", nil},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.entryTS, func(t *testing.T) {
+			t.Parallel()
+
+			got := InferResourceParams(tt.entryTS)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("InferResourceParams(%q) mismatch (-want +got):\n%s", tt.entryTS, diff)
+			}
+		})
+	}
+}
+
+func TestCompileWithResourceBindingsOverride(t *testing.T) {
+	t.Parallel()
+
+	dev := DevManifest{
+		Name:    "zendesk",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Tools: []DevManifestTool{
+			{
+				EntryTS:          "tools/account.tickets.list.ts",
+				Idempotent:       boolPtr(true),
+				AccessMode:       accessModePtr(tooldef.AccessModeReadOnly),
+				ResourceBindings: map[string]string{"account_id": "zendesk_account"},
+			},
+		},
+	}
+
+	pkg := Compile(dev)
+
+	if len(pkg.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
+	}
+
+	tool := pkg.Tools[0]
+	if len(tool.ResourceParams) != 1 {
+		t.Fatalf("expected 1 resource param, got %d", len(tool.ResourceParams))
+	}
+
+	rp := tool.ResourceParams[0]
+	if rp.Name != "account_id" {
+		t.Fatalf("expected resource param name 'account_id', got %q", rp.Name)
+	}
+	if rp.BindingName != "zendesk_account" {
+		t.Fatalf("expected binding name 'zendesk_account', got %q", rp.BindingName)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

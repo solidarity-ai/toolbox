@@ -85,8 +85,37 @@ func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
 	allHidden := make(map[string]map[string]bool)
 
 	for _, tool := range tools {
-		bindings, ok := toolBindings[tool.Name]
-		if !ok {
+		// Start with explicit per-tool bindings
+		bindings := make(map[string]Binding)
+		if tb, ok := toolBindings[tool.Name]; ok {
+			for k, v := range tb {
+				bindings[k] = v
+			}
+		}
+
+		// Merge resource-level bindings from the two-tier model:
+		// PackageTool.ResourceParams maps param name -> canonical binding name
+		// Config.ResourceBindings maps canonical name -> Binding
+		if tool.Package != nil {
+			for _, pt := range tool.Package.Tools {
+				entryMatch := (tool.TS != nil && pt.EntryTS == tool.TS.Entry) ||
+					(tool.TSWasm != nil && pt.EntryTS == tool.TSWasm.Entry)
+				if !entryMatch {
+					continue
+				}
+				for _, rp := range pt.ResourceParams {
+					// Skip if explicit per-tool binding already set
+					if _, exists := bindings[rp.Name]; exists {
+						continue
+					}
+					if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
+						bindings[rp.Name] = rb
+					}
+				}
+			}
+		}
+
+		if len(bindings) == 0 {
 			continue
 		}
 

@@ -360,14 +360,15 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 func requireTSWasip2Artifacts(t *testing.T) {
 	t.Helper()
 
+	tooltest.EnsureSandboxBinary(t)
+
 	paths := []string{
-		filepath.Join(httpClientFixtureDir(), "toolbox.pkg.json"),
+		filepath.Join(httpClientFixtureDir(), "toolbox.devpkg.json"),
 		filepath.Join(httpClientFixtureDir(), "dist", "http-client.wasm"),
-		filepath.Join("..", "wasmcli-sandbox", "target", "debug", "wasmcli-sandbox"),
 	}
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
-			t.Skipf("wasip2 artifacts not ready: missing %s", p)
+			t.Fatalf("wasip2 artifacts not ready: missing %s", p)
 		}
 	}
 }

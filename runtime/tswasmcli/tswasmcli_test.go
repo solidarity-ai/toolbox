@@ -60,7 +60,7 @@ func requireWasip2Artifacts(t *testing.T) {
 	}
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
-			t.Skipf("wasip2 artifacts not ready: missing %s", p)
+			t.Fatalf("wasip2 artifacts not ready: missing %s — rebuild with: cargo build --manifest-path wasmcli-sandbox/Cargo.toml", p)
 		}
 	}
 }

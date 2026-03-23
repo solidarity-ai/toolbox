@@ -3,6 +3,8 @@ package mcpserver_test
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -379,6 +381,51 @@ func httpClientFixtureDir() string {
 		panic("mcpserver_test: runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "http-client")
+}
+
+func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
+	// Start a test HTTP server that returns known content.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"greeting":"hello from test server"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.FetchTestToolset(t)))
+
+	// Invoke the fetch-test.get tool with the test server URL.
+	result := h.CallTool("fetch-test.get", map[string]any{
+		"url": srv.URL,
+	})
+	if result.IsError {
+		if len(result.Content) > 0 {
+			text, _ := mcp.AsTextContent(result.Content[0])
+			t.Fatalf("expected non-error result, got: %s", text.Text)
+		}
+		t.Fatalf("expected non-error result")
+	}
+
+	structured := mcptest.StructuredMap(t, result)
+	resultStr, ok := structured["result"].(string)
+	if !ok {
+		t.Fatalf("expected string result, got %#v", structured["result"])
+	}
+
+	// The tool returns JSON with status and body.
+	var fetchResult struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(resultStr), &fetchResult); err != nil {
+		t.Fatalf("parse fetch result: %v (raw: %s)", err, resultStr)
+	}
+	if fetchResult.Status != 200 {
+		t.Fatalf("expected status 200, got %d", fetchResult.Status)
+	}
+	if !strings.Contains(fetchResult.Body, "hello from test server") {
+		t.Fatalf("expected body to contain greeting, got: %s", fetchResult.Body)
+	}
 }
 
 func assertContains(t *testing.T, values []string, want string) {

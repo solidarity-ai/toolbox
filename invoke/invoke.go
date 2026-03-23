@@ -1,14 +1,19 @@
 package invoke
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/microsoft/typescript-go/toolbox"
+	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -56,7 +61,9 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 
 func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
 	session := getCheckSession(tool.Package)
-	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{}, &session)
+	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{
+		Fetch: goFetch,
+	}, &session)
 	setCheckSession(tool.Package, session)
 	return result, err
 }
@@ -102,6 +109,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 		WriteFile: func(path string, data string) error {
 			return memFS.WriteFile(path, []byte(data))
 		},
+		Fetch: goFetch,
 		Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
 			relativePath, ok := tool.TSWasm.Executables[binary]
 			if !ok {
@@ -169,4 +177,44 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 	default:
 		return "wasix-cli"
 	}
+}
+
+// goFetch performs an HTTP request using the fetch package.
+// It's the Go-side implementation behind the JS fetch() global.
+func goFetch(url, method, headersJSON, body string) (quickts.FetchResult, error) {
+	reqHeaders := fetch.NewHeaders()
+	var pairs [][2]string
+	if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
+		for _, p := range pairs {
+			reqHeaders.Append(p[0], p[1])
+		}
+	}
+
+	var bodyReader io.Reader
+	if body != "" {
+		bodyReader = strings.NewReader(body)
+	}
+
+	resp, err := fetch.Fetch(context.Background(), url, &fetch.RequestInit{
+		Method:  method,
+		Headers: reqHeaders,
+		Body:    bodyReader,
+	})
+	if err != nil {
+		return quickts.FetchResult{}, err
+	}
+	defer resp.Body().Close()
+
+	respBody, err := io.ReadAll(resp.Body())
+	if err != nil {
+		return quickts.FetchResult{}, fmt.Errorf("read response body: %w", err)
+	}
+
+	return quickts.FetchResult{
+		Status:     resp.Status(),
+		StatusText: resp.StatusText(),
+		Headers:    resp.Headers().Entries(),
+		Body:       string(respBody),
+		URL:        resp.URL(),
+	}, nil
 }

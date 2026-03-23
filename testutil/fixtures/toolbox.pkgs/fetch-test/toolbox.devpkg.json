@@ -1,0 +1,11 @@
+{
+  "name": "fetch-test",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/fetch-test.get.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

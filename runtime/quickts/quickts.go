@@ -27,10 +27,20 @@ type ExecResult struct {
 	ExitCode int    `json:"exitCode"`
 }
 
+// FetchResult holds the response from a fetch call.
+type FetchResult struct {
+	Status     int         `json:"status"`
+	StatusText string      `json:"statusText"`
+	Headers    [][2]string `json:"headers"`
+	Body       string      `json:"body"`
+	URL        string      `json:"url"`
+}
+
 type Host struct {
 	Exec      func(binary string, args []string) (ExecResult, error)
 	ReadFile  func(path string) (string, error)
 	WriteFile func(path string, data string) error
+	Fetch     func(url, method, headersJSON, body string) (FetchResult, error)
 }
 
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
@@ -131,6 +141,12 @@ func installHost(rt *qjs.Runtime, host Host) error {
 
 	if host.ReadFile != nil || host.WriteFile != nil {
 		if err := installFS(rt, host); err != nil {
+			return err
+		}
+	}
+
+	if host.Fetch != nil {
+		if err := installFetch(rt, host); err != nil {
 			return err
 		}
 	}

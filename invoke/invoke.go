@@ -33,18 +33,21 @@ func setCheckSession(pkg *tooldef.Package, session *toolbox.CheckSession) {
 	checkSessions[pkg] = session
 }
 
-// Run is the minimal invoke seam for the first outside-in tests.
-//
-// For now it only proves that a caller can select one visible tool by name and
-// route execution through a single package boundary.
+// Run selects a visible tool by name, evaluates any bindings to produce the
+// full param set (including hidden params), and dispatches execution.
 func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any) (string, error) {
+	fullParams, err := resolved.ValidateCall(toolName, args)
+	if err != nil {
+		return "", err
+	}
+
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
 			if tool.TSWasm != nil {
-				return runTSWasmTool(tool, args)
+				return runTSWasmTool(tool, fullParams)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, args)
+				return runTSTool(tool, fullParams)
 			}
 
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
@@ -65,13 +68,18 @@ func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
 // This allows callers to pre-populate files before execution and inspect
 // files written by the WASM guest afterwards.
 func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[string]any, memFS *vfs.MemFS) (string, error) {
+	fullParams, err := resolved.ValidateCall(toolName, args)
+	if err != nil {
+		return "", err
+	}
+
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
 			if tool.TSWasm != nil {
-				return runTSWasmToolWithVFS(tool, args, memFS)
+				return runTSWasmToolWithVFS(tool, fullParams, memFS)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, args)
+				return runTSTool(tool, fullParams)
 			}
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
 		}

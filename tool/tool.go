@@ -28,12 +28,19 @@ const (
 	AccessModeCanDestruct AccessMode = "canDestruct"
 )
 
+// ResourceParam describes one inferred resource parameter and its canonical binding name.
+type ResourceParam struct {
+	Name        string `json:"name"`         // e.g. "account_id"
+	BindingName string `json:"binding_name"` // e.g. "zendesk_account" (defaults to Name)
+}
+
 type PackageTool struct {
-	EntryTS      string         `json:"entry_ts"`
-	Idempotent   *bool          `json:"idempotent,omitempty"`
-	AccessMode   AccessMode     `json:"accessMode,omitempty"`
-	Description  string         `json:"description,omitempty"`
-	ParamsSchema map[string]any `json:"paramsSchema,omitempty"`
+	EntryTS        string          `json:"entry_ts"`
+	Idempotent     *bool           `json:"idempotent,omitempty"`
+	AccessMode     AccessMode      `json:"accessMode,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	ParamsSchema   map[string]any  `json:"paramsSchema,omitempty"`
+	ResourceParams []ResourceParam `json:"resourceParams,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current

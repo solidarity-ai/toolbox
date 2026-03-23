@@ -51,9 +51,10 @@ type DevManifest struct {
 }
 
 type DevManifestTool struct {
-	EntryTS    string              `json:"entry_ts"`
-	Idempotent *bool               `json:"idempotent"`
-	AccessMode *tooldef.AccessMode `json:"accessMode"`
+	EntryTS          string              `json:"entry_ts"`
+	Idempotent       *bool               `json:"idempotent"`
+	AccessMode       *tooldef.AccessMode `json:"accessMode"`
+	ResourceBindings map[string]string   `json:"resource_bindings,omitempty"` // param name -> canonical binding name
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -109,10 +110,20 @@ func Compile(dev DevManifest) tooldef.Package {
 		if tool.AccessMode != nil {
 			accessMode = *tool.AccessMode
 		}
+
+		resourceParams := InferResourceParams(tool.EntryTS)
+		// Apply manifest overrides for binding names
+		for j := range resourceParams {
+			if override, ok := tool.ResourceBindings[resourceParams[j].Name]; ok {
+				resourceParams[j].BindingName = override
+			}
+		}
+
 		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:    tool.EntryTS,
-			Idempotent: tool.Idempotent,
-			AccessMode: accessMode,
+			EntryTS:        tool.EntryTS,
+			Idempotent:     tool.Idempotent,
+			AccessMode:     accessMode,
+			ResourceParams: resourceParams,
 		}
 	}
 	return pkg
@@ -164,6 +175,57 @@ func InferAccessMode(entryTS string) tooldef.AccessMode {
 func InferToolName(entryTS string) string {
 	base := filepath.Base(entryTS)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// ResourceParam describes one inferred resource parameter.
+type ResourceParam = tooldef.ResourceParam
+
+// InferResourceParams derives resource parameters from the tool entry filename.
+//
+// Convention: "users.calendars.events.list.ts" -> user_id, calendar_id.
+// The verb (last segment) is stripped. For "list" the deepest resource ID is
+// excluded; for "get"/"update"/"delete" it is included.
+// Only applies when there are 3+ segments (resource.subresource.verb).
+func InferResourceParams(entryTS string) []ResourceParam {
+	base := filepath.Base(entryTS)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	parts := strings.Split(base, ".")
+
+	// Need at least 3 parts: resource.subresource.verb
+	if len(parts) < 3 {
+		return nil
+	}
+
+	verb := parts[len(parts)-1]
+	resources := parts[:len(parts)-1] // all segments except verb
+
+	// Determine how many resource IDs to include
+	count := len(resources) - 1 // skip deepest for list
+	if verb == "get" || verb == "update" || verb == "delete" || verb == "remove" || verb == "set" || verb == "patch" || verb == "put" || verb == "replace" || verb == "edit" {
+		count = len(resources)
+	}
+
+	if count <= 0 {
+		return nil
+	}
+
+	params := make([]ResourceParam, 0, count)
+	for i := 0; i < count; i++ {
+		name := singularize(resources[i]) + "_id"
+		params = append(params, ResourceParam{
+			Name:        name,
+			BindingName: name,
+		})
+	}
+	return params
+}
+
+// singularize naively strips a trailing 's' from a word.
+func singularize(s string) string {
+	if len(s) > 1 && s[len(s)-1] == 's' {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 func inferVerb(entryTS string) string {

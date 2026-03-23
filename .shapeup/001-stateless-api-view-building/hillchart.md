@@ -3,15 +3,17 @@
 **Session**: 01
 
 ## Scopes
-  ▲ Binding + CEL + AgentView — Uphill (investigating, starting first piece)
-  ▲ ValidateCall — Uphill (not started, depends on binding engine)
-  ▲ Resource Param Inference — Uphill (not started)
-  ▲ Extended TS Metadata — Uphill (not started, in typescript-go fork)
-  ▲ Codemode Refactor — Uphill (not started, depends on AgentView)
-  ▲ MCP Service Wiring — Uphill (not started, depends on AgentView)
+  ✓ Binding Types + CEL Engine — Done (types, compilation, evaluation all working)
+  ✓ AgentView — Done (filtered tool surface with hidden params stripped)
+  ✓ Enhanced Resolve — Done (Config input, CEL compilation, backward compat)
+  ✓ ValidateCall — Done (invoke-time evaluation, check expressions, wired into invoke.Run)
+  ✓ Resource Param Inference — Done (InferResourceParams, two-tier binding model, manifest overrides)
+  ✓ Codemode Refactor — Done (preludeForTools uses AgentView)
+  ✓ MCP Service Wiring — Done (Service.DiscoverTools returns AgentView)
+  ~ Extended TS Metadata — Nice-to-have (requires typescript-go fork changes, deferred)
 
 ## Risk
-CEL engine integration is the riskiest unknown — new dependency, compilation/evaluation model untested in this codebase.
+No remaining must-have risks. Extended TS Metadata is deferred — codemode works via module imports.
 
 ## Next
-Push "Binding + CEL + AgentView" uphill: define types, integrate cel-go, write tests, prove hidden params work.
+All must-haves complete. Ready for PR and review.

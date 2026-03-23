@@ -104,6 +104,8 @@ func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error
 // are exposed.
 func preludeForTools(view toolset.AgentView) string {
 	var b strings.Builder
+	// Capture the raw invoke hook, delete it from globalThis so user code
+	// cannot call it directly, then initialize the tools namespace object.
 	b.WriteString("const __toolboxInvoke = globalThis.__invokeTool;\n")
 	b.WriteString("delete globalThis.__invokeTool;\n")
 	b.WriteString("globalThis.tools = {};\n")

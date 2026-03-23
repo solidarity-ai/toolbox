@@ -1,5 +1,7 @@
 package toolset
 
+import tooldef "github.com/solidarity-ai/toolbox/tool"
+
 // AgentView is the agent-visible API surface produced by Resolve.
 type AgentView struct {
 	Tools []AgentTool
@@ -7,11 +9,15 @@ type AgentView struct {
 
 // AgentTool is one tool as seen by the agent — with hidden params removed.
 type AgentTool struct {
-	Name         string
-	Description  string
+	Name        string
+	Description string
+	// TODO: When TS metadata extraction lands (ParamTypes/ReturnType on AgentTool),
+	// consider deriving ParamsSchema from the TS types rather than carrying the
+	// JSON Schema through from PackageTool. This would make AgentView the single
+	// source of truth for the agent-visible type surface.
 	ParamsSchema map[string]any // JSON Schema with hidden params removed
-	ReadOnly     bool
-	Idempotent   bool
+	AccessMode   tooldef.AccessMode
+	Idempotent   *bool
 }
 
 // AgentView produces the agent-visible tool surface from the resolved toolset.
@@ -28,12 +34,16 @@ func (r ResolvedToolset) AgentView() AgentView {
 			Name:         rt.Name,
 			Description:  rt.Description,
 			ParamsSchema: schema,
+			AccessMode:   rt.AccessMode,
+			Idempotent:   rt.Idempotent,
 		})
 	}
 	return AgentView{Tools: tools}
 }
 
 // filterHiddenParams returns a copy of the JSON Schema with hidden params removed.
+// This only handles top-level properties, which matches the binding model's
+// constraint that bindings operate on top-level params only (no nested paths).
 func filterHiddenParams(schema map[string]any, bindings map[string]resolvedBinding) map[string]any {
 	if schema == nil {
 		return nil
@@ -50,7 +60,7 @@ func filterHiddenParams(schema map[string]any, bindings map[string]resolvedBindi
 		return schema
 	}
 
-	// Deep copy the schema and remove hidden params.
+	// Shallow copy the schema, then filter properties and required.
 	out := make(map[string]any, len(schema))
 	for k, v := range schema {
 		out[k] = v

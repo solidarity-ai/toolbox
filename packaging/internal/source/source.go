@@ -80,6 +80,8 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			Name:           manifest.InferToolName(pkgTool.EntryTS),
 			Description:    description,
 			ParamsSchema:   pkgTool.ParamsSchema,
+			AccessMode:     pkgTool.AccessMode,
+			Idempotent:     pkgTool.Idempotent,
 			ResourceParams: pkgTool.ResourceParams,
 			Package:        &p.Package,
 		}

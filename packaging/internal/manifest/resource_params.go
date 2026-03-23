@@ -7,10 +7,14 @@ import (
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
-// methodNeedsDeepestID returns true if the verb requires the deepest resource ID.
-func methodNeedsDeepestID(verb string) bool {
+// isCollectionMethod returns true for verbs that operate on a collection
+// (and therefore do NOT need the deepest resource ID).
+// All other verbs (get, update, delete, etc.) are member operations
+// that require the deepest resource ID. This default is safer since
+// unknown verbs will include all resource IDs.
+func isCollectionMethod(verb string) bool {
 	switch verb {
-	case "get", "update", "delete", "remove", "set", "put", "patch", "replace", "edit":
+	case "list", "create", "add", "search", "find", "new", "send", "post":
 		return true
 	default:
 		return false
@@ -23,9 +27,9 @@ func methodNeedsDeepestID(verb string) bool {
 // verb is "list". Each resource (except possibly the last) gets a param named
 // by singularizing (strip trailing 's') and appending '_id'.
 //
-// For list/create/add/search methods, the deepest resource ID is NOT included
-// (the verb operates on the collection). For get/update/delete, the deepest
-// resource ID IS included (the verb operates on a specific item).
+// Collection methods (list, create, search, etc.) exclude the deepest resource ID
+// since they operate on the collection. All other methods (get, update, delete,
+// etc.) include it since they operate on a specific member.
 func InferResourceParams(entryTS string) []tooldef.ResourceParam {
 	base := filepath.Base(entryTS)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
@@ -38,9 +42,11 @@ func InferResourceParams(entryTS string) []tooldef.ResourceParam {
 	verb := parts[len(parts)-1]
 	resources := parts[:len(parts)-1]
 
-	count := len(resources) - 1
-	if methodNeedsDeepestID(verb) {
-		count = len(resources)
+	// Default: include all resource IDs (member operation).
+	// Collection methods exclude the deepest resource ID.
+	count := len(resources)
+	if isCollectionMethod(verb) {
+		count = len(resources) - 1
 	}
 
 	if count <= 0 {

@@ -50,6 +50,8 @@ type ResolvedTool struct {
 	Name           string
 	Description    string
 	ParamsSchema   map[string]any
+	AccessMode     AccessMode
+	Idempotent     *bool
 	ResourceParams []ResourceParam
 	Package        *Package
 	TS             *TSToolDef

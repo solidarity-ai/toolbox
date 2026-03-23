@@ -19,15 +19,15 @@ Big Batch: 6 weeks
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| R0 | Stateless function: `(packages, bindings, context) -> AgentView` | Core goal |
-| R1 | CEL binding engine — value expressions resolve params from context/agent input | Must-have |
-| R2 | Hidden params — bindings can hide params from agent, injected at call time | Must-have |
-| R3 | Check expressions — CEL guards validate agent params before execution | Must-have |
-| R4 | Two-tier resource binding — convention-based from resource paths + explicit manifest override; toolset-level binds canonical names to context | Must-have |
-| R5 | AgentView type — shared output with TS type info, consumed by MCP and codemode | Must-have |
-| R6 | Refactor codemode to consume AgentView instead of inline SDK generation | Must-have |
-| R7 | Wire MCP service to serve AgentView as tool list | Must-have |
-| R8 | ValidateCall — evaluate bindings + inject hidden params at invoke time | Must-have |
+| R0 | Stateless function: `(packages, bindings, context) -> AgentView` | **Fully met** — `Builder.Resolve(Config)` → `ResolvedToolset` → `.AgentView()`. Stateless, deterministic. |
+| R1 | CEL binding engine — value expressions resolve params from context/agent input | **Fully met** — `toolset/cel.go`: `newCELEnv` with `params`+`context` vars, `compileBinding`, `evalBinding`. cel-go v0.27.0. |
+| R2 | Hidden params — bindings can hide params from agent, injected at call time | **Fully met** — `Binding.Hidden` removes from AgentView ParamsSchema+required. `ValidateCall` injects hidden values. 2 tests. |
+| R3 | Check expressions — CEL guards validate agent params before execution | **Fully met** — `Binding.Check` compiled at resolve time, evaluated in `ValidateCall`. Returns `"check failed"` error. 2 tests. |
+| R4 | Two-tier resource binding — convention-based from resource paths + explicit manifest override; toolset-level binds canonical names to context | **Partially met** — Convention inference (`InferResourceParams`) and canonical name propagation work. Manifest `resource_bindings` override field not yet added to `DevManifestTool`. |
+| R5 | AgentView type — shared output with TS type info, consumed by MCP and codemode | **Partially met** — `AgentView`/`AgentTool` types exist and are consumed by codemode+service. `ParamTypes`/`ReturnType` fields not yet added (blocked on typescript-go fork extension). |
+| R6 | Refactor codemode to consume AgentView instead of inline SDK generation | **Partially met** — `preludeForTools` uses `AgentView`. `typecheckSDKSource` still uses import-based approach (needs `ParamTypes` from R5). |
+| R7 | Wire MCP service to serve AgentView as tool list | **Fully met** — `ToolsetService.ExecuteDiscovery` returns AgentView tools. `ExecuteAction` runs code via codemode. 2 tests. |
+| R8 | ValidateCall — evaluate bindings + inject hidden params at invoke time | **Partially met** — `ResolvedToolset.ValidateCall` exists and works (6 tests). Not yet wired into `invoke.Run` as the call-site integration point. |
 
 ## Solution
 

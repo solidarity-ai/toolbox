@@ -170,7 +170,7 @@ func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 		t.Fatalf("add external package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -230,7 +230,7 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 		t.Fatalf("add copied package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -389,7 +389,7 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 		t.Fatalf("add http-client package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 	result := h.CallTool("http-client.fetch", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -479,6 +479,15 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	if !strings.Contains(fetchResult.Body, "hello from test server") {
 		t.Fatalf("expected body to contain greeting, got: %s", fetchResult.Body)
 	}
+}
+
+func mustResolve(t testing.TB, builder *toolset.Builder) toolset.ResolvedToolset {
+	t.Helper()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+	return resolved
 }
 
 func assertContains(t *testing.T, values []string, want string) {

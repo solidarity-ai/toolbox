@@ -30,10 +30,11 @@ func NewHeadersFromPairs(pairs [][2]string) (*Headers, error) {
 		if err := validateHeaderName(pair[0]); err != nil {
 			return nil, err
 		}
-		if err := validateHeaderValue(pair[1]); err != nil {
+		value := normalizeHeaderValue(pair[1])
+		if err := validateHeaderValue(value); err != nil {
 			return nil, err
 		}
-		h.list = append(h.list, [2]string{strings.ToLower(pair[0]), pair[1]})
+		h.list = append(h.list, [2]string{strings.ToLower(pair[0]), value})
 	}
 	h.sort()
 	return h, nil
@@ -65,10 +66,12 @@ func (h *Headers) Clone() *Headers {
 }
 
 // Append adds a new value for the given header name.
+// Per the Fetch spec, value is normalized (trimmed) before validation.
 func (h *Headers) Append(name, value string) error {
 	if err := validateHeaderName(name); err != nil {
 		return err
 	}
+	value = normalizeHeaderValue(value)
 	if err := validateHeaderValue(value); err != nil {
 		return err
 	}
@@ -126,10 +129,12 @@ func (h *Headers) Has(name string) (bool, error) {
 }
 
 // Set replaces all values for the given header name with a single value.
+// Per the Fetch spec, value is normalized (trimmed) before validation.
 func (h *Headers) Set(name, value string) error {
 	if err := validateHeaderName(name); err != nil {
 		return err
 	}
+	value = normalizeHeaderValue(value)
 	if err := validateHeaderValue(value); err != nil {
 		return err
 	}
@@ -147,8 +152,19 @@ func (h *Headers) Set(name, value string) error {
 	return nil
 }
 
+// GetSetCookie returns individual Set-Cookie header values without combining.
+func (h *Headers) GetSetCookie() []string {
+	var result []string
+	for _, entry := range h.list {
+		if entry[0] == "set-cookie" {
+			result = append(result, entry[1])
+		}
+	}
+	return result
+}
+
 // Entries returns all combined header entries sorted by name.
-// Each entry is [name, combined_value].
+// Set-Cookie headers are not combined per the Fetch spec.
 func (h *Headers) Entries() [][2]string {
 	return h.combined()
 }
@@ -213,19 +229,24 @@ func (h *Headers) RawList() [][2]string {
 }
 
 // combined returns entries with values combined per unique name.
+// Set-Cookie headers are never combined — each appears as a separate entry
+// per the Fetch spec.
 func (h *Headers) combined() [][2]string {
 	if len(h.list) == 0 {
-		return nil
+		return [][2]string{}
 	}
 	var result [][2]string
 	var prevName string
 	for _, entry := range h.list {
-		if entry[0] == prevName && len(result) > 0 {
+		if entry[0] == "set-cookie" {
+			// Set-Cookie is never combined.
+			result = append(result, [2]string{entry[0], entry[1]})
+		} else if entry[0] == prevName && len(result) > 0 {
 			result[len(result)-1][1] += ", " + entry[1]
 		} else {
 			result = append(result, [2]string{entry[0], entry[1]})
-			prevName = entry[0]
 		}
+		prevName = entry[0]
 	}
 	return result
 }
@@ -251,13 +272,26 @@ func validateHeaderName(name string) error {
 }
 
 // validateHeaderValue checks if a header value is valid per the Fetch spec.
+// Values must not contain NUL (0x00), CR (0x0D), or LF (0x0A).
+// Code points > 0xFF are rejected (not representable as bytes).
 func validateHeaderValue(value string) error {
 	for _, c := range value {
-		if c > 127 {
+		if c == 0x00 || c == 0x0A || c == 0x0D {
+			return fmt.Errorf("%w: %q", ErrInvalidHeaderValue, value)
+		}
+		if c > 0xFF {
 			return fmt.Errorf("%w: %q", ErrInvalidHeaderValue, value)
 		}
 	}
 	return nil
+}
+
+// normalizeHeaderValue strips leading and trailing HTTP whitespace
+// (0x09 tab, 0x0A LF, 0x0D CR, 0x20 space) per the Fetch spec.
+func normalizeHeaderValue(value string) string {
+	return strings.TrimFunc(value, func(r rune) bool {
+		return r == 0x09 || r == 0x0A || r == 0x0D || r == 0x20
+	})
 }
 
 // isTokenChar returns true for characters valid in HTTP tokens (RFC 7230).

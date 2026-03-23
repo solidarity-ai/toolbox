@@ -23,8 +23,22 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 
+	// Set default headers per the Fetch spec.
+	hasAccept, hasAcceptLang := false, false
 	for _, entry := range req.headers.list {
 		httpReq.Header.Add(entry[0], entry[1])
+		switch entry[0] {
+		case "accept":
+			hasAccept = true
+		case "accept-language":
+			hasAcceptLang = true
+		}
+	}
+	if !hasAccept {
+		httpReq.Header.Set("Accept", "*/*")
+	}
+	if !hasAcceptLang {
+		httpReq.Header.Set("Accept-Language", "*")
 	}
 
 	client := &http.Client{

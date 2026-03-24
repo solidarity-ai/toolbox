@@ -250,6 +250,41 @@ Even with SecureExec as the JS runtime, we'd still need:
 
 ---
 
+## 11. The npm Compatibility Question
+
+The most compelling argument for SecureExec is npm compatibility — tool authors can `import` any npm package and it just works. Our current stack rejects bare imports entirely (`unsupported import "zod"`). For tools that call SaaS APIs, this means no access to validation libraries (zod), date handling (date-fns), HTML parsing (cheerio), OAuth/JWT (jose), CSV parsing (papaparse), or SaaS SDKs (@octokit/rest, @slack/web-api).
+
+**However, this gap is solvable without changing runtimes.**
+
+The key insight: esbuild already runs at tool execution time (`runtime/quickts/quickts.go:177-206`), and esbuild is a full-featured bundler that can resolve and inline `node_modules`. The missing piece is:
+
+1. **Build time**: Tool packages declare dependencies (package.json or manifest field). `toolbox build` runs `npm install` then esbuild bundles all deps into the `.toolbox.pkg` archive as a single self-contained JS file.
+2. **Runtime**: No changes needed — QuickJS already executes whatever esbuild produces.
+
+The pipeline becomes:
+
+```
+Tool author's machine:
+  package.json (declares deps like zod, date-fns, cheerio)
+  → npm install (downloads node_modules/)
+  → toolbox build
+    → esbuild resolves bare imports against node_modules/
+    → bundles .ts + deps → single .js in .toolbox.pkg archive
+
+End user's machine:
+  → toolbox run
+    → QuickJS executes the self-contained bundled .js
+    → no npm, no node_modules, no network needed
+```
+
+**What npm packages would work?** Any pure-JS package that doesn't depend on Node.js built-ins (`net`, `crypto`, `child_process`, `stream`). This covers the majority of utility libraries. For SaaS SDKs that use `http`/`https` internally, many now ship browser/edge builds that use standard `fetch` — and we're already building a Go-backed `globalThis.fetch` host import.
+
+**What wouldn't work?** Packages with native addons (`.node` files), packages that depend on Node.js-specific APIs not shimmed by our host functions, and packages that require runtime `require()` (though most modern packages use ESM).
+
+This approach keeps the single-binary, zero-runtime-dependency deployment model intact while giving tool authors access to the npm ecosystem where it matters most.
+
+---
+
 ## Recommendation
 
 **Do not adopt SecureExec.** The mismatch is architectural, not feature-level:
@@ -262,13 +297,15 @@ Even with SecureExec as the JS runtime, we'd still need:
 
 4. **The isolation trade-off isn't worth it.** V8 process isolation is stronger than QuickJS in-process execution, but our tools already run in a controlled environment with limited host function access. The security boundary that matters most is our host function layer (what `exec`, `readFile`, `writeFile` are allowed to do), not the JS engine's isolation.
 
-### If stronger JS isolation is needed
+5. **npm compatibility — SecureExec's strongest selling point — is achievable without it.** Pre-bundling deps at package build time via esbuild + providing `globalThis.fetch` covers the vast majority of useful npm packages (validation, date/time, parsing, SaaS SDKs with browser builds) while keeping our single-binary architecture.
 
-Consider these alternatives instead:
+### Recommended next steps
 
-- **Harden the QuickJS sandbox**: Audit host function injection, add resource limits (execution time, memory), validate all inputs at the Go boundary.
-- **Run QuickJS in a WASM sandbox**: Compile QuickJS to WASM and run it in Wasmtime/Wasmer for process-level isolation without requiring Node.js.
-- **Use V8 via Go bindings**: Projects like [nicholasgasior/gopher-v8](https://github.com/nicholasgasior/gopher-v8) or [nicholasgasior/goja](https://github.com/nicholasgasior/goja) (a Go V8 alternative) could provide V8-level performance if JS execution speed becomes a bottleneck, though they add CGo complexity.
+Instead of switching runtimes, close the npm gap within the current architecture:
+
+1. **Add npm dep support to `toolbox build`**: Allow tool packages to declare dependencies, run `npm install` at build time, let esbuild bundle them into the archive.
+2. **Ship `globalThis.fetch`**: The Go-backed Fetch API host import (already in progress) unlocks SaaS SDKs that ship browser/edge builds.
+3. **Harden the QuickJS sandbox**: If stronger isolation is needed — audit host function injection, add resource limits (execution time, memory), validate all inputs at the Go boundary.
 
 ---
 

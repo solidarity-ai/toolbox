@@ -5,23 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/solidarity-ai/toolbox/toolset"
 )
-
-// Service provides the toolset API surface backed by a resolved toolset.
-type Service struct {
-	resolved toolset.ResolvedToolset
-}
-
-// NewService creates a service from a resolved toolset.
-func NewService(resolved toolset.ResolvedToolset) *Service {
-	return &Service{resolved: resolved}
-}
-
-// DiscoverTools returns the agent-visible tool surface from the resolved toolset.
-func (s *Service) DiscoverTools(_ context.Context) (toolset.AgentView, error) {
-	return s.resolved.AgentView(), nil
-}
 
 const (
 	ToolDiscoveryExecute = "tool_discovery_execute"

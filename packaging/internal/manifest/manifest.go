@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/jinzhu/inflection"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -225,19 +226,17 @@ func InferResourceParams(entryTS string) []ResourceParam {
 // (and therefore don't need the deepest resource ID).
 func isCollectionMethod(verb string) bool {
 	switch verb {
-	case "list", "create", "add", "search", "find", "new", "send", "post":
+	case "list", "create", "add", "append", "search", "find", "new", "send", "post":
 		return true
 	default:
 		return false
 	}
 }
 
-// singularize naively strips a trailing 's' from a word.
+// singularize converts a plural resource name to its singular form
+// using jinzhu/inflection for Rails-style irregular handling.
 func singularize(s string) string {
-	if len(s) > 1 && s[len(s)-1] == 's' {
-		return s[:len(s)-1]
-	}
-	return s
+	return inflection.Singular(s)
 }
 
 func inferVerb(entryTS string) string {

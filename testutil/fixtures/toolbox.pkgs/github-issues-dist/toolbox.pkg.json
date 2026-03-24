@@ -1,0 +1,32 @@
+{
+  "name": "github-issues",
+  "runtime": "typescript-sandbox",
+  "sha256": "896d9377e080bd838669e139c926a919f4f1752993b906ef48ad5a1d56bfbfcf",
+  "additionalTypeScriptGlobs": [
+    "tools/shims.ts"
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/github-issues.get.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "paramsSchema": {
+        "properties": {
+          "number": {
+            "type": "number"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ]
+}

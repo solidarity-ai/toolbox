@@ -107,20 +107,72 @@ The module path is always the identity. How you obtain the bytes is a separate c
 
 ### 2. Package Registry / Tool Library
 
-#### Design: Git-native with optional proxy
+#### Design: GitHub Releases as primary distribution
 
-Packages live in git repositories. The source at a tagged commit IS the package — this is already the model in `pkg-tool-definition-spec.md`. No separate publish step to a central registry is required.
+Packages live in git repositories and are distributed as pre-built `.toolbox.pkg` archives attached to GitHub Releases (or equivalent release mechanisms on other git hosts). The release artifact is the package — not the raw source tree.
 
-This follows Go modules, not npm. The reasons:
+This diverges from Go modules (which treat the source at a tag as the package) in one important way: we ship pre-built archives via releases rather than requiring clients to build from source. The reasons:
 
-- Tool packages are small (TS source + optional WASM binaries). Git clone at a tag is fast enough.
-- Git hosting already provides access control, discoverability (within an org), and versioning (tags).
-- No new infrastructure required to start publishing packages.
-- Organizations can use private git repos for private tools without any registry configuration.
+- **Release artifacts are the natural distribution unit.** `packaging.Pack` already produces a self-contained `.toolbox.pkg` archive with sha256 integrity. Attaching it to a release is the simplest publish step.
+- **No proxy required for basic use.** Clients download release artifacts directly from the git host's release API. No intermediate infrastructure needed.
+- **WASM binaries work naturally.** Large WASM binaries are awkward in git history but trivial as release attachments. This eliminates the biggest pain point of git-native distribution.
+- **Familiar workflow.** Tag a version, run `toolbox pack`, attach the archive to the release. A GitHub Action automates this to zero manual steps.
 
-#### Registry proxy (optional, recommended for production)
+#### Publishing via GitHub Action
 
-A registry proxy sits between clients and git hosts, similar to GOPROXY:
+We provide an official `solidarity-ai/toolbox-pack-action` that automates the pack-and-release workflow:
+
+```yaml
+# .github/workflows/release.yml
+name: Release Toolbox Package
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: solidarity-ai/toolbox-pack-action@v1
+        # Reads toolbox.devpkg.json, runs `toolbox pack`,
+        # creates a GitHub Release with the .toolbox.pkg archive
+        # and toolbox.pkg.json manifest attached.
+```
+
+This action:
+1. Validates the package against the dist schema
+2. Runs `packaging.Pack` to produce the `.toolbox.pkg` archive and external `toolbox.pkg.json` manifest
+3. Creates a GitHub Release for the tag
+4. Attaches both files as release assets
+
+Package authors add this workflow once. After that, publishing is: `git tag v2.0.1 && git push --tags`.
+
+#### Release artifact convention
+
+A release for version `v2.0.1` is expected to have these assets:
+
+```
+{name}.toolbox.pkg       # the archive (same format packaging.Pack produces)
+toolbox.pkg.json         # external manifest with sha256
+```
+
+The resolver fetches these from the release by convention. The release tag must match the version.
+
+#### Git-source fallback
+
+When release artifacts are not available (e.g., private repos without CI, older packages, non-GitHub hosts without release support), the client falls back to git-source resolution:
+
+1. Derive the git clone URL from the module path
+2. Fetch the tag matching the version
+3. Read the package source from the tagged commit
+4. Build locally (`packaging.Pack` — compile TS, validate manifest)
+5. Cache the result
+
+This fallback ensures the system works with any git host, not just GitHub. But the recommended path is always: publish release artifacts.
+
+#### Registry proxy (optional, for discovery and caching)
+
+A registry proxy is **optional** infrastructure for organizations that want centralized search and caching:
 
 ```
 TOOLBOX_PROXY=https://proxy.toolbox.dev
@@ -128,9 +180,7 @@ TOOLBOX_PROXY=https://proxy.toolbox.dev
 
 The proxy serves two functions:
 
-**1. Caching and availability.** Serves cached package archives so clients don't need git access. Survives git repo deletions, force-pushes to tags, and git host outages.
-
-**2. Discovery and search.** Provides a search API over published packages:
+**1. Discovery and search.** Provides a search API over known packages:
 
 ```
 GET /v1/search?q=zendesk&runtime=typescript-sandbox
@@ -139,9 +189,13 @@ GET /v1/packages/github.com/acme-corp/zendesk-tools/versions
 GET /v1/packages/github.com/acme-corp/zendesk-tools@v2.0.1
 ```
 
+**2. Caching and availability.** Mirrors release artifacts so clients have a single fast endpoint. Survives release deletions and git host outages.
+
+The proxy is not required for basic operation. Clients can fetch packages directly from GitHub Releases without any proxy. The proxy adds value for organizations with many packages, cross-host discovery needs, or availability requirements.
+
 #### Proxy protocol
 
-The proxy serves pre-built package archives and metadata:
+When present, the proxy serves cached archives and metadata:
 
 ```
 GET /v1/packages/{module_path}/@v/{version}.info     → version metadata (JSON)
@@ -151,17 +205,7 @@ GET /v1/packages/{module_path}/@latest                → latest version info
 GET /v1/packages/{module_path}/@v/list                → available versions
 ```
 
-This mirrors the Go module proxy protocol structure. The `.pkg` endpoint returns the same `.toolbox.pkg` archive that `packaging.Pack` produces today.
-
-#### Without a proxy
-
-When no proxy is configured, the client resolves packages directly from git:
-
-1. Derive the git clone URL from the module path (e.g., `github.com/acme-corp/zendesk-tools` becomes `https://github.com/acme-corp/zendesk-tools.git`)
-2. Fetch the tag matching the version (`v2.0.1`)
-3. Read the package source from the tagged commit
-4. Build locally (compile TS, validate manifest)
-5. Cache the result
+This mirrors the Go module proxy protocol structure. The `.pkg` endpoint returns the same `.toolbox.pkg` archive that the GitHub Action publishes.
 
 #### Package metadata
 
@@ -204,10 +248,12 @@ When a toolset references a package, resolution follows this order:
 1. Check replace directives (local dev overrides)
 2. Check local cache (content-addressable store)
 3. Fetch from proxy (if TOOLBOX_PROXY is set)
-4. Fetch from git (direct clone at tag)
-5. Build from source if fetched from git (compile TS, validate)
+4. Fetch from GitHub Release (download .toolbox.pkg + manifest from release assets)
+5. Fetch from git source (clone at tag, build locally with packaging.Pack)
 6. Store in local cache
 ```
+
+Steps 4 and 5 are the two remote fetch strategies. GitHub Releases (step 4) is preferred because it downloads a pre-built archive — fast and no local build step. Git-source (step 5) is the fallback when release artifacts don't exist.
 
 #### Local cache
 
@@ -539,7 +585,7 @@ Package author's repo:         Harness author's repo:
       toolbox.pkg.json          all packages loaded
 ```
 
-A tool author works on their package using `toolbox.devpkg.json`. They test by running tools locally. When ready, they tag a version in git and optionally push to a proxy.
+A tool author works on their package using `toolbox.devpkg.json`. They test by running tools locally. When ready, they tag a version in git. The GitHub Action (see section 2) automatically packs and publishes the release artifact.
 
 A harness author references that package in `toolbox.toolset.json`. During development, they use `replace` to point at a local checkout. For production, the `replace` is removed and the lockfile pins the published version.
 
@@ -646,7 +692,7 @@ A central registry where packages are published with `toolbox publish` and fetch
 - Packages would need separate identity from their git repos (npm-style package names vs. git URLs)
 - The Go ecosystem proved that git-native package distribution works well and scales
 
-The proxy is the middle ground — it provides the discoverability and caching benefits of a registry without requiring a separate publish step. Packages exist in git; the proxy indexes and caches them.
+GitHub Releases are the middle ground — packages exist in git repos, but distribution uses pre-built release artifacts rather than requiring clients to clone and build. The optional proxy adds discoverability and cross-host caching on top.
 
 ### OCI registries
 
@@ -706,13 +752,9 @@ Tempting but premature. Go avoided this (there is no `go.dev/http`) and it worke
 
 ### 3. WASM binary distribution
 
-Large WASM binaries in git repos are awkward (git is bad at large binaries). Options:
-- Git LFS
-- Separate binary artifacts attached to git tags (GitHub releases)
-- Proxy serves binaries separately from source
-- WASM binaries are built from source as part of the pack step
+Largely resolved by the GitHub Releases model. WASM binaries are included in the `.toolbox.pkg` archive produced by `toolbox pack`. The archive is attached as a release asset — clients download the archive, not the git history. The git repo may store WASM sources or use Git LFS, but consumers never interact with that.
 
-The current spec says WASM binaries are "pre-built and committed to the repo (or attached to the git tag)." This works for now but may need revisiting as packages grow. The proxy naturally solves this — it serves the packed archive which includes WASM binaries, regardless of how the source repo stores them.
+For the git-source fallback path, WASM binaries must be present in the repo at the tagged commit (either committed directly or via LFS). This is another reason to prefer the release artifact path.
 
 ### 4. Toolset file format — JSON vs. something else
 
@@ -746,16 +788,20 @@ This RFC covers a large surface area. The recommended build order:
 
 2. **Local cache layout** — Implement the `~/.cache/toolbox/pkg/` structure. Write cached archives after `Pack`, read them in a new `LoadFromCache` path.
 
-3. **Git-direct resolver** — Given a module path + version, clone/fetch the git repo at the tag, run `Pack` to produce an archive, store in the cache. No proxy yet.
+3. **GitHub Release resolver** — Given a module path + version, fetch the `.toolbox.pkg` archive and manifest from the GitHub Release. Store in the cache. This is the primary remote fetch path.
 
-4. **`Builder.AddFromRegistry`** — New method that calls the resolver, then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
+4. **Git-source fallback resolver** — Given a module path + version, clone/fetch the git repo at the tag, run `Pack` to produce an archive, store in the cache. Used when release artifacts aren't available.
 
-5. **Toolset file format** — Parse `toolbox.toolset.json`, resolve all packages, produce a `ResolvedToolset`. Lockfile generation.
+5. **`Builder.AddFromRegistry`** — New method that calls the resolver (release then git-source), then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
 
-6. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_PROXY` support to the resolver.
+6. **GitHub Action for packing** — `solidarity-ai/toolbox-pack-action` that runs `toolbox pack` and attaches artifacts to a GitHub Release on tag push.
 
-7. **Replace directives** — Support `replace` in the toolset file (or overlay) for local development.
+7. **Toolset file format** — Parse `toolbox.toolset.json`, resolve all packages, produce a `ResolvedToolset`. Lockfile generation.
 
-8. **Search and discovery** — Proxy search API, `toolbox search` CLI command.
+8. **Replace directives** — Support `replace` in the toolset file (or overlay) for local development.
 
-Steps 1-4 are the critical path. Steps 5-8 can be parallelized.
+9. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_PROXY` support to the resolver.
+
+10. **Search and discovery** — Proxy search API, `toolbox search` CLI command.
+
+Steps 1-5 are the critical path. Step 6 (GH Action) can be built in parallel. Steps 7-10 can be parallelized after the core resolver works.

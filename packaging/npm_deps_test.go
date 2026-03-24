@@ -1,6 +1,7 @@
 package packaging_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,6 +181,67 @@ func npmInstall(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatalf("npm install failed: %v\n%s", err, out)
 	}
+}
+
+// TestNpmDepsE2E runs the github-issues tool against the real GitHub API.
+// Uses GITHUB_TOKEN env var, or falls back to `gh auth token`.
+func TestNpmDepsE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E test in short mode")
+	}
+	token := githubToken(t)
+
+	fixtureDir := findFixture(t, "github-issues")
+	workDir := copyFixtureToTempDir(t, fixtureDir)
+	npmInstall(t, workDir)
+
+	loaded, err := packaging.LoadDev(workDir)
+	if err != nil {
+		t.Fatalf("LoadDev: %v", err)
+	}
+
+	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+
+	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
+	result, err := invoke.Run(resolved, "github-issues.get", map[string]any{
+		"owner":  "octocat",
+		"repo":   "Hello-World",
+		"number": 1,
+		"token":  token,
+	})
+	if err != nil {
+		t.Fatalf("invoke.Run: %v", err)
+	}
+
+	var issue struct {
+		Number int      `json:"number"`
+		Title  string   `json:"title"`
+		State  string   `json:"state"`
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(result), &issue); err != nil {
+		t.Fatalf("unmarshal result: %v\nraw: %s", err, result)
+	}
+
+	if issue.Number != 1 {
+		t.Errorf("expected issue #1, got #%d", issue.Number)
+	}
+	if issue.Title == "" {
+		t.Error("expected non-empty title")
+	}
+	t.Logf("fetched issue #%d: %q (state=%s)", issue.Number, issue.Title, issue.State)
+}
+
+func githubToken(t *testing.T) string {
+	t.Helper()
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		t.Fatal("GITHUB_TOKEN not set and `gh auth token` failed — need a GitHub token for E2E test")
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Ensure quickts is used (imported for EmitBundle).

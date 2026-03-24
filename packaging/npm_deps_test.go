@@ -232,7 +232,7 @@ func githubToken(t *testing.T) string {
 	}
 	out, err := exec.Command("gh", "auth", "token").Output()
 	if err != nil {
-		t.Fatal("GITHUB_TOKEN not set and `gh auth token` failed — need a GitHub token for E2E test")
+		t.Skip("GITHUB_TOKEN not set and `gh auth token` failed — set GITHUB_TOKEN to enable this test")
 	}
 	return strings.TrimSpace(string(out))
 }

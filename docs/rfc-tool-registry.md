@@ -107,20 +107,49 @@ The module path is always the identity. How you obtain the bytes is a separate c
 
 ### 2. Package Registry / Tool Library
 
-#### Design: GitHub Releases as primary distribution
+#### Design: Built package registry with pluggable sources
 
-Packages live in git repositories and are distributed as pre-built `.toolbox.pkg` archives attached to GitHub Releases (or equivalent release mechanisms on other git hosts). The release artifact is the package — not the raw source tree.
+The distribution model separates **package identity** (module path) from **package source** (where the built archive is fetched from). A package source is any system that can serve a `.toolbox.pkg` archive and its manifest for a given module path + version. GitHub Releases is the first and primary source, but the abstraction is not GitHub-specific.
 
-This diverges from Go modules (which treat the source at a tag as the package) in one important way: we ship pre-built archives via releases rather than requiring clients to build from source. The reasons:
+```
+Package Identity (module path)  →  Package Source (fetches the archive)
+                                      ├── GitHub Releases (primary)
+                                      ├── GitLab Releases
+                                      ├── Generic HTTP (any URL serving the artifacts)
+                                      └── Git source (fallback: clone + build)
+```
 
-- **Release artifacts are the natural distribution unit.** `packaging.Pack` already produces a self-contained `.toolbox.pkg` archive with sha256 integrity. Attaching it to a release is the simplest publish step.
-- **No proxy required for basic use.** Clients download release artifacts directly from the git host's release API. No intermediate infrastructure needed.
-- **WASM binaries work naturally.** Large WASM binaries are awkward in git history but trivial as release attachments. This eliminates the biggest pain point of git-native distribution.
-- **Familiar workflow.** Tag a version, run `toolbox pack`, attach the archive to the release. A GitHub Action automates this to zero manual steps.
+The reasons for built-archive-first distribution:
 
-#### Publishing via GitHub Action
+- **Release artifacts are the natural distribution unit.** `packaging.Pack` already produces a self-contained `.toolbox.pkg` archive with sha256 integrity. Hosting it anywhere is the simplest publish step.
+- **No proxy required for basic use.** Clients download archives directly from the source. No intermediate infrastructure needed.
+- **WASM binaries work naturally.** Large WASM binaries are awkward in git history but trivial as hosted artifacts. This eliminates the biggest pain point of git-native distribution.
+- **Host-agnostic.** Any CI system that can run `toolbox pack` and upload two files can be a package source.
 
-We provide an official `solidarity-ai/toolbox-pack-action` that automates the pack-and-release workflow:
+#### Package source interface
+
+A package source implements a simple contract:
+
+```
+Given (module_path, version):
+  → return (.toolbox.pkg archive bytes, toolbox.pkg.json manifest bytes)
+  → or "not found"
+```
+
+The resolver tries sources in order until one succeeds. The source is recorded in the lockfile for provenance.
+
+#### GitHub Releases source (primary)
+
+For GitHub-hosted packages, the release artifact convention is:
+
+A release tagged `v2.0.1` has these assets:
+
+```
+{name}.toolbox.pkg       # the archive (same format packaging.Pack produces)
+toolbox.pkg.json         # external manifest with sha256
+```
+
+We provide an official `solidarity-ai/toolbox-pack-action` that automates this:
 
 ```yaml
 # .github/workflows/release.yml
@@ -145,22 +174,11 @@ This action:
 3. Creates a GitHub Release for the tag
 4. Attaches both files as release assets
 
-Package authors add this workflow once. After that, publishing is: `git tag v2.0.1 && git push --tags`.
-
-#### Release artifact convention
-
-A release for version `v2.0.1` is expected to have these assets:
-
-```
-{name}.toolbox.pkg       # the archive (same format packaging.Pack produces)
-toolbox.pkg.json         # external manifest with sha256
-```
-
-The resolver fetches these from the release by convention. The release tag must match the version.
+Package authors add this workflow once. After that, publishing is: `git tag v2.0.1 && git push --tags`. Equivalent actions/pipelines can be built for GitLab CI, Gitea, or any CI system.
 
 #### Git-source fallback
 
-When release artifacts are not available (e.g., private repos without CI, older packages, non-GitHub hosts without release support), the client falls back to git-source resolution:
+When no built artifacts are available, the client falls back to git-source resolution:
 
 1. Derive the git clone URL from the module path
 2. Fetch the tag matching the version
@@ -168,19 +186,19 @@ When release artifacts are not available (e.g., private repos without CI, older 
 4. Build locally (`packaging.Pack` — compile TS, validate manifest)
 5. Cache the result
 
-This fallback ensures the system works with any git host, not just GitHub. But the recommended path is always: publish release artifacts.
+This fallback ensures the system works with any git host, even without CI. But the recommended path is always: publish built artifacts.
 
-#### Registry proxy (optional, for discovery and caching)
+#### Registry proxy (optional, for discovery and stats)
 
-A registry proxy is **optional** infrastructure for organizations that want centralized search and caching:
+A registry proxy is **optional** infrastructure. It does **not** host package archives itself — it passes through download links to the underlying package source and provides value-added services:
 
 ```
 TOOLBOX_PROXY=https://proxy.toolbox.dev
 ```
 
-The proxy serves two functions:
+The proxy provides:
 
-**1. Discovery and search.** Provides a search API over known packages:
+**1. Discovery and search.** A search API over known packages:
 
 ```
 GET /v1/search?q=zendesk&runtime=typescript-sandbox
@@ -189,23 +207,25 @@ GET /v1/packages/github.com/acme-corp/zendesk-tools/versions
 GET /v1/packages/github.com/acme-corp/zendesk-tools@v2.0.1
 ```
 
-**2. Caching and availability.** Mirrors release artifacts so clients have a single fast endpoint. Survives release deletions and git host outages.
+**2. Download stats and popularity.** Tracks download counts per package/version, enabling ecosystem visibility (most-used packages, trending tools).
 
-The proxy is not required for basic operation. Clients can fetch packages directly from GitHub Releases without any proxy. The proxy adds value for organizations with many packages, cross-host discovery needs, or availability requirements.
+**3. Availability caching (optional).** Can optionally mirror archives for resilience against source outages or deletions. This is a caching layer, not the primary host.
+
+The proxy is not required for fetching packages. Clients download directly from the package source (e.g., GitHub Releases API). The proxy adds value for ecosystem-wide discovery, stats, and organizational visibility.
 
 #### Proxy protocol
 
-When present, the proxy serves cached archives and metadata:
+When present, the proxy serves metadata and can redirect or cache archives:
 
 ```
-GET /v1/packages/{module_path}/@v/{version}.info     → version metadata (JSON)
-GET /v1/packages/{module_path}/@v/{version}.pkg      → .toolbox.pkg archive
-GET /v1/packages/{module_path}/@v/{version}.manifest  → toolbox.pkg.json (external manifest with sha256)
+GET /v1/packages/{module_path}/@v/{version}.info     → version metadata (JSON, includes source download URLs)
+GET /v1/packages/{module_path}/@v/{version}.pkg      → .toolbox.pkg archive (cached or redirect to source)
+GET /v1/packages/{module_path}/@v/{version}.manifest  → toolbox.pkg.json (cached or redirect to source)
 GET /v1/packages/{module_path}/@latest                → latest version info
 GET /v1/packages/{module_path}/@v/list                → available versions
 ```
 
-This mirrors the Go module proxy protocol structure. The `.pkg` endpoint returns the same `.toolbox.pkg` archive that the GitHub Action publishes.
+The `.info` endpoint returns source URLs so clients can fetch directly from the package source. The `.pkg` and `.manifest` endpoints can either serve cached copies or redirect (302) to the source URL.
 
 #### Package metadata
 
@@ -377,11 +397,32 @@ A toolset is declared as a JSON file that lists package dependencies and binding
 
 Key design choices:
 
-- **`packages`** declares all dependencies with exact versions. This is the source of truth for what packages the toolset uses.
+- **`packages`** declares all dependencies with exact versions. This is the source of truth for what packages the toolset uses. Supports aliasing (see below).
 - **`replace`** redirects a module path to a local directory (for development). Semantics match Go's `replace` directive.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
 - **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.
 - **`context`** and **`credentials`** declare the expected inputs. These are documentation and validation — the harness provides actual values at runtime.
+
+#### Package aliasing for name conflicts
+
+Two packages from different organizations may share the same `name` field (e.g., both called `"zendesk-tools"`). Since short names are derived from the package `name`, this creates ambiguity. The toolset resolves this with explicit aliases, similar to Go's import renaming:
+
+```json
+{
+  "packages": {
+    "github.com/acme-corp/zendesk-tools": "v2.0.1",
+    "github.com/other-org/zendesk-tools": { "version": "v1.0.0", "alias": "other-zendesk" }
+  }
+}
+```
+
+When no alias is specified, the short name defaults to the package `name` field from the manifest. When an alias is set, the alias replaces the package name for all short-name resolution within this toolset.
+
+Rules:
+- If two packages resolve to the same short name and neither has an alias, the toolset fails to parse with a clear error: *"packages 'github.com/acme-corp/zendesk-tools' and 'github.com/other-org/zendesk-tools' both resolve to short name 'zendesk-tools'; add an alias to one"*.
+- Aliases are toolset-local — they don't change the package's canonical identity (module path) or its FQN.
+- Full FQNs always work regardless of aliasing. Aliases only affect short-name references.
+- The alias appears in `AgentView` tool names when the package prefix is shown (e.g., `other-zendesk/tickets.list` vs `zendesk-tools/tickets.list`).
 
 #### Lockfile: `toolbox.toolset.lock`
 
@@ -391,24 +432,34 @@ The lockfile records the resolved state of all packages:
 {
   "packages": {
     "github.com/acme-corp/zendesk-tools@v2.0.1": {
-      "sha256": "a1b2c3d4e5f6...",
-      "resolved_from": "proxy",
+      "archive_sha256": "a1b2c3d4e5f6...",
+      "manifest_sha256": "9f8e7d6c5b4a...",
+      "git_sha": "abc123def456789...",
+      "resolved_from": "github-release",
       "resolved_at": "2026-03-15T10:30:00Z"
     },
     "github.com/solidarity-ai/slack-tools@v1.2.0": {
-      "sha256": "f6e5d4c3b2a1...",
-      "resolved_from": "git",
+      "archive_sha256": "f6e5d4c3b2a1...",
+      "manifest_sha256": "1a2b3c4d5e6f...",
+      "git_sha": "def789abc123456...",
+      "resolved_from": "git-source",
       "resolved_at": "2026-03-20T08:15:00Z"
     }
   }
 }
 ```
 
+Each lockfile entry records three integrity hashes:
+
+- **`archive_sha256`**: SHA256 of the `.toolbox.pkg` archive bytes. Verified by `packaging.LoadArchive` on every load.
+- **`manifest_sha256`**: SHA256 of the external `toolbox.pkg.json` manifest. Ensures the manifest hasn't been tampered with independently of the archive.
+- **`git_sha`**: The git commit SHA for the version tag. Pins the exact source commit for auditing and reproducibility. If the git host force-pushes the tag to a different commit, this detects the change.
+
 The lockfile is committed to version control. It guarantees:
 
 - **Reproducibility**: Same lockfile + same toolset file = same resolved packages on any machine.
-- **Integrity**: sha256 in the lockfile is compared against the archive on every load. Mismatch means corruption or tampering.
-- **Auditability**: `resolved_from` and `resolved_at` provide provenance.
+- **Integrity**: All three hashes are verified on load. Mismatch on any hash means corruption or tampering — the cache entry is discarded and re-fetched. If the re-fetched version also doesn't match, resolution fails with an error.
+- **Auditability**: `resolved_from`, `resolved_at`, and `git_sha` provide full provenance. You can trace any package in a resolved toolset back to the exact source commit.
 
 Running `toolbox resolve` reads the toolset file, resolves all packages, and writes/updates the lockfile. Running `toolbox resolve --upgrade github.com/acme-corp/zendesk-tools` bumps one package to its latest version and updates the lockfile.
 

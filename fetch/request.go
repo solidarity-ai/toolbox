@@ -42,28 +42,6 @@ func NewRequest(url string, init *RequestInit) *Request {
 	return r
 }
 
-// URL returns the request URL.
-func (r *Request) URL() string { return r.url }
-
-// Method returns the request method.
-func (r *Request) Method() string { return r.method }
-
-// Headers returns the request headers.
-func (r *Request) Headers() *Headers { return r.headers }
-
-// Body returns the request body reader, or nil.
-func (r *Request) Body() io.Reader { return r.body }
-
-// Clone creates a copy of the request.
-func (r *Request) Clone() *Request {
-	return &Request{
-		url:     r.url,
-		method:  r.method,
-		headers: r.headers.Clone(),
-		body:    r.body, // Note: body can only be consumed once in the real API
-	}
-}
-
 // normalizeMethod uppercases standard HTTP methods per the Fetch spec.
 func normalizeMethod(method string) string {
 	upper := strings.ToUpper(method)

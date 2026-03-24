@@ -46,6 +46,44 @@ func TestRunWithHiddenParamBinding(t *testing.T) {
 	}
 }
 
+func TestRunWithHiddenParamBindingOverridesAgentValue(t *testing.T) {
+	t.Parallel()
+
+	cfg := toolset.Config{
+		Context: map[string]any{
+			"fixed_a": 10,
+		},
+		Tools: []toolset.BoundTool{
+			{
+				ToolRef: "calc.add",
+				Bindings: map[string]toolset.Binding{
+					"a": {Value: "context.fixed_a", Hidden: true},
+				},
+			},
+		},
+	}
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(calcDir()); err != nil {
+		t.Fatalf("add calc dir: %v", err)
+	}
+	resolved, err := builder.Resolve(cfg)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// Agent tries to pass a=999 for a hidden param — binding should override it
+	result, err := invoke.Run(resolved, "calc.add", map[string]any{"a": 999, "b": 5})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Should be 15 (10+5), not 1004 (999+5) — the bound value wins
+	if result != "15" {
+		t.Fatalf("expected 15 (bound 10+5), got %q — agent value was not overridden", result)
+	}
+}
+
 func TestRunWithCheckExpressionBlocksCall(t *testing.T) {
 	t.Parallel()
 

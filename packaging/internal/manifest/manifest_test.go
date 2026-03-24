@@ -524,10 +524,12 @@ func TestCompileWithResourceBindingsOverride(t *testing.T) {
 		Runtime: tooldef.RuntimeTypeScriptSandbox,
 		Tools: []DevManifestTool{
 			{
-				EntryTS:          "tools/account.tickets.list.ts",
-				Idempotent:       boolPtr(true),
-				AccessMode:       accessModePtr(tooldef.AccessModeReadOnly),
-				ResourceBindings: map[string]string{"account_id": "zendesk_account"},
+				EntryTS:    "tools/account.tickets.list.ts",
+				Idempotent: boolPtr(true),
+				AccessMode: accessModePtr(tooldef.AccessModeReadOnly),
+				Resource: &DevManifestToolResource{
+					Bindings: map[string]string{"account_id": "zendesk_account"},
+				},
 			},
 		},
 	}
@@ -549,6 +551,71 @@ func TestCompileWithResourceBindingsOverride(t *testing.T) {
 	}
 	if rp.BindingName != "zendesk_account" {
 		t.Fatalf("expected binding name 'zendesk_account', got %q", rp.BindingName)
+	}
+}
+
+func TestCompileWithResourceModeOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		entryTS        string
+		mode           string
+		wantParamNames []string
+	}{
+		{
+			// "archive" is normally a member verb (includes deepest ID: ticket_id).
+			// Forcing "collection" mode should exclude the deepest ID.
+			name:           "archive forced collection excludes deepest ID",
+			entryTS:        "tools/account.tickets.archive.ts",
+			mode:           "collection",
+			wantParamNames: []string{"account_id"},
+		},
+		{
+			// "list" is normally a collection verb (excludes deepest ID).
+			// Forcing "member" mode should include the deepest ID.
+			name:           "list forced member includes deepest ID",
+			entryTS:        "tools/account.tickets.list.ts",
+			mode:           "member",
+			wantParamNames: []string{"account_id", "ticket_id"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dev := DevManifest{
+				Name:    "test",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{
+						EntryTS: tt.entryTS,
+						Resource: &DevManifestToolResource{
+							Mode: tt.mode,
+						},
+					},
+				},
+			}
+
+			pkg := Compile(dev)
+
+			if len(pkg.Tools) != 1 {
+				t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
+			}
+
+			tool := pkg.Tools[0]
+			if len(tool.ResourceParams) != len(tt.wantParamNames) {
+				t.Fatalf("expected %d resource params, got %d: %v", len(tt.wantParamNames), len(tool.ResourceParams), tool.ResourceParams)
+			}
+
+			for i, wantName := range tt.wantParamNames {
+				if tool.ResourceParams[i].Name != wantName {
+					t.Fatalf("param[%d]: expected name %q, got %q", i, wantName, tool.ResourceParams[i].Name)
+				}
+			}
+		})
 	}
 }
 

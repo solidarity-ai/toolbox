@@ -51,11 +51,17 @@ type DevManifest struct {
 	Tools                     []DevManifestTool   `json:"tools"`
 }
 
+// DevManifestToolResource groups resource-related overrides for a tool.
+type DevManifestToolResource struct {
+	Bindings map[string]string `json:"bindings,omitempty"`
+	Mode     string            `json:"mode,omitempty"` // "collection" or "member", empty means infer
+}
+
 type DevManifestTool struct {
-	EntryTS          string              `json:"entry_ts"`
-	Idempotent       *bool               `json:"idempotent"`
-	AccessMode       *tooldef.AccessMode `json:"accessMode"`
-	ResourceBindings map[string]string   `json:"resource_bindings,omitempty"` // param name -> canonical binding name
+	EntryTS    string                   `json:"entry_ts"`
+	Idempotent *bool                    `json:"idempotent"`
+	AccessMode *tooldef.AccessMode      `json:"accessMode"`
+	Resource   *DevManifestToolResource `json:"resource,omitempty"`
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -112,10 +118,16 @@ func Compile(dev DevManifest) tooldef.Package {
 			accessMode = *tool.AccessMode
 		}
 
-		resourceParams := InferResourceParams(tool.EntryTS)
+		var resourceMode string
+		var resourceBindings map[string]string
+		if tool.Resource != nil {
+			resourceMode = tool.Resource.Mode
+			resourceBindings = tool.Resource.Bindings
+		}
+		resourceParams := InferResourceParamsWithMode(tool.EntryTS, resourceMode)
 		// Apply manifest overrides for binding names
 		for j := range resourceParams {
-			if override, ok := tool.ResourceBindings[resourceParams[j].Name]; ok {
+			if override, ok := resourceBindings[resourceParams[j].Name]; ok {
 				resourceParams[j].BindingName = override
 			}
 		}
@@ -188,6 +200,14 @@ type ResourceParam = tooldef.ResourceParam
 // excluded; for "get"/"update"/"delete" it is included.
 // Only applies when there are 3+ segments (resource.subresource.verb).
 func InferResourceParams(entryTS string) []ResourceParam {
+	return InferResourceParamsWithMode(entryTS, "")
+}
+
+// InferResourceParamsWithMode is like InferResourceParams but accepts an
+// optional mode override. When mode is "collection", the deepest resource ID
+// is always excluded. When mode is "member", it is always included. When mode
+// is empty, the current isCollectionMethod inference is used.
+func InferResourceParamsWithMode(entryTS string, mode string) []ResourceParam {
 	base := filepath.Base(entryTS)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	parts := strings.Split(base, ".")
@@ -200,10 +220,20 @@ func InferResourceParams(entryTS string) []ResourceParam {
 	verb := parts[len(parts)-1]
 	resources := parts[:len(parts)-1] // all segments except verb
 
-	// Default: include all resource IDs (member operation).
-	// Collection methods exclude the deepest resource ID.
+	// Determine whether to treat as collection (exclude deepest ID) or member
+	// (include deepest ID), based on mode override or verb inference.
+	var collection bool
+	switch mode {
+	case "collection":
+		collection = true
+	case "member":
+		collection = false
+	default:
+		collection = isCollectionMethod(verb)
+	}
+
 	count := len(resources)
-	if isCollectionMethod(verb) {
+	if collection {
 		count = len(resources) - 1
 	}
 

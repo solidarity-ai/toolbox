@@ -39,9 +39,6 @@ func TestNpmDepsDevMode(t *testing.T) {
 	if !strings.Contains(bundled, "ZodError") {
 		t.Error("bundle missing zod code")
 	}
-	if !strings.Contains(bundled, "Octokit") {
-		t.Error("bundle missing octokit code")
-	}
 	t.Logf("dev mode bundle: %d bytes", len(bundled))
 }
 
@@ -122,12 +119,8 @@ func TestNpmDepsBundleSize(t *testing.T) {
 		t.Fatalf("EmitBundle: %v", err)
 	}
 
-	// The bundle should contain code from both zod and octokit
 	if !strings.Contains(bundled, "ZodError") {
 		t.Error("bundled JS does not contain zod code (expected ZodError)")
-	}
-	if !strings.Contains(bundled, "Octokit") {
-		t.Error("bundled JS does not contain octokit code")
 	}
 	t.Logf("bundle size: %d bytes", len(bundled))
 }

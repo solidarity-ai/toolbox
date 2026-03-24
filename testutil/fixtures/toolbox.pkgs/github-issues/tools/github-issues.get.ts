@@ -1,5 +1,4 @@
 import "./shims.ts";
-import { Octokit } from "octokit";
 import { z } from "zod";
 
 const ParamsSchema = z.object({
@@ -26,16 +25,26 @@ export default async function tool(
 ) {
   const parsed = ParamsSchema.parse(params);
 
-  const octokit = new Octokit({
-    auth: parsed.token,
-  });
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "toolbox",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (parsed.token) {
+    headers["Authorization"] = `token ${parsed.token}`;
+  }
 
-  const { data } = await octokit.rest.issues.get({
-    owner: parsed.owner,
-    repo: parsed.repo,
-    issue_number: parsed.number,
-  });
+  const resp = await fetch(
+    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/issues/${parsed.number}`,
+    { headers },
+  );
 
+  if (resp.status !== 200) {
+    const body = await resp.text();
+    throw new Error(`GitHub API ${resp.status}: ${body}`);
+  }
+
+  const data = await resp.json();
   const issue = IssueSchema.parse(data);
 
   return JSON.stringify({

@@ -28,27 +28,20 @@ func TestNpmDepsDevMode(t *testing.T) {
 
 	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
 
-	// Run the tool — it will fail at runtime (no network / missing QuickJS APIs)
-	// but should NOT fail with esbuild "unsupported import" errors.
-	_, err = invoke.Run(resolved, "github-issues.get", map[string]any{
-		"owner":  "octocat",
-		"repo":   "hello-world",
-		"number": 1,
-	})
-	// The tool will fail with a network error (can't reach api.github.com),
-	// but critically it should NOT fail with "unsupported import" or
-	// "bare import" errors — those would mean esbuild couldn't resolve npm deps.
+	// Verify esbuild can bundle the tool with npm deps.
+	// We don't run the tool (it would hang on a real fetch to api.github.com)
+	// but we prove the bundle is self-contained with zod + octokit inlined.
+	bundled, err := quickts.EmitBundle(*resolved.Tools()[0].TS)
 	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "unsupported import") || strings.Contains(errStr, "bare import") {
-			t.Fatalf("esbuild failed to resolve npm deps: %v", err)
-		}
-		if strings.Contains(errStr, "esbuild emit failed") {
-			t.Fatalf("esbuild bundling failed: %v", err)
-		}
-		// Network error or fetch error is expected — the tool tried to call GitHub API
-		t.Logf("expected runtime error (network): %v", err)
+		t.Fatalf("esbuild bundling failed: %v", err)
 	}
+	if !strings.Contains(bundled, "ZodError") {
+		t.Error("bundle missing zod code")
+	}
+	if !strings.Contains(bundled, "Octokit") {
+		t.Error("bundle missing octokit code")
+	}
+	t.Logf("dev mode bundle: %d bytes", len(bundled))
 }
 
 // TestNpmDepsDistMode documents that dist mode does NOT yet support npm deps.

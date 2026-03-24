@@ -49,6 +49,8 @@ type Host struct {
 	ReadFile  func(path string) (string, error)
 	WriteFile func(path string, data string) error
 	Fetch     func(url, method, headersJSON, body string) (FetchResult, error)
+	// Console receives JS console output. If nil, console calls are no-ops.
+	Console func(level string, args []string)
 }
 
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
@@ -159,6 +161,49 @@ func installHost(rt *qjs.Runtime, host Host) error {
 		}
 	}
 
+	if err := installConsole(rt, host); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func installConsole(rt *qjs.Runtime, host Host) error {
+	ctx := rt.Context()
+
+	jsLog, err := qjs.FuncToJS(ctx, func(level string, args []string) {
+		if host.Console != nil {
+			host.Console(level, args)
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("bind console: %w", err)
+	}
+	ctx.Global().SetPropertyStr("__toolboxConsole", jsLog)
+
+	consoleJS := `
+(function() {
+  function makeLog(level) {
+    return function(...args) {
+      __toolboxConsole(level, args.map(a => {
+        if (typeof a === 'string') return a;
+        try { return JSON.stringify(a); } catch { return String(a); }
+      }));
+    };
+  }
+  globalThis.console = {
+    log: makeLog('log'),
+    warn: makeLog('warn'),
+    error: makeLog('error'),
+    info: makeLog('info'),
+    debug: makeLog('debug'),
+    trace: makeLog('trace'),
+  };
+})();
+`
+	if _, err := rt.Eval("__toolbox_console.js", qjs.Code(consoleJS)); err != nil {
+		return fmt.Errorf("install console: %w", err)
+	}
 	return nil
 }
 

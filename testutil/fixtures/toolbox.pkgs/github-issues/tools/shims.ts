@@ -1,12 +1,6 @@
 // Runtime shims for QuickJS — provides minimal browser globals that npm
 // packages expect when bundled with browser/default export conditions.
-
-const noop = (..._args: unknown[]) => {};
-
-// Console with bindable methods
-globalThis.console = {
-  log: noop, warn: noop, error: noop, info: noop, debug: noop, trace: noop,
-} as any;
+// Note: console is provided by the runtime (installConsole), not here.
 
 // Navigator stub — QuickJS may have read-only navigator
 try { (globalThis as any).navigator = { userAgent: "toolbox" }; } catch {}

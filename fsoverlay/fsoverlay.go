@@ -2,6 +2,7 @@ package fsoverlay
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"sort"
 )
@@ -52,6 +53,15 @@ func (o FS) Open(name string) (fs.File, error) {
 		return nil, errors.Join(errs...)
 	}
 	return nil, fs.ErrNotExist
+}
+
+func (o FS) ReadFile(name string) ([]byte, error) {
+	f, err := o.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 func (o FS) Stat(name string) (fs.FileInfo, error) {

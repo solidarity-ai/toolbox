@@ -47,12 +47,15 @@ type PackageTool struct {
 // outside-in seams. It combines static package identity with the concrete
 // executable artifact for one visible tool.
 type ResolvedTool struct {
-	Name         string
-	Description  string
-	ParamsSchema map[string]any
-	Package      *Package
-	TS           *TSToolDef
-	TSWasm       *TSWasmToolDef
+	Name           string
+	Description    string
+	ParamsSchema   map[string]any
+	AccessMode     AccessMode
+	Idempotent     *bool
+	ResourceParams []ResourceParam
+	Package        *Package
+	TS             *TSToolDef
+	TSWasm         *TSWasmToolDef
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

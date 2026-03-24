@@ -199,10 +199,11 @@ func InferResourceParams(entryTS string) []ResourceParam {
 	verb := parts[len(parts)-1]
 	resources := parts[:len(parts)-1] // all segments except verb
 
-	// Determine how many resource IDs to include
-	count := len(resources) - 1 // skip deepest for list
-	if verb == "get" || verb == "update" || verb == "delete" || verb == "remove" || verb == "set" || verb == "patch" || verb == "put" || verb == "replace" || verb == "edit" {
-		count = len(resources)
+	// Default: include all resource IDs (member operation).
+	// Collection methods exclude the deepest resource ID.
+	count := len(resources)
+	if isCollectionMethod(verb) {
+		count = len(resources) - 1
 	}
 
 	if count <= 0 {
@@ -218,6 +219,17 @@ func InferResourceParams(entryTS string) []ResourceParam {
 		})
 	}
 	return params
+}
+
+// isCollectionMethod returns true for verbs that operate on a collection
+// (and therefore don't need the deepest resource ID).
+func isCollectionMethod(verb string) bool {
+	switch verb {
+	case "list", "create", "add", "search", "find", "new", "send", "post":
+		return true
+	default:
+		return false
+	}
 }
 
 // singularize naively strips a trailing 's' from a word.

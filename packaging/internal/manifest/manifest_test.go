@@ -492,6 +492,11 @@ func TestInferResourceParams(t *testing.T) {
 			{Name: "calendar_id", BindingName: "calendar_id"},
 			{Name: "event_id", BindingName: "event_id"},
 		}},
+		// Unknown verb defaults to member (includes deepest ID)
+		{"tools/account.tickets.archive.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+			{Name: "ticket_id", BindingName: "ticket_id"},
+		}},
 		// Flat tool: calc.add -> no resource params
 		{"tools/calc.add.ts", nil},
 		// Simple tool: users.list -> no parent resources (list at top level)

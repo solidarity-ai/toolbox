@@ -31,9 +31,6 @@ func TestServiceDiscoveryReturnsAgentViewTools(t *testing.T) {
 			if tool.Description == "" {
 				t.Fatal("expected non-empty description")
 			}
-			if !tool.ReadOnly {
-				t.Fatal("expected calc.add to be read-only")
-			}
 			break
 		}
 	}

@@ -10,42 +10,37 @@ type AgentView struct {
 
 // AgentTool is a single tool visible to the agent.
 type AgentTool struct {
-	Name         string
-	Description  string
+	Name        string
+	Description string
+	// TODO: When TS metadata extraction lands (ParamTypes/ReturnType on AgentTool),
+	// consider deriving ParamsSchema from the TS types rather than carrying the
+	// JSON Schema through from PackageTool. This would make AgentView the single
+	// source of truth for the agent-visible type surface.
 	ParamsSchema map[string]any
-	ParamTypes   []ParamType
-	ReturnType   string
-	ReadOnly     bool
-	Idempotent   bool
+	AccessMode   tooldef.AccessMode
+	Idempotent   *bool
 }
 
-// ParamType mirrors the typescript-go extraction output for one parameter.
-type ParamType struct {
-	Name     string
-	TypeText string
-	Optional bool
-}
-
-// AgentView produces the agent-visible tool surface from a resolved toolset.
-// Hidden params are removed from schemas. Visible params retain their metadata.
+// AgentView produces the agent-visible tool surface from the resolved toolset.
+// Hidden params are removed from each tool's ParamsSchema.
 func (r ResolvedToolset) AgentView() AgentView {
-	var tools []AgentTool
+	tools := make([]AgentTool, 0, len(r.tools))
 	for _, rt := range r.tools {
-		at := AgentTool{
+		tools = append(tools, AgentTool{
 			Name:         rt.Name,
 			Description:  rt.Description,
-			ParamsSchema: filterSchema(rt.ParamsSchema, r.hiddenParams[rt.Name]),
-			ReadOnly:     rt.Package != nil && rt.Package.Tools != nil && isReadOnly(rt),
-			Idempotent:   isIdempotent(rt),
-		}
-		tools = append(tools, at)
+			ParamsSchema: filterHiddenParams(rt.ParamsSchema, r.hiddenParams[rt.Name]),
+			AccessMode:   rt.AccessMode,
+			Idempotent:   rt.Idempotent,
+		})
 	}
 	return AgentView{Tools: tools}
 }
 
-// filterSchema returns a copy of schema with hidden params removed from
-// "properties" and "required".
-func filterSchema(schema map[string]any, hidden map[string]bool) map[string]any {
+// filterHiddenParams returns a copy of the JSON Schema with hidden params removed.
+// This only handles top-level properties, which matches the binding model's
+// constraint that bindings operate on top-level params only (no nested paths).
+func filterHiddenParams(schema map[string]any, hidden map[string]bool) map[string]any {
 	if len(hidden) == 0 || schema == nil {
 		return schema
 	}
@@ -81,34 +76,4 @@ func filterSchema(schema map[string]any, hidden map[string]bool) map[string]any 
 	}
 
 	return out
-}
-
-func isReadOnly(rt tooldef.ResolvedTool) bool {
-	if rt.Package == nil {
-		return false
-	}
-	for _, pt := range rt.Package.Tools {
-		if rt.TS != nil && pt.EntryTS == rt.TS.Entry {
-			return pt.AccessMode == tooldef.AccessModeReadOnly
-		}
-		if rt.TSWasm != nil && pt.EntryTS == rt.TSWasm.Entry {
-			return pt.AccessMode == tooldef.AccessModeReadOnly
-		}
-	}
-	return false
-}
-
-func isIdempotent(rt tooldef.ResolvedTool) bool {
-	if rt.Package == nil {
-		return false
-	}
-	for _, pt := range rt.Package.Tools {
-		if rt.TS != nil && pt.EntryTS == rt.TS.Entry {
-			return pt.Idempotent != nil && *pt.Idempotent
-		}
-		if rt.TSWasm != nil && pt.EntryTS == rt.TSWasm.Entry {
-			return pt.Idempotent != nil && *pt.Idempotent
-		}
-	}
-	return false
 }

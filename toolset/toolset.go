@@ -115,7 +115,10 @@ func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
 	for _, loaded := range b.packages {
 		tools = append(tools, loaded.ResolvedTools()...)
 	}
+	return b.resolveTools(tools, cfg)
+}
 
+func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
 	// Build binding lookup: tool ref -> param name -> Binding
 	toolBindings := make(map[string]map[string]Binding, len(cfg.Tools))
 	for _, bt := range cfg.Tools {
@@ -140,24 +143,15 @@ func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
 		}
 
 		// Merge resource-level bindings from the two-tier model:
-		// PackageTool.ResourceParams maps param name -> canonical binding name
+		// ResolvedTool.ResourceParams maps param name -> canonical binding name
 		// Config.ResourceBindings maps canonical name -> Binding
-		if tool.Package != nil {
-			for _, pt := range tool.Package.Tools {
-				entryMatch := (tool.TS != nil && pt.EntryTS == tool.TS.Entry) ||
-					(tool.TSWasm != nil && pt.EntryTS == tool.TSWasm.Entry)
-				if !entryMatch {
-					continue
-				}
-				for _, rp := range pt.ResourceParams {
-					// Skip if explicit per-tool binding already set
-					if _, exists := bindings[rp.Name]; exists {
-						continue
-					}
-					if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
-						bindings[rp.Name] = rb
-					}
-				}
+		for _, rp := range tool.ResourceParams {
+			// Skip if explicit per-tool binding already set
+			if _, exists := bindings[rp.Name]; exists {
+				continue
+			}
+			if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
+				bindings[rp.Name] = rb
 			}
 		}
 
@@ -191,6 +185,14 @@ func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
 		context:      cfg.Context,
 		celEnv:       env,
 	}, nil
+}
+
+// ResolveTools resolves a pre-built list of tools with the given config.
+// This is useful for testing with synthetic tool definitions.
+func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
+	b := &Builder{}
+	// Inject pre-resolved tools directly into the resolve flow.
+	return b.resolveTools(tools, cfg)
 }
 
 // NewResolvedToolset creates a resolved toolset from a visible tool list

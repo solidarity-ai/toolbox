@@ -36,26 +36,29 @@ func (r ResolvedToolset) ValidateCall(toolName string, agentParams map[string]an
 		fullParams[k] = v
 	}
 
-	// Evaluate each binding
+	// Evaluate each binding: checks first, then values.
+	// Check expressions run against agent-provided params (before injection)
+	// to validate what the agent actually sent.
 	for paramName, cb := range bindings {
-		// Evaluate value binding if present
-		if cb.valueProgram != nil {
-			val, err := evalBinding(cb.valueProgram, agentParams, ctx)
-			if err != nil {
-				return nil, fmt.Errorf("param %q: %w", paramName, err)
-			}
-			fullParams[paramName] = val
-		}
-
-		// Evaluate check expression if present
 		if cb.checkProgram != nil {
-			pass, err := evalCheck(cb.checkProgram, fullParams, ctx)
+			pass, err := evalCheck(cb.checkProgram, agentParams, ctx)
 			if err != nil {
 				return nil, fmt.Errorf("param %q: %w", paramName, err)
 			}
 			if !pass {
 				return nil, fmt.Errorf("check failed for param %q on tool %q", paramName, toolName)
 			}
+		}
+	}
+
+	// Evaluate value bindings after all checks pass.
+	for paramName, cb := range bindings {
+		if cb.valueProgram != nil {
+			val, err := evalBinding(cb.valueProgram, agentParams, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("param %q: %w", paramName, err)
+			}
+			fullParams[paramName] = val
 		}
 	}
 

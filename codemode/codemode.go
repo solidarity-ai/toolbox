@@ -101,6 +101,8 @@ func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error
 
 func preludeForTools(view toolset.AgentView) string {
 	var b strings.Builder
+	// Capture the injected invoke function, remove it from globalThis to prevent
+	// direct access, and initialize the tools namespace object.
 	b.WriteString("const __toolboxInvoke = globalThis.__invokeTool;\n")
 	b.WriteString("delete globalThis.__invokeTool;\n")
 	b.WriteString("globalThis.tools = {};\n")

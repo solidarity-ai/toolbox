@@ -209,28 +209,93 @@ export async function authenticate(
 }
 ```
 
-The `CredentialInjector` runs this strategy in a **separate, minimal QuickJS sandbox** — not the tool's sandbox. The strategy sandbox has:
-- No `fetch`, `exec`, or filesystem access — it can only compute over the request and secrets.
+The `CredentialInjector` runs this strategy in a **separate, minimal QuickJS sandbox** — not the tool's sandbox. The strategy sandbox has two modes with different capabilities:
+
+**Injection mode** (runs on every matching outbound request):
+- A scoped `fetch()` for calling auth-related endpoints (e.g. token exchange, STS). The fetch is restricted to hosts declared in the strategy's `auth_hosts` list — it cannot call arbitrary URLs.
 - A `secrets.get()` function scoped to the credential's secret store prefix.
-- A timeout (e.g. 100ms) to prevent abuse.
+- No `exec` or filesystem access.
+- A timeout (e.g. 2s) to prevent abuse — long enough for a token exchange HTTP call, short enough to fail fast.
 
-The strategy receives the request metadata and returns headers to merge. The injector applies the returned headers to the real request before sending it upstream. The tool never sees the strategy execute or its outputs.
+```json
+"credentials": [{
+  "name": "aws_s3",
+  "type": "custom",
+  "strategy": "auth/aws_sigv4.ts",
+  "auth_hosts": ["sts.amazonaws.com"],
+  "inject": { "hosts": ["*.amazonaws.com"] }
+}]
+```
 
-**Callback support:** For auth flows that require a server-side callback (e.g. OAuth2 with custom token exchange steps), the strategy can also export an `onCallback` handler used during `toolbox auth`:
+The strategy's `fetch()` is NOT the same as the tool's `fetch()`. It is a separate, transport-internal HTTP client that:
+- Does NOT go through the MITM proxy or credential injector (to avoid circular injection).
+- Is restricted to `auth_hosts` only.
+- Has its own audit trail (`auth_strategy_fetch` events).
+
+For pure computation strategies (HMAC signing, SigV4) that don't need HTTP calls, `auth_hosts` can be omitted and `fetch` will not be available, keeping the sandbox minimal.
+
+**Setup mode** (runs during `toolbox auth`, interactive):
+- Same `fetch()` capability as injection mode, for token exchange calls.
+- A `secrets` object with both `get()` and `set()` for persisting tokens.
+- A `human` object for interactive authentication flows:
 
 ```typescript
-// Called during `toolbox auth` when the callback URL is hit
-export async function onCallback(
-  callbackParams: Record<string, string>,
-  secrets: { get(key: string): string; set(key: string, value: string): void }
-): Promise<void> {
-  // Custom token exchange logic
-  const token = await exchangeCode(callbackParams.code, secrets.get("client_secret"));
-  secrets.set("access_token", token);
+export async function setup(ctx: {
+  fetch: (url: string, opts?: RequestInit) => Promise<Response>,
+  secrets: { get(key: string): string; set(key: string, value: string): void },
+  human: {
+    // Opens a browser to the URL, starts a localhost callback server,
+    // and returns the callback query parameters when the user completes the flow.
+    browserAuth(url: string, opts?: { port?: number }): Promise<Record<string, string>>,
+    // Prompts the user for text input in the terminal.
+    prompt(message: string): Promise<string>,
+  }
+}): Promise<void> {
+  // Example: custom OAuth2-like flow
+  const authUrl = `https://auth.custom.com/authorize?client_id=${ctx.secrets.get("client_id")}`;
+  const callback = await ctx.human.browserAuth(authUrl);
+
+  // Exchange the code for tokens
+  const resp = await ctx.fetch("https://auth.custom.com/token", {
+    method: "POST",
+    body: JSON.stringify({ code: callback.code, client_id: ctx.secrets.get("client_id") }),
+  });
+  const tokens = await resp.json();
+  ctx.secrets.set("access_token", tokens.access_token);
+  ctx.secrets.set("refresh_token", tokens.refresh_token);
 }
 ```
 
-This keeps the auth CLI extensible without hardcoding every provider's flow into the toolbox binary.
+The `human.browserAuth()` primitive is the key enabler: it handles the localhost callback server, browser launch, and parameter capture — the same mechanics that the built-in OAuth2 flow uses, but exposed to custom strategies. `human.prompt()` covers simpler cases like API key entry.
+
+**Injection mode example with fetch:**
+
+```typescript
+// auth/custom_rotating_token.ts
+export async function authenticate(
+  request: { method: string; url: string; headers: Record<string, string>; body?: string },
+  ctx: {
+    fetch: (url: string, opts?: RequestInit) => Promise<Response>,
+    secrets: { get(key: string): string },
+  }
+): Promise<{ headers: Record<string, string> }> {
+  // Exchange a long-lived refresh token for a short-lived access token
+  const resp = await ctx.fetch("https://auth.custom.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: ctx.secrets.get("refresh_token"),
+    }),
+  });
+  const { access_token } = await resp.json();
+  return { headers: { "Authorization": `Bearer ${access_token}` } };
+}
+```
+
+The injector caches the result from `authenticate()` using the same `TokenCache` mechanism as built-in OAuth2, so the strategy is not called on every request — only when the cached token expires.
+
+This keeps the auth CLI extensible without hardcoding every provider's flow into the toolbox binary, while giving strategies the HTTP and human-interaction capabilities they need.
 
 ### How It Integrates
 

@@ -434,14 +434,12 @@ The lockfile records the resolved state of all packages:
   "packages": {
     "github.com/acme-corp/zendesk-tools@v2.0.1": {
       "archive_sha256": "a1b2c3d4e5f6...",
-      "manifest_sha256": "9f8e7d6c5b4a...",
       "git_sha": "abc123def456789...",
       "resolved_from": "github-release",
       "resolved_at": "2026-03-15T10:30:00Z"
     },
     "github.com/solidarity-ai/slack-tools@v1.2.0": {
       "archive_sha256": "f6e5d4c3b2a1...",
-      "manifest_sha256": "1a2b3c4d5e6f...",
       "git_sha": "def789abc123456...",
       "resolved_from": "git-source",
       "resolved_at": "2026-03-20T08:15:00Z"
@@ -450,16 +448,15 @@ The lockfile records the resolved state of all packages:
 }
 ```
 
-Each lockfile entry records three integrity hashes:
+Each lockfile entry records two integrity hashes:
 
-- **`archive_sha256`**: SHA256 of the `.toolbox.pkg` archive bytes. Verified by `packaging.LoadArchive` on every load.
-- **`manifest_sha256`**: SHA256 of the external `toolbox.pkg.json` manifest. Ensures the manifest hasn't been tampered with independently of the archive.
+- **`archive_sha256`**: SHA256 of the `.toolbox.pkg` archive bytes. Verified by `packaging.LoadArchive` on every load. A separate manifest hash is not needed — the archive contains a copy of the manifest internally, and `LoadArchive` already verifies that the internal and external manifests match.
 - **`git_sha`**: The git commit SHA for the version tag. Pins the exact source commit for auditing and reproducibility. If the git host force-pushes the tag to a different commit, this detects the change.
 
 The lockfile is committed to version control. It guarantees:
 
 - **Reproducibility**: Same lockfile + same toolset file = same resolved packages on any machine.
-- **Integrity**: All three hashes are verified on load. Mismatch on any hash means corruption or tampering — the cache entry is discarded and re-fetched. If the re-fetched version also doesn't match, resolution fails with an error.
+- **Integrity**: Both hashes are verified on load. Mismatch means corruption or tampering — the cache entry is discarded and re-fetched. If the re-fetched version also doesn't match, resolution fails with an error.
 - **Auditability**: `resolved_from`, `resolved_at`, and `git_sha` provide full provenance. You can trace any package in a resolved toolset back to the exact source commit.
 
 Running `toolbox resolve` reads the toolset file, resolves all packages, and writes/updates the lockfile. Running `toolbox resolve --upgrade github.com/acme-corp/zendesk-tools` bumps one package to its latest version and updates the lockfile.

@@ -642,28 +642,6 @@ A tool author works on their package using `toolbox.devpkg.json`. They test by r
 
 A harness author references that package in `toolbox.toolset.json`. During development, they use `replace` to point at a local checkout. For production, the `replace` is removed and the lockfile pins the published version.
 
-#### Dev server
-
-For a fast local iteration loop:
-
-```bash
-# In the tool author's repo
-toolbox dev
-
-# Watches toolbox.devpkg.json and tools/ for changes
-# Recompiles TS on change
-# Serves the package locally for toolset testing
-```
-
-```bash
-# In the harness author's repo (with replace pointing to local package)
-toolbox serve toolbox.toolset.json
-
-# Resolves the toolset (using replace for local packages)
-# Watches for changes in replaced packages
-# Hot-reloads when tool source changes
-```
-
 ---
 
 ### 8. Interaction with Bindings

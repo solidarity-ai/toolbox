@@ -342,10 +342,6 @@ A toolset is declared as a JSON file that lists package dependencies and binding
     "github.com/solidarity-ai/slack-tools": "v1.2.0"
   },
 
-  "replace": {
-    "github.com/acme-corp/zendesk-tools": "../zendesk-tools"
-  },
-
   "context": {
     "customer_id": { "description": "The customer this toolset is scoped to" },
     "environment": { "description": "production or staging" },
@@ -398,7 +394,7 @@ A toolset is declared as a JSON file that lists package dependencies and binding
 Key design choices:
 
 - **`packages`** declares all dependencies with exact versions. This is the source of truth for what packages the toolset uses. Supports aliasing (see below).
-- **`replace`** redirects a module path to a local directory (for development). Semantics match Go's `replace` directive.
+- **`replace`** (in `toolbox.toolset.local.json`, gitignored) redirects a module path to a local directory for development.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
 - **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.
 - **`context`** declares the expected context inputs. These are documentation and validation — the harness provides actual values at runtime.
@@ -596,13 +592,10 @@ Deferred to a future RFC. The sandbox is the enforcement layer; capability decla
 
 #### `replace` directives
 
-A toolset file can redirect any module path to a local directory:
+A separate overlay file (`toolbox.toolset.local.json`, gitignored) can redirect any module path to a local directory:
 
 ```json
 {
-  "packages": {
-    "github.com/acme-corp/zendesk-tools": "v2.0.1"
-  },
   "replace": {
     "github.com/acme-corp/zendesk-tools": "../zendesk-tools"
   }
@@ -616,7 +609,7 @@ When a `replace` is present for a module path, the resolver:
 3. Uses dev-mode validation (lenient, warnings instead of errors)
 4. Does NOT update the lockfile entry for that package
 
-This matches Go's `replace` semantics exactly. The `replace` block is typically not committed — it's either in a gitignored overlay file or added temporarily during development.
+This matches Go's `replace` semantics. Unlike Go (which puts `replace` in `go.mod` alongside dependencies), replace directives live in a separate overlay file — `toolbox.toolset.local.json` — that is gitignored by default. This avoids the Go pitfall where developers accidentally commit replace directives or have to remember not to. The resolver merges the overlay into the toolset at load time.
 
 #### Relationship to `toolbox.devpkg.json`
 
@@ -802,12 +795,6 @@ Probably yes, following Go's sub-module convention — the module path includes 
 ### 6. Deprecation and yanking
 
 How does a package author signal that a version should not be used? The proxy could support a yank/deprecation flag. The resolver would warn (or error) on yanked versions. Git tags can't be "deprecated" natively, so this requires proxy support.
-
-### 7. Replace overlay file
-
-Should `replace` directives live in the toolset file directly, or in a separate gitignored file (e.g., `toolbox.toolset.local.json`) that's merged at load time?
-
-Leaning toward a separate overlay file. Go puts `replace` in `go.mod` which means it either gets committed (bad for CI) or developers have to remember not to commit it. A separate file that's gitignored by default is cleaner.
 
 ---
 

@@ -296,6 +296,8 @@ The local cache is content-addressable, keyed by module path + version + archive
 
 This layout mirrors the proxy protocol, so the cache can be populated either from a proxy response or from a local build. When loaded, `packaging.LoadArchive` is called with the cached `.pkg` and `.manifest` paths — the existing integrity verification (sha256 check, internal/external manifest comparison) applies unchanged.
 
+The flat-file layout above is the logical model. The physical implementation may use a **SQLite-backed content-addressable store** instead, since toolbox already uses FUSE and Go VFS for sandbox filesystems. A CAS deduplicates any shared files across packages (e.g., sandbox interpreters or common assets) and integrates naturally with the VFS layer. The cache interface remains the same — callers see module path + version lookups; the storage backend is an implementation detail.
+
 #### Integrity verification
 
 Every cached archive is verified on load using the existing `LoadArchive` flow:

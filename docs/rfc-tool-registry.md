@@ -353,8 +353,8 @@ A toolset is declared as a JSON file that lists package dependencies and binding
   },
 
   "credentials": {
-    "slack_token": { "description": "Slack bot token" },
-    "zendesk_key": { "description": "Zendesk API key" }
+    "slack_token": { "source": "env:SLACK_BOT_TOKEN" },
+    "zendesk_key": { "source": "vault:zendesk/api-key" }
   },
 
   "resource_bindings": {
@@ -401,7 +401,8 @@ Key design choices:
 - **`replace`** redirects a module path to a local directory (for development). Semantics match Go's `replace` directive.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
 - **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.
-- **`context`** and **`credentials`** declare the expected inputs. These are documentation and validation — the harness provides actual values at runtime.
+- **`context`** declares the expected context inputs. These are documentation and validation — the harness provides actual values at runtime.
+- **`credentials`** binds package-declared credential requirements to sources. Packages declare what credentials they need (e.g., `slack_token`, `zendesk_key`) in their manifest. The toolset binds those to concrete sources — environment variables (`env:SLACK_BOT_TOKEN`), secret vaults (`vault:zendesk/api-key`), or other providers. The package declares *what* it needs; the toolset decides *where* the value comes from.
 
 #### Package aliasing for name conflicts
 
@@ -463,25 +464,29 @@ The lockfile is committed to version control. It guarantees:
 
 Running `toolbox resolve` reads the toolset file, resolves all packages, and writes/updates the lockfile. Running `toolbox resolve --upgrade github.com/acme-corp/zendesk-tools` bumps one package to its latest version and updates the lockfile.
 
-#### Declarative resolution replaces imperative building
+#### Two interfaces: declarative file and programmatic Builder
 
-The current imperative flow:
+Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.json` is not required.
 
-```go
-b := toolset.New()
-b.AddFromDir("../zendesk-tools")
-b.AddFromArchive("slack.toolbox.pkg", "toolbox.pkg.json")
-resolved := b.Resolve()
-```
-
-Becomes:
+**Declarative file** — for config-driven toolsets:
 
 ```go
 ts, err := toolset.Load("toolbox.toolset.json")  // reads toolset + lockfile
 resolved, err := ts.Resolve(ctx)                   // auto-downloads, caches, resolves
 ```
 
-The `Builder` API remains available for programmatic use (tests, embedding), but the primary interface for harness authors is the declarative file.
+**Programmatic Builder** — for toolsets assembled in code (harnesses, tests, dynamic composition):
+
+```go
+b := toolset.New()
+b.AddFromRegistry("github.com/acme-corp/zendesk-tools", "v2.0.1")
+b.AddFromRegistry("github.com/solidarity-ai/slack-tools", "v1.2.0")
+b.AddFromDir("../local-tools")  // local dev package
+// bindings, context, credentials configured programmatically
+resolved := b.Resolve()
+```
+
+The declarative file is a convenience that calls the same Builder APIs underneath. Harness authors who build toolsets programmatically get the same auto-download, caching, and integrity verification — the file format is just one way to drive it.
 
 ---
 

@@ -46,4 +46,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326014150-794b4df5dca7
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326120501-54bace80d5fa

@@ -7,7 +7,4 @@ use (
 	./cmd/toolbox-pack
 )
 
-replace (
-	github.com/solidarity-ai/toolbox v0.0.0-20260321144313-a0f540464d2c => .
-	github.com/microsoft/typescript-go => ../../../dev/vendor/typescript-go
-)
+replace github.com/solidarity-ai/toolbox v0.0.0-20260321144313-a0f540464d2c => .

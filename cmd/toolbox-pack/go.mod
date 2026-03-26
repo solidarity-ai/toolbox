@@ -18,4 +18,4 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 )
 
-replace github.com/microsoft/typescript-go => /home/mackross/dev/vendor/typescript-go
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326014150-794b4df5dca7

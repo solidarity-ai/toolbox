@@ -300,7 +300,7 @@ The local cache is content-addressable, keyed by module path + version + archive
 
 This layout mirrors the proxy protocol, so the cache can be populated either from a proxy response or from a local build. When loaded, `packaging.LoadArchive` is called with the cached `.pkg` and `.manifest` paths — the existing integrity verification (sha256 check, internal/external manifest comparison) applies unchanged.
 
-The flat-file layout above is the logical model. The physical implementation may use a **SQLite-backed content-addressable store** instead, since toolbox already uses FUSE and Go VFS for sandbox filesystems. A CAS deduplicates any shared files across packages (e.g., sandbox interpreters or common assets) and integrates naturally with the VFS layer. The cache interface remains the same — callers see module path + version lookups; the storage backend is an implementation detail.
+The initial implementation uses this flat-file layout directly. The physical implementation may later move to a **SQLite-backed content-addressable store**, since toolbox already uses FUSE and Go VFS for sandbox filesystems. A CAS deduplicates any shared files across packages (e.g., sandbox interpreters or common assets) and integrates naturally with the VFS layer. The cache interface remains the same — callers see module path + version lookups; the storage backend is an implementation detail.
 
 #### Integrity verification
 
@@ -336,6 +336,8 @@ Internally, this calls the resolver, which calls `LoadArchive` on the cached res
 ---
 
 ### 4. Toolset Composition — Declarative Format
+
+> **Note:** The declarative toolset file format described here is provisional. It covers the file-based model needed for initial implementation. When the toolbox server is complete, toolset composition may move entirely to the server side, and static `.toolset.json` files may no longer be needed. The programmatic Builder API (described below) is the stable interface — the file format is one way to drive it.
 
 #### Toolset file: `toolbox.toolset.json`
 
@@ -455,6 +457,34 @@ Each lockfile entry records two integrity hashes:
 - **`archive_sha256`**: SHA256 of the `.toolbox.pkg` archive bytes. Verified by `packaging.LoadArchive` on every load. A separate manifest hash is not needed — the archive contains a copy of the manifest internally, and `LoadArchive` already verifies that the internal and external manifests match.
 - **`git_sha`**: The git commit SHA for the version tag. Pins the exact source commit for auditing and reproducibility. If the git host force-pushes the tag to a different commit, this detects the change.
 
+#### Pseudo-versions (untagged commits)
+
+Following Go modules' convention, packages can be pinned to a specific git commit using a **pseudo-version** — a synthetic version string that encodes a timestamp and commit SHA:
+
+```
+v0.0.0-20260315103000-abc123def456
+```
+
+Format: `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`
+
+This is useful for:
+- Depending on an unreleased commit before the author tags a version
+- Pinning to a specific commit during development or testing
+
+The timestamp component (derived from the commit's author date) makes pseudo-versions sortable — you can tell which is newer without resolving the git history. The commit SHA prefix identifies the exact source. Together they provide a version string that is both human-readable and machine-sortable.
+
+In the toolset file, pseudo-versions are used anywhere a regular version would be:
+
+```json
+{
+  "packages": {
+    "github.com/acme-corp/zendesk-tools": "v0.0.0-20260315103000-abc123def456"
+  }
+}
+```
+
+The resolver fetches the specified commit, runs `packaging.Pack` locally (since there won't be release artifacts for untagged commits), and caches the result. The lockfile records both the pseudo-version and the full `git_sha`.
+
 The lockfile is committed to version control. It guarantees:
 
 - **Reproducibility**: Same lockfile + same toolset file = same resolved packages on any machine.
@@ -470,7 +500,7 @@ Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.js
 **Declarative file** — for config-driven toolsets:
 
 ```go
-ts, err := toolset.Load("toolbox.toolset.json")  // reads toolset + lockfile
+ts, err := toolset.Load("toolbox.toolset.json")  // reads toolset + lockfile (any filename works)
 resolved, err := ts.Resolve(ctx)                   // auto-downloads, caches, resolves
 ```
 
@@ -531,9 +561,36 @@ toolbox resolve --upgrade-all
 
 # Upgrade to a specific version
 toolbox resolve --set github.com/acme-corp/zendesk-tools=v3.0.0
+
+# Limit upgrades to patch versions only (e.g., v2.0.1 → v2.0.3, never v2.1.0)
+toolbox resolve --upgrade-all --patch
+
+# Limit upgrades to minor versions (e.g., v2.0.1 → v2.1.0, never v3.0.0)
+toolbox resolve --upgrade-all --minor
 ```
 
+The `--patch` and `--minor` flags constrain how far `--upgrade` and `--upgrade-all` will go. `--patch` stays within the same minor version (only bumps the patch component). `--minor` stays within the same major version (bumps minor and patch but not major). Without either flag, upgrades go to the latest available version regardless of semver distance.
+
 Each of these updates both the toolset file and the lockfile.
+
+#### Toolset file selection
+
+All commands that operate on a toolset file accept an optional `--file` (or `-f`) flag to specify which toolset file to use:
+
+```bash
+# Resolve a specific toolset file
+toolbox resolve --file support-agent.toolset.json
+
+# Upgrade packages in a specific toolset
+toolbox resolve --upgrade-all --file onboarding.toolset.json
+
+# Show versions for a package in context of a specific toolset
+toolbox versions --file billing.toolset.json github.com/acme-corp/zendesk-tools
+```
+
+When `--file` is omitted, commands default to `toolbox.toolset.json` in the current directory. The corresponding lockfile is derived from the toolset filename (e.g., `support-agent.toolset.json` → `support-agent.toolset.lock`).
+
+This supports workflows where different parts of an agentic system use different toolsets — a support agent, an onboarding agent, and a billing agent might each have their own toolset file with different packages and bindings.
 
 ---
 
@@ -694,7 +751,7 @@ When a package version is bumped (e.g., `v2.0.1` to `v2.1.0`):
 - **Minor version bump** (additive only per the spec): Existing tool paths are stable. Existing bindings continue to work. New tools may appear but have no bindings — the harness author adds them explicitly if desired.
 - **Major version bump** (breaking): Tool paths, params, or resource structure may change. Bindings may break. The harness author must review and update bindings. This is the expected cost of a major version bump.
 
-The lockfile makes this safe: bindings are written against a specific version, and the lockfile pins that version. Nothing changes until the harness author explicitly runs `toolbox resolve --upgrade`.
+The lockfile makes this safe: bindings are written against a specific version, and the lockfile pins that version. Nothing changes until the harness author explicitly runs `toolbox resolve --upgrade`. For cautious upgrades, `--patch` and `--minor` flags limit the upgrade scope (see section 5).
 
 #### Resolved toolset stores canonical FQNs
 

@@ -11,7 +11,6 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
 	"github.com/microsoft/typescript-go/toolbox"
-	"github.com/solidarity-ai/toolbox/fsoverlay"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -84,19 +83,10 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 }
 
 func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error) {
-	layers := []fs.FS{
-		fstest.MapFS{
-			"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
-			"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
-		},
-	}
-	for _, tool := range resolved.Tools() {
-		if tool.TS == nil {
-			continue
-		}
-		layers = append(layers, tool.TS.Files)
-	}
-	return fsoverlay.New(layers...), nil
+	return fstest.MapFS{
+		"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
+		"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
+	}, nil
 }
 
 func preludeForTools(view toolset.AgentView) string {
@@ -140,38 +130,42 @@ func preludeForTools(view toolset.AgentView) string {
 func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 	var b strings.Builder
 	b.WriteString("declare function __invokeTool<T>(toolName: string, args: unknown): T;\n")
-	b.WriteString("type ToolResult<T> = T extends Promise<infer U> ? U : T;\n")
 
-	tools := resolved.Tools()
+	view := resolved.AgentView()
+	tools := make([]toolset.AgentTool, len(view.Tools))
+	copy(tools, view.Tools)
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name < tools[j].Name
 	})
 
-	for i, tool := range tools {
-		if tool.TS == nil {
-			continue
+	// Emit type declarations for any $ref definitions
+	for _, tool := range tools {
+		if tool.ParamsTSType != nil {
+			decls := toolbox.TSTypeDeclarationsToTS(tool.ParamsTSType)
+			if decls != "" {
+				b.WriteString(decls)
+				b.WriteString("\n")
+			}
 		}
-		fmt.Fprintf(&b, "import toolmod%d from \"./%s\";\n", i, tool.TS.Entry)
 	}
 
 	namespaces := map[string][]string{}
 	b.WriteString("export const tools = {\n")
-	for i, tool := range tools {
-		if tool.TS == nil {
-			continue
-		}
-
+	for _, tool := range tools {
 		parts := strings.Split(tool.Name, ".")
 		if len(parts) != 2 {
 			continue
 		}
 
+		paramType := "Record<string, unknown>"
+		if tool.ParamsTSType != nil {
+			paramType = tool.ParamsTSType.ToTS()
+		}
+
 		namespaces[parts[0]] = append(namespaces[parts[0]], fmt.Sprintf(
-			"    %s(args: Parameters<typeof toolmod%d>[0]): ToolResult<ReturnType<typeof toolmod%d>> { return __invokeTool<ToolResult<ReturnType<typeof toolmod%d>>>(%q, args); },",
+			"    %s(args: %s): string { return __invokeTool<string>(%q, args); },",
 			parts[1],
-			i,
-			i,
-			i,
+			paramType,
 			tool.Name,
 		))
 	}

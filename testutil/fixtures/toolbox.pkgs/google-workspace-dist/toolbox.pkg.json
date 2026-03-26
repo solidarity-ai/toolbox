@@ -1,7 +1,7 @@
 {
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "6f9dd983fcea59487f43bd02a5f466e261c0df91f8eadc27e238bd3964ae2d60",
+  "sha256": "7203d4cf807b2a23d26b9595d4797d967e81682533f8ac630986119d1101a4b0",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },
@@ -9,7 +9,10 @@
     {
       "entry_ts": "tools/users.list.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "accessMode": "readOnly",
+      "paramsSchema": {
+        "type": "object"
+      }
     }
   ]
 }

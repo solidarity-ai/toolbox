@@ -1,6 +1,9 @@
 package toolset
 
-import tooldef "github.com/solidarity-ai/toolbox/tool"
+import (
+	"github.com/microsoft/typescript-go/toolbox"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
+)
 
 // AgentView is the agent-visible API surface produced by resolving a toolset
 // with bindings. Hidden params are stripped; tool names may be shortened.
@@ -10,13 +13,11 @@ type AgentView struct {
 
 // AgentTool is a single tool visible to the agent.
 type AgentTool struct {
-	Name        string
-	Description string
-	// TODO: When TS metadata extraction lands (ParamTypes/ReturnType on AgentTool),
-	// consider deriving ParamsSchema from the TS types rather than carrying the
-	// JSON Schema through from PackageTool. This would make AgentView the single
-	// source of truth for the agent-visible type surface.
+	Name         string
+	Description  string
 	ParamsSchema map[string]any
+	ParamsTSType *toolbox.TSType
+	FuncSig      *toolbox.TSFuncSig
 	AccessMode   tooldef.AccessMode
 	Idempotent   *bool
 }
@@ -30,11 +31,37 @@ func (r ResolvedToolset) AgentView() AgentView {
 			Name:         rt.Name,
 			Description:  rt.Description,
 			ParamsSchema: filterHiddenParams(rt.ParamsSchema, r.hiddenParams[rt.Name]),
+			ParamsTSType: filterHiddenTSType(rt.ParamsTSType, r.hiddenParams[rt.Name]),
+			FuncSig:      rt.FuncSig,
 			AccessMode:   rt.AccessMode,
 			Idempotent:   rt.Idempotent,
 		})
 	}
 	return AgentView{Tools: tools}
+}
+
+// filterHiddenTSType returns a copy of the TSType with hidden properties removed.
+// This only handles top-level properties, matching the binding model constraint.
+func filterHiddenTSType(t *toolbox.TSType, hidden map[string]bool) *toolbox.TSType {
+	if len(hidden) == 0 || t == nil || t.Kind != toolbox.TSTypeObject {
+		return t
+	}
+	out := *t
+	var filteredProps []toolbox.TSProperty
+	for _, prop := range t.Properties {
+		if !hidden[prop.Name] {
+			filteredProps = append(filteredProps, prop)
+		}
+	}
+	out.Properties = filteredProps
+	var filteredReq []string
+	for _, r := range t.Required {
+		if !hidden[r] {
+			filteredReq = append(filteredReq, r)
+		}
+	}
+	out.Required = filteredReq
+	return &out
 }
 
 // filterHiddenParams returns a copy of the JSON Schema with hidden params removed.

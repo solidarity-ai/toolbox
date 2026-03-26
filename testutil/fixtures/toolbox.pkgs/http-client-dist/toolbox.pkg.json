@@ -1,7 +1,7 @@
 {
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "5764941ae55133e1ed4936ce520179273a3578a63a63dba21712a0ef1635a299",
+  "sha256": "47e75787b5d54c5bddd85d8d076c9caa941c8fe8e8b0ab3a6a164ecb0627ee5e",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },
@@ -9,7 +9,10 @@
     {
       "entry_ts": "tools/http-client.fetch.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "accessMode": "readOnly",
+      "paramsSchema": {
+        "type": "object"
+      }
     }
   ]
 }

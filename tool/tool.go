@@ -1,6 +1,10 @@
 package tool
 
-import "io/fs"
+import (
+	"io/fs"
+
+	"github.com/microsoft/typescript-go/toolbox"
+)
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
@@ -35,12 +39,14 @@ type ResourceParam struct {
 }
 
 type PackageTool struct {
-	EntryTS        string          `json:"entry_ts"`
-	Idempotent     *bool           `json:"idempotent,omitempty"`
-	AccessMode     AccessMode      `json:"accessMode,omitempty"`
-	Description    string          `json:"description,omitempty"`
-	ParamsSchema   map[string]any  `json:"paramsSchema,omitempty"`
-	ResourceParams []ResourceParam `json:"resourceParams,omitempty"`
+	EntryTS        string              `json:"entry_ts"`
+	Idempotent     *bool               `json:"idempotent,omitempty"`
+	AccessMode     AccessMode          `json:"accessMode,omitempty"`
+	Description    string              `json:"description,omitempty"`
+	ParamsSchema   map[string]any      `json:"paramsSchema,omitempty"`
+	ParamsTSType   *toolbox.TSType     `json:"-"`
+	FuncSig        *toolbox.TSFuncSig  `json:"-"`
+	ResourceParams []ResourceParam     `json:"resourceParams,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current
@@ -50,6 +56,8 @@ type ResolvedTool struct {
 	Name           string
 	Description    string
 	ParamsSchema   map[string]any
+	ParamsTSType   *toolbox.TSType
+	FuncSig        *toolbox.TSFuncSig
 	AccessMode     AccessMode
 	Idempotent     *bool
 	ResourceParams []ResourceParam

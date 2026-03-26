@@ -1,7 +1,7 @@
 {
   "name": "vfs-wasip2",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "ebf6c9eee21d6950bbbff7f07981e396aea2590c0cf6b1a79d44c2dbd8129687",
+  "sha256": "062b3743bc6d4f73a19f650e87aaff9006efe9bd4030ace0960c3b99e3f5a037",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },
@@ -9,7 +9,10 @@
     {
       "entry_ts": "tools/vfs-wasip2.run.ts",
       "idempotent": true,
-      "accessMode": "canDestruct"
+      "accessMode": "canDestruct",
+      "paramsSchema": {
+        "type": "object"
+      }
     }
   ]
 }

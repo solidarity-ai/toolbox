@@ -1,7 +1,7 @@
 {
   "name": "fetch-test",
   "runtime": "typescript-sandbox",
-  "sha256": "0ea982bfe3c012c9d98d190acee7c761e4a62cd60a761f31ca81008119610680",
+  "sha256": "2a9aa9ce8084cf5948af2661fcbf337ca452e89a54849d3347eb0f52713ebecf",
   "tools": [
     {
       "entry_ts": "tools/fetch-test.get.ts",

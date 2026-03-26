@@ -234,6 +234,8 @@ The strategy's `fetch()` is NOT the same as the tool's `fetch()`. It is a separa
 
 For pure computation strategies (HMAC signing, SigV4) that don't need HTTP calls, `auth_hosts` can be omitted and `fetch` will not be available, keeping the sandbox minimal.
 
+**Secret scoping for custom strategies:** Because a custom strategy has `fetch()` (and can also manipulate the outbound URL), it has the theoretical ability to exfiltrate any secret it can read. This means secrets exposed to custom strategies must always be **package-scoped**. The `secrets.get()` function in the strategy sandbox is restricted to the credential's own secret store prefix (e.g. `google_workspace/*`). It cannot read secrets belonging to other credentials or packages. Combined with tenant scoping (e.g. `tenant/acme/google_workspace/*`), this ensures a compromised strategy can only leak secrets that belong to its own credential set — not cross-credential or cross-tenant secrets. The `auth_hosts` restriction on `fetch()` further limits where exfiltrated data could be sent, though it is not a complete exfiltration defense on its own (the strategy could also encode data in the URL of the request it's authenticating). Package trust is the primary boundary: custom strategies ship with the package, and the package author is trusted for the secrets they declare.
+
 **Setup mode** (runs during `toolbox auth`, interactive):
 - Same `fetch()` capability as injection mode, for token exchange calls.
 - A `secrets` object with both `get()` and `set()` for persisting tokens.
@@ -296,6 +298,22 @@ export async function authenticate(
 The injector caches the result from `authenticate()` using the same `TokenCache` mechanism as built-in OAuth2, so the strategy is not called on every request — only when the cached token expires.
 
 This keeps the auth CLI extensible without hardcoding every provider's flow into the toolbox binary, while giving strategies the HTTP and human-interaction capabilities they need.
+
+#### Built-in OAuth2 as a Strategy
+
+An appealing option: implement the built-in OAuth2 flow (`"type": "oauth2"`) as a strategy running in the same sandbox, rather than as separate Go code. The built-in providers (Google, Slack, Microsoft) would ship as bundled strategy files that run with a higher trust level (system-provided, not package-provided).
+
+**Advantages:**
+- **One execution path.** All credential injection — built-in and custom — flows through the same sandbox + `authenticate()` contract. Fewer code paths to audit and test.
+- **Strategies are the reference implementation.** Package authors writing custom strategies can read the built-in Google OAuth2 strategy as a working example.
+- **Easier to add providers.** Adding Zendesk OAuth2 support is writing a new `.ts` strategy file, not modifying Go code.
+
+**Concerns:**
+- **Performance.** Spinning up a QuickJS sandbox for every token refresh adds overhead vs. a direct Go `http.Post()`. Mitigated by token caching — the sandbox runs infrequently (once per token lifetime, typically ~1 hour).
+- **Trust boundary.** Built-in strategies would need a "system trust" marker so they can access the full provider config (token URLs, etc.) without declaring them in a package manifest.
+- **Bootstrap.** The strategy sandbox itself needs to be initialized before any strategy can run. Built-in strategies can't have circular dependencies on the sandbox setup.
+
+**Recommendation:** Start with built-in OAuth2 in Go for v1 (simpler, no bootstrap concerns). Refactor to strategy-based once custom strategies are proven. The `authenticate()` / `setup()` contract is designed to support this migration — the interface is the same regardless of whether the implementation is Go or TypeScript.
 
 ### How It Integrates
 

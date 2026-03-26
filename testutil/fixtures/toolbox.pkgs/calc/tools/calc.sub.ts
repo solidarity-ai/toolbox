@@ -1,3 +1,10 @@
-export default function tool(params: { a: number; b: number }, ctx: unknown) {
-  return String(params.a - params.b);
+/**
+ * Subtract two numbers.
+ * @accessMode readOnly
+ * @idempotent
+ * @param a - The first number
+ * @param b - The second number
+ */
+export default function tool(a: number, b: number): string {
+  return String(a - b);
 }

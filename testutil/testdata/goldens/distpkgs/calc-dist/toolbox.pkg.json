@@ -1,55 +1,25 @@
 {
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "8c67f83d8d3c2078520d7c036d8cc1687c0214cad4baa0bf227d24e0d73db9b9",
+  "sha256": "bee534fecd393bfcde89e7826ba84abda28fbc22239157749a4cadbaa94e658c",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",
       "idempotent": true,
       "accessMode": "readOnly",
-      "paramsSchema": {
-        "properties": {
-          "a": {
-            "type": "number"
-          },
-          "b": {
-            "type": "number"
-          }
-        },
-        "type": "object"
-      }
+      "description": "Add two numbers."
     },
     {
       "entry_ts": "tools/calc.sub.ts",
       "idempotent": true,
       "accessMode": "readOnly",
-      "paramsSchema": {
-        "properties": {
-          "a": {
-            "type": "number"
-          },
-          "b": {
-            "type": "number"
-          }
-        },
-        "type": "object"
-      }
+      "description": "Subtract two numbers."
     },
     {
       "entry_ts": "tools/calc.asyncAdd.ts",
       "idempotent": true,
       "accessMode": "readOnly",
-      "paramsSchema": {
-        "properties": {
-          "a": {
-            "type": "number"
-          },
-          "b": {
-            "type": "number"
-          }
-        },
-        "type": "object"
-      }
+      "description": "Add two numbers asynchronously."
     }
   ]
 }

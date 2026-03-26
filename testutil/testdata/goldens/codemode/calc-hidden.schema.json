@@ -2,31 +2,47 @@
   "calc.add": {
     "properties": {
       "b": {
+        "description": "The second number",
         "type": "number"
       }
     },
+    "required": [
+      "b"
+    ],
     "type": "object"
   },
   "calc.asyncAdd": {
     "properties": {
       "a": {
+        "description": "The first number",
         "type": "number"
       },
       "b": {
+        "description": "The second number",
         "type": "number"
       }
     },
+    "required": [
+      "a",
+      "b"
+    ],
     "type": "object"
   },
   "calc.sub": {
     "properties": {
       "a": {
+        "description": "The first number",
         "type": "number"
       },
       "b": {
+        "description": "The second number",
         "type": "number"
       }
     },
+    "required": [
+      "a",
+      "b"
+    ],
     "type": "object"
   }
 }

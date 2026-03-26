@@ -1,0 +1,15 @@
+{
+  "name": "edge-cases",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/edge-cases.complex.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.params-object.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.minimal.ts"
+    }
+  ]
+}

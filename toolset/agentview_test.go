@@ -213,17 +213,16 @@ func TestAgentViewResourceBindingHidesParam(t *testing.T) {
 	// We need to use the packaging layer to load, but for a unit test
 	// we'll test the binding propagation by verifying the Resolve flow
 	// with a manually constructed resolved toolset.
-	resolved := toolset.NewResolvedToolset([]tooldef.ResolvedTool{
-		{
-			Name:         "account.tickets.list",
-			Description:  "List tickets",
-			ParamsSchema: pkg.Tools[0].ParamsSchema,
-			Package:      &pkg,
-			TS: &tooldef.TSToolDef{
-				Entry: "tools/account.tickets.list.ts",
-			},
+	rt := tooldef.ResolvedTool{
+		Name:        "account.tickets.list",
+		Description: "List tickets",
+		Package:     &pkg,
+		TS: &tooldef.TSToolDef{
+			Entry: "tools/account.tickets.list.ts",
 		},
-	})
+	}
+	rt.SetParamsSchema(pkg.Tools[0].ParamsSchema)
+	resolved := toolset.NewResolvedToolset([]tooldef.ResolvedTool{rt})
 	_ = builder // not used in this test path
 
 	view := resolved.AgentView()
@@ -247,39 +246,40 @@ func TestAgentViewResourceBindingHidesParam(t *testing.T) {
 func TestResourceBindingTwoTierFlow(t *testing.T) {
 	t.Parallel()
 
-	tools := []tooldef.ResolvedTool{
-		{
-			Name:        "account.tickets.list",
-			Description: "List tickets",
-			ParamsSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"account_id": map[string]any{"type": "string"},
-					"status":     map[string]any{"type": "string"},
-				},
-				"required": []any{"account_id"},
-			},
-			ResourceParams: []tooldef.ResourceParam{
-				{Name: "account_id", BindingName: "zendesk_account"},
-			},
-		},
-		{
-			Name:        "account.tickets.get",
-			Description: "Get a ticket",
-			ParamsSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"account_id": map[string]any{"type": "string"},
-					"ticket_id":  map[string]any{"type": "string"},
-				},
-				"required": []any{"account_id", "ticket_id"},
-			},
-			ResourceParams: []tooldef.ResourceParam{
-				{Name: "account_id", BindingName: "zendesk_account"},
-				{Name: "ticket_id", BindingName: "ticket_id"},
-			},
+	listTool := tooldef.ResolvedTool{
+		Name:        "account.tickets.list",
+		Description: "List tickets",
+		ResourceParams: []tooldef.ResourceParam{
+			{Name: "account_id", BindingName: "zendesk_account"},
 		},
 	}
+	listTool.SetParamsSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"account_id": map[string]any{"type": "string"},
+			"status":     map[string]any{"type": "string"},
+		},
+		"required": []any{"account_id"},
+	})
+
+	getToolDef := tooldef.ResolvedTool{
+		Name:        "account.tickets.get",
+		Description: "Get a ticket",
+		ResourceParams: []tooldef.ResourceParam{
+			{Name: "account_id", BindingName: "zendesk_account"},
+			{Name: "ticket_id", BindingName: "ticket_id"},
+		},
+	}
+	getToolDef.SetParamsSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"account_id": map[string]any{"type": "string"},
+			"ticket_id":  map[string]any{"type": "string"},
+		},
+		"required": []any{"account_id", "ticket_id"},
+	})
+
+	tools := []tooldef.ResolvedTool{listTool, getToolDef}
 
 	resolved, err := toolset.ResolveTools(tools, toolset.Config{
 		ResourceBindings: map[string]toolset.Binding{
@@ -294,8 +294,8 @@ func TestResourceBindingTwoTierFlow(t *testing.T) {
 	// AgentView should hide account_id on both tools.
 	view := resolved.AgentView()
 
-	listTool := findAgentTool(t, view, "account.tickets.list")
-	listProps := listTool.ParamsSchema["properties"].(map[string]any)
+	listAgent := findAgentTool(t, view, "account.tickets.list")
+	listProps := listAgent.ParamsSchema["properties"].(map[string]any)
 	if _, ok := listProps["account_id"]; ok {
 		t.Error("account_id should be hidden from list tool AgentView")
 	}
@@ -303,8 +303,8 @@ func TestResourceBindingTwoTierFlow(t *testing.T) {
 		t.Error("status should be visible in list tool AgentView")
 	}
 
-	getTool := findAgentTool(t, view, "account.tickets.get")
-	getProps := getTool.ParamsSchema["properties"].(map[string]any)
+	getAgent := findAgentTool(t, view, "account.tickets.get")
+	getProps := getAgent.ParamsSchema["properties"].(map[string]any)
 	if _, ok := getProps["account_id"]; ok {
 		t.Error("account_id should be hidden from get tool AgentView")
 	}

@@ -94,7 +94,8 @@ func vfsTestDistFixtureDir() string {
 	return filepath.Join(filepath.Dir(file), "..", "testdata", "goldens", "distpkgs", "vfs-test-dist")
 }
 
-func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
+// CalcResolvedTool returns the full ResolvedTool (with Sig) for a calc tool.
+func CalcResolvedTool(t testing.TB, name string) tooldef.ResolvedTool {
 	t.Helper()
 
 	pkg, err := packaging.LoadDev(calcFixtureDir())
@@ -103,14 +104,21 @@ func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
 	}
 	for _, tool := range pkg.ResolvedTools() {
 		if tool.Name == name {
-			if tool.TS == nil {
-				t.Fatalf("tool %s has no TS definition", name)
-			}
-			return *tool.TS
+			return tool
 		}
 	}
 	t.Fatalf("expected tool %s", name)
-	return tooldef.TSToolDef{}
+	return tooldef.ResolvedTool{}
+}
+
+func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
+	t.Helper()
+
+	tool := CalcResolvedTool(t, name)
+	if tool.TS == nil {
+		t.Fatalf("tool %s has no TS definition", name)
+	}
+	return *tool.TS
 }
 
 func calcFixtureDir() string {

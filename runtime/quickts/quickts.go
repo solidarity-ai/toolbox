@@ -53,31 +53,27 @@ type Host struct {
 	Console func(level string, args []string)
 }
 
-// Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
-// already runnable as a JS module and hides QuickJS behind this package.
-func Run(def tooldef.TSToolDef, args map[string]any) (string, error) {
-	return RunWithHost(def, args, Host{}, nil)
+// Run is the minimal TS-tool runtime seam.
+func Run(def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSig) (string, error) {
+	return RunWithHost(def, args, Host{}, nil, sig)
 }
 
 // RunWithSession is like Run but accepts a session pointer for caching.
-func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession) (string, error) {
-	return RunWithHost(def, args, Host{}, session)
+func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSig) (string, error) {
+	return RunWithHost(def, args, Host{}, session, sig)
 }
 
 // RunWithHost is the same minimal runtime seam with optional host imports.
 // If *session is non-nil the TypeScript checker reuses it for incremental
 // checking. On first call the created session is written back through the pointer.
-func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession) (string, error) {
+// If sig is non-nil, args are spread as individual function params in order;
+// otherwise they are passed as a single object (legacy style).
+func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSig) (string, error) {
 	var checkSession *toolbox.CheckSession
 	if session != nil {
 		checkSession = *session
 	}
-	argsJSON, err := json.Marshal(args)
-	if err != nil {
-		return "", fmt.Errorf("marshal args: %w", err)
-	}
-
-	files, err := withRunner(def.Files, runnerSource(def.Entry, string(argsJSON)))
+	files, err := withRunner(def.Files, runnerSource(def.Entry, args, sig))
 	if err != nil {
 		return "", err
 	}
@@ -292,10 +288,35 @@ func withRunner(base fs.FS, source string) (fs.FS, error) {
 	), nil
 }
 
-func runnerSource(entry string, argsJSON string) string {
-	return fmt.Sprintf(`import tool from "./%s";
-export default await tool(%s, {});
-`, entry, argsJSON)
+func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSig) string {
+	if sig == nil {
+		// Legacy single-object style: tool(args, ctx)
+		argsJSON, _ := json.Marshal(args)
+		return fmt.Sprintf("import tool from \"./%s\";\nexport default await tool(%s, {});\n", entry, argsJSON)
+	}
+	params := sig.Params()
+	if len(params) == 0 {
+		return fmt.Sprintf("import tool from \"./%s\";\nexport default await tool();\n", entry)
+	}
+	// Multi-param style: inline each arg with a type assertion against the
+	// function's parameter types so the TS checker validates arg types.
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "import tool from \"./%s\";\n", entry)
+	sb.WriteString("export default await tool(")
+	for i, p := range params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		val, ok := args[p.Name()]
+		if !ok {
+			sb.WriteString("undefined")
+		} else {
+			valJSON, _ := json.Marshal(val)
+			fmt.Fprintf(&sb, "%s as Parameters<typeof tool>[%d]", string(valJSON), i)
+		}
+	}
+	sb.WriteString(");\n")
+	return sb.String()
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {
@@ -402,8 +423,8 @@ func loaderForPath(file string) api.Loader {
 }
 
 // RunnerSourceForTest exposes the generated runner source for narrow unit tests.
-func RunnerSourceForTest(entry string, argsJSON string) string {
-	return runnerSource(entry, argsJSON)
+func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSig) string {
+	return runnerSource(entry, args, sig)
 }
 
 // EmitBundle runs esbuild bundling on a tool definition and returns the bundled JS.

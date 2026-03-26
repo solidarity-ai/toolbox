@@ -45,5 +45,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326120501-54bace80d5fa

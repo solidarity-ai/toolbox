@@ -66,7 +66,7 @@ func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
 	session := getCheckSession(tool.Package)
 	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{
 		Fetch: goFetch,
-	}, &session)
+	}, &session, tool.Sig)
 	setCheckSession(tool.Package, session)
 	return result, err
 }
@@ -151,7 +151,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 				ExitCode: result.ExitCode,
 			}, nil
 		},
-	}, &session)
+	}, &session, tool.Sig)
 	setCheckSession(tool.Package, session)
 	return result, err
 }

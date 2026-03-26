@@ -1,20 +1,13 @@
 {
   "name": "fetch-test",
   "runtime": "typescript-sandbox",
-  "sha256": "2a9aa9ce8084cf5948af2661fcbf337ca452e89a54849d3347eb0f52713ebecf",
+  "sha256": "927701477fb03760cb8db8f3ef3c6563d80828a808cf9c676d0ab7a718aa0665",
   "tools": [
     {
       "entry_ts": "tools/fetch-test.get.ts",
       "idempotent": true,
       "accessMode": "readOnly",
-      "paramsSchema": {
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
+      "description": "Fetch a URL and return the response."
     }
   ]
 }

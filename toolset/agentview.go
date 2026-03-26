@@ -22,18 +22,17 @@ type AgentTool struct {
 	Idempotent   *bool
 }
 
-// ParamsType returns the first parameter's type from the function signature,
+// ParamsType returns the combined parameter type from the function signature,
 // with hidden bound params removed. Returns nil if no signature is available.
 func (t AgentTool) ParamsType() *toolbox.ParamsType {
 	if t.Sig == nil {
 		return nil
 	}
-	params := t.Sig.Params()
-	if len(params) == 0 {
+	pt := t.Sig.CombinedParamsType()
+	if pt == nil {
 		return nil
 	}
-	pt := params[0].Type()
-	if len(t.hiddenParams) > 0 && pt != nil {
+	if len(t.hiddenParams) > 0 {
 		names := make([]string, 0, len(t.hiddenParams))
 		for n := range t.hiddenParams {
 			names = append(names, n)
@@ -52,7 +51,7 @@ func (r ResolvedToolset) AgentView() AgentView {
 		tools = append(tools, AgentTool{
 			Name:         rt.Name,
 			Description:  rt.Description,
-			ParamsSchema: filterHiddenParams(rt.ParamsSchema, hidden),
+			ParamsSchema: filterHiddenParams(rt.ParamsSchema(), hidden),
 			Sig:          rt.Sig,
 			hiddenParams: hidden,
 			AccessMode:   rt.AccessMode,

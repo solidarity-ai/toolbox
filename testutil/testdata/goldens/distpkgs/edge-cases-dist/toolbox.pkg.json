@@ -1,0 +1,25 @@
+{
+  "name": "edge-cases",
+  "runtime": "typescript-sandbox",
+  "sha256": "c49e8342bf8cbfd10a35f1d3d77a6dfad36a72b22032f665322b877fb7e518d8",
+  "tools": [
+    {
+      "entry_ts": "tools/edge-cases.complex.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "Search for records with complex filtering, pagination, and output options."
+    },
+    {
+      "entry_ts": "tools/edge-cases.params-object.ts",
+      "idempotent": true,
+      "accessMode": "canDestruct",
+      "description": "Process a batch of items with a specified action."
+    },
+    {
+      "entry_ts": "tools/edge-cases.minimal.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "A minimal no-op tool."
+    }
+  ]
+}

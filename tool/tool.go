@@ -54,7 +54,6 @@ type PackageTool struct {
 type ResolvedTool struct {
 	Name           string
 	Description    string
-	ParamsSchema   map[string]any
 	Sig            *toolbox.FuncSig
 	AccessMode     AccessMode
 	Idempotent     *bool
@@ -62,6 +61,29 @@ type ResolvedTool struct {
 	Package        *Package
 	TS             *TSToolDef
 	TSWasm         *TSWasmToolDef
+
+	// paramsSchema is the fallback JSON Schema for when Sig is nil (e.g. dist packages).
+	// Use ParamsSchema() to access — it derives from Sig when available.
+	paramsSchema map[string]any
+}
+
+// SetParamsSchema sets the fallback JSON Schema (used when Sig is nil).
+func (rt *ResolvedTool) SetParamsSchema(schema map[string]any) {
+	rt.paramsSchema = schema
+}
+
+// ParamsSchema returns the JSON Schema for this tool's parameters.
+// When Sig is available, it derives the schema from the type signature
+// using CombinedParamsType (which handles both single-param-object and
+// multi-param functions); otherwise it falls back to the stored schema
+// (e.g. from dist manifests).
+func (rt ResolvedTool) ParamsSchema() map[string]any {
+	if rt.Sig != nil {
+		if pt := rt.Sig.CombinedParamsType(); pt != nil {
+			return pt.ToJSONSchema()
+		}
+	}
+	return rt.paramsSchema
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

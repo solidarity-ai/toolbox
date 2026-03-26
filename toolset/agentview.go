@@ -16,8 +16,8 @@ type AgentTool struct {
 	Name         string
 	Description  string
 	ParamsSchema map[string]any
-	ParamsTSType *toolbox.TSType
-	FuncSig      *toolbox.TSFuncSig
+	ParamsType *toolbox.ParamsType
+	Sig      *toolbox.FuncSig
 	AccessMode   tooldef.AccessMode
 	Idempotent   *bool
 }
@@ -31,8 +31,8 @@ func (r ResolvedToolset) AgentView() AgentView {
 			Name:         rt.Name,
 			Description:  rt.Description,
 			ParamsSchema: filterHiddenParams(rt.ParamsSchema, r.hiddenParams[rt.Name]),
-			ParamsTSType: filterHiddenTSType(rt.ParamsTSType, r.hiddenParams[rt.Name]),
-			FuncSig:      rt.FuncSig,
+			ParamsType: filterHiddenParamsType(rt.ParamsType, r.hiddenParams[rt.Name]),
+			Sig:      rt.Sig,
 			AccessMode:   rt.AccessMode,
 			Idempotent:   rt.Idempotent,
 		})
@@ -40,28 +40,17 @@ func (r ResolvedToolset) AgentView() AgentView {
 	return AgentView{Tools: tools}
 }
 
-// filterHiddenTSType returns a copy of the TSType with hidden properties removed.
+// filterHiddenParamsType returns a copy of the ParamsType with hidden properties removed.
 // This only handles top-level properties, matching the binding model constraint.
-func filterHiddenTSType(t *toolbox.TSType, hidden map[string]bool) *toolbox.TSType {
-	if len(hidden) == 0 || t == nil || t.Kind != toolbox.TSTypeObject {
+func filterHiddenParamsType(t *toolbox.ParamsType, hidden map[string]bool) *toolbox.ParamsType {
+	if len(hidden) == 0 || t == nil {
 		return t
 	}
-	out := *t
-	var filteredProps []toolbox.TSProperty
-	for _, prop := range t.Properties {
-		if !hidden[prop.Name] {
-			filteredProps = append(filteredProps, prop)
-		}
+	names := make([]string, 0, len(hidden))
+	for n := range hidden {
+		names = append(names, n)
 	}
-	out.Properties = filteredProps
-	var filteredReq []string
-	for _, r := range t.Required {
-		if !hidden[r] {
-			filteredReq = append(filteredReq, r)
-		}
-	}
-	out.Required = filteredReq
-	return &out
+	return t.RemoveProperties(names...)
 }
 
 // filterHiddenParams returns a copy of the JSON Schema with hidden params removed.

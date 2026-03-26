@@ -80,8 +80,8 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			Name:           manifest.InferToolName(pkgTool.EntryTS),
 			Description:    description,
 			ParamsSchema:   pkgTool.ParamsSchema,
-			ParamsTSType:   pkgTool.ParamsTSType,
-			FuncSig:        pkgTool.FuncSig,
+			ParamsType:     pkgTool.ParamsType,
+			Sig:            pkgTool.Sig,
 			AccessMode:     pkgTool.AccessMode,
 			Idempotent:     pkgTool.Idempotent,
 			ResourceParams: pkgTool.ResourceParams,
@@ -168,7 +168,7 @@ func enrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 		if meta.ParamsSchema != nil {
 			tool.ParamsSchema = meta.ParamsSchema
 		}
-		tool.ParamsTSType = meta.ParamsTSType
-		tool.FuncSig = meta.FuncSig
+		tool.ParamsType = meta.ParamsType
+		tool.Sig = meta.Sig
 	}
 }

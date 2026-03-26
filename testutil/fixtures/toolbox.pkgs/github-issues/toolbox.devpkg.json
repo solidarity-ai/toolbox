@@ -1,0 +1,12 @@
+{
+  "name": "github-issues",
+  "runtime": "typescript-sandbox",
+  "additionalTypeScriptGlobs": ["tools/shims.ts"],
+  "tools": [
+    {
+      "entry_ts": "tools/github-issues.get.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

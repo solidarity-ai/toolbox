@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing/fstest"
 
@@ -20,6 +21,13 @@ const (
 	runnerTSFile = "__toolbox_run.ts"
 	runnerJSFile = "__toolbox_run.js"
 )
+
+// nodeBuiltins are marked as external so esbuild doesn't try to bundle them.
+// npm packages that reference these will fail at runtime in QuickJS unless
+// the code path is never actually reached (e.g. conditional requires).
+var nodeBuiltins = []string{
+	"node:*",
+}
 
 type ExecResult struct {
 	Stdout   string `json:"stdout"`
@@ -41,6 +49,8 @@ type Host struct {
 	ReadFile  func(path string) (string, error)
 	WriteFile func(path string, data string) error
 	Fetch     func(url, method, headersJSON, body string) (FetchResult, error)
+	// Console receives JS console output. If nil, console calls are no-ops.
+	Console func(level string, args []string)
 }
 
 // Run is the minimal TS-tool runtime seam. For now it assumes the tool entry is
@@ -91,7 +101,7 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session 
 		return "", fmt.Errorf("typescript check failed: %s", formatDiagnostics(diagnostics))
 	}
 
-	code, err := emit(files)
+	code, err := emit(files, def.PackageRoot)
 	if err != nil {
 		return "", err
 	}
@@ -151,6 +161,49 @@ func installHost(rt *qjs.Runtime, host Host) error {
 		}
 	}
 
+	if err := installConsole(rt, host); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func installConsole(rt *qjs.Runtime, host Host) error {
+	ctx := rt.Context()
+
+	jsLog, err := qjs.FuncToJS(ctx, func(level string, args []string) {
+		if host.Console != nil {
+			host.Console(level, args)
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("bind console: %w", err)
+	}
+	ctx.Global().SetPropertyStr("__toolboxConsole", jsLog)
+
+	consoleJS := `
+(function() {
+  function makeLog(level) {
+    return function(...args) {
+      __toolboxConsole(level, args.map(a => {
+        if (typeof a === 'string') return a;
+        try { return JSON.stringify(a); } catch { return String(a); }
+      }));
+    };
+  }
+  globalThis.console = {
+    log: makeLog('log'),
+    warn: makeLog('warn'),
+    error: makeLog('error'),
+    info: makeLog('info'),
+    debug: makeLog('debug'),
+    trace: makeLog('trace'),
+  };
+})();
+`
+	if _, err := rt.Eval("__toolbox_console.js", qjs.Code(consoleJS)); err != nil {
+		return fmt.Errorf("install console: %w", err)
+	}
 	return nil
 }
 
@@ -190,17 +243,17 @@ func installFS(rt *qjs.Runtime, host Host) error {
 	return nil
 }
 
-func emit(files fs.FS) (string, error) {
+func emit(files fs.FS, packageRoot string) (string, error) {
 	runner, err := fs.ReadFile(files, runnerTSFile)
 	if err != nil {
 		return "", fmt.Errorf("read runner: %w", err)
 	}
 
-	result := api.Build(api.BuildOptions{
+	opts := api.BuildOptions{
 		Bundle:   true,
 		Write:    false,
 		Format:   api.FormatESModule,
-		Platform: api.PlatformNeutral,
+		Platform: api.PlatformBrowser,
 		Target:   api.ES2023,
 		LogLevel: api.LogLevelSilent,
 		Stdin: &api.StdinOptions{
@@ -209,8 +262,17 @@ func emit(files fs.FS) (string, error) {
 			Sourcefile: runnerTSFile,
 			Loader:     api.LoaderTS,
 		},
-		Plugins: []api.Plugin{memFSPlugin(files)},
-	})
+		Plugins:  []api.Plugin{memFSPlugin(files, packageRoot)},
+		External: nodeBuiltins,
+	}
+
+	// When running from a source directory on disk, allow esbuild to resolve
+	// bare imports (npm packages) from the package's node_modules.
+	if packageRoot != "" {
+		opts.NodePaths = []string{filepath.Join(packageRoot, "node_modules")}
+	}
+
+	result := api.Build(opts)
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("esbuild emit failed: %s", result.Errors[0].Text)
 	}
@@ -248,26 +310,65 @@ func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {
 	return strings.Join(parts, "; ")
 }
 
-func memFSPlugin(files fs.FS) api.Plugin {
+func memFSPlugin(files fs.FS, packageRoot string) api.Plugin {
 	return api.Plugin{
 		Name: "memfs",
 		Setup: func(build api.PluginBuild) {
-			build.OnResolve(api.OnResolveOptions{Filter: ".*"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-				switch {
-				case strings.HasPrefix(args.Path, "."):
-					return api.OnResolveResult{
-						Path:      path.Clean(path.Join(args.ResolveDir, args.Path)),
-						Namespace: "memfs",
-					}, nil
-				case strings.HasPrefix(args.Path, "/"):
-					return api.OnResolveResult{
-						Path:      path.Clean(args.Path),
-						Namespace: "memfs",
-					}, nil
-				default:
-					return api.OnResolveResult{}, fmt.Errorf("unsupported import %q", args.Path)
+			// isMemFSResolve returns true if the import originates from our
+			// virtual filesystem (memfs namespace) or from the stdin entry
+			// (namespace "file" with virtual resolve dir "/").
+			isMemFSResolve := func(args api.OnResolveArgs) bool {
+				if args.Namespace == "memfs" {
+					return true
 				}
+				// The stdin entry has namespace "file" with ResolveDir "/"
+				if args.Namespace == "file" && args.ResolveDir == "/" {
+					return true
+				}
+				return false
+			}
+
+			// Resolve relative imports from tool source files.
+			build.OnResolve(api.OnResolveOptions{Filter: `^\.`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if !isMemFSResolve(args) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{
+					Path:      path.Clean(path.Join(args.ResolveDir, args.Path)),
+					Namespace: "memfs",
+				}, nil
 			})
+
+			// Resolve absolute imports from tool source files.
+			build.OnResolve(api.OnResolveOptions{Filter: `^/`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if !isMemFSResolve(args) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{
+					Path:      path.Clean(args.Path),
+					Namespace: "memfs",
+				}, nil
+			})
+
+			// Bare imports (e.g. "zod", "octokit") from tool source files:
+			// resolve using esbuild's native resolution from the package root.
+			if packageRoot != "" {
+				build.OnResolve(api.OnResolveOptions{Filter: ".*", Namespace: "memfs"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+					// Only bare imports reach here (relative/absolute matched above).
+					resolved := build.Resolve(args.Path, api.ResolveOptions{
+						Kind:       api.ResolveJSImportStatement,
+						ResolveDir: packageRoot,
+						Namespace:  "file",
+					})
+					if len(resolved.Errors) > 0 {
+						return api.OnResolveResult{}, fmt.Errorf("resolve %q: %s", args.Path, resolved.Errors[0].Text)
+					}
+					return api.OnResolveResult{
+						Path:      resolved.Path,
+						Namespace: "file",
+					}, nil
+				})
+			}
 
 			build.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: "memfs"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				name := strings.TrimPrefix(args.Path, "/")
@@ -276,9 +377,11 @@ func memFSPlugin(files fs.FS) api.Plugin {
 					return api.OnLoadResult{}, err
 				}
 				contents := string(content)
+				resolveDir := path.Dir(args.Path)
 				return api.OnLoadResult{
-					Contents: &contents,
-					Loader:   loaderForPath(args.Path),
+					Contents:   &contents,
+					Loader:     loaderForPath(args.Path),
+					ResolveDir: resolveDir,
 				}, nil
 			})
 		},
@@ -301,4 +404,14 @@ func loaderForPath(file string) api.Loader {
 // RunnerSourceForTest exposes the generated runner source for narrow unit tests.
 func RunnerSourceForTest(entry string, argsJSON string) string {
 	return runnerSource(entry, argsJSON)
+}
+
+// EmitBundle runs esbuild bundling on a tool definition and returns the bundled JS.
+// Exported for testing that npm deps are correctly inlined.
+func EmitBundle(def tooldef.TSToolDef) (string, error) {
+	files, err := withRunner(def.Files, runnerSource(def.Entry, "{}"))
+	if err != nil {
+		return "", err
+	}
+	return emit(files, def.PackageRoot)
 }

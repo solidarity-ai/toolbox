@@ -15,7 +15,7 @@ It owns:
 
 ## Who depends on this package
 
-### `runtime/quickjs`
+### `runtime/quickts`
 Uses `transport` to satisfy host-imported network calls from TypeScript tools.
 
 ### `runtime/wasix`

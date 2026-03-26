@@ -17,7 +17,7 @@ This package should primarily own shapes and schemas, not control flow.
 ### `transport`
 Emits HTTP-level audit events.
 
-### `runtime/quickjs`
+### `runtime/quickts`
 Emits runtime logs and execution events.
 
 ### `runtime/wasix`

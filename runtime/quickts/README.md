@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`runtime/quickjs` executes TypeScript tools.
+`runtime/quickts` executes TypeScript tools.
 
 It owns:
 
@@ -17,7 +17,7 @@ It owns:
 
 ### `invoke`
 
-Uses `runtime/quickts` when the selected tool is a JS tool.
+Uses `runtime/quickts` when the selected tool is a TypeScript tool.
 
 ### `codemode`
 

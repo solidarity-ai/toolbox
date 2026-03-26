@@ -15,7 +15,7 @@ This keeps runtime packages from needing to understand package layout or acquisi
 ### `registry`
 Provides package-backed asset material to `assets`.
 
-### `runtime/quickjs`
+### `runtime/quickts`
 Uses `assets` to resolve executable assets referenced by host imports such as `exec(...)`.
 
 ### `runtime/wasix`

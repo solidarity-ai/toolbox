@@ -16,7 +16,7 @@ The design is centered around three ideas:
 - `transport` — outbound HTTP mediation, credential injection, and audit capture
 - `assets` — non-tool executable/package assets
 - `registry` — package acquisition and caching
-- `runtime/quickjs` — TypeScript tool execution
+- `runtime/quickts` — TypeScript tool execution
 - `runtime/wasix` — native WASM execution via the Rust host
 - `invoke` — orchestration for one tool call
 - `codemode` — code session semantics against a toolset
@@ -37,7 +37,7 @@ flowchart TD
 
   TR[transport] --> A
 
-  Q[runtime/quickjs] --> T
+  Q[runtime/quickts] --> T
   Q --> TR
   Q --> AS
   Q --> A
@@ -103,7 +103,7 @@ Service or CodeMode
        - tool name
        - call params
   -> runtime selection
-     -> runtime/quickjs   for TS tools
+     -> runtime/quickts   for TS tools
      -> runtime/wasix     for native WASM tools
   -> normalized result + audit
 ```
@@ -112,7 +112,7 @@ Service or CodeMode
 
 ```text
 invoke
-  -> runtime/quickjs
+  -> runtime/quickts
   -> host imports (fetch / exec / log / mcp)
   -> transport for outbound HTTP calls
   -> audit events
@@ -151,7 +151,7 @@ Service / harness
 | `tool` | static definition data | validated definition models | shared vocabulary only |
 | `toolset` | selected tools, bindings, context, credentials | resolved toolset, agent view, validation errors | synchronous, request-scoped assembly |
 | `transport` | outbound request + execution context | outbound response + HTTP audit + transport errors | synchronous, per-call capability boundary |
-| `runtime/quickjs` | TS tool artifact, resolved params, execution context | runtime result, logs, runtime errors | synchronous, in-process sandbox |
+| `runtime/quickts` | TS tool artifact, resolved params, execution context | runtime result, logs, runtime errors | synchronous, in-process sandbox |
 | `runtime/wasix` | native WASM execution request | subprocess result, stdout/stderr, runtime error | synchronous, subprocess boundary |
 | `invoke` | resolved toolset, selected tool, params, request metadata | normalized invocation result + audit | synchronous orchestration |
 | `codemode` | resolved toolset, agent code, session config | code session result + aggregated audit | synchronous session execution |
@@ -170,7 +170,7 @@ These are the most important architectural rules to preserve:
    - `codemode` delegates tool execution to `invoke`.
 
 3. **Runtimes do not understand request semantics.**
-   - `runtime/quickjs` and `runtime/wasix` receive prepared execution requests only.
+   - `runtime/quickts` and `runtime/wasix` receive prepared execution requests only.
    - They do not know about bindings, toolset rules, or context semantics.
 
 4. **CEL stays inside `toolset`.**
@@ -187,7 +187,7 @@ If you are new to the repo, read the package docs in this order:
 1. `tool/README.md`
 2. `toolset/README.md`
 3. `invoke/README.md`
-4. `runtime/quickjs/README.md`
+4. `runtime/quickts/README.md`
 5. `runtime/wasix/README.md`
 6. `codemode/README.md`
 7. `transport/README.md`

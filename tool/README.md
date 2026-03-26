@@ -22,7 +22,7 @@ Uses `tool` definitions as the input to request-scoped assembly.
 ### `registry`
 Returns loaded packages in terms of `tool` types.
 
-### `runtime/quickjs`
+### `runtime/quickts`
 Uses tool definitions to understand what is being executed and what host capabilities are needed.
 
 ### `runtime/wasix`

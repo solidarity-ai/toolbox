@@ -11,11 +11,11 @@ Given a resolved toolset, a selected tool, and call params, it:
 - normalizes the result
 - returns audit information in a consistent shape
 
-This package exists to stop execution semantics from leaking into `api`, `codemode`, or the runtime packages.
+This package exists to stop execution semantics from leaking into `service`, `codemode`, or the runtime packages.
 
 ## Who depends on this package
 
-### `api`
+### `service`
 Uses `invoke` to execute one tool call from MCP or HTTP.
 
 ### `codemode`
@@ -37,4 +37,4 @@ Uses `invoke` repeatedly during a code session whenever agent code calls a tool.
 
 ## Architectural rule
 
-`api` and `codemode` should not call runtimes directly. Tool execution should go through `invoke`.
+`service` and `codemode` should not call runtimes directly. Tool execution should go through `invoke`.

@@ -15,7 +15,7 @@ It owns:
 
 ## Who depends on this package
 
-### `api`
+### `service`
 Uses `registry` to resolve package refs or tool refs into loaded package artifacts before request-scoped assembly.
 
 ### `assets`

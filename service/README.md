@@ -14,7 +14,7 @@ It owns:
 
 ## Who depends on this package
 
-This is the outermost package area. External callers depend on it through MCP and HTTP, but internal packages generally should not depend on `api`.
+This is the outermost package area. External callers depend on it through MCP and HTTP, but internal packages generally should not depend on `service`.
 
 ## What it uses other packages for
 

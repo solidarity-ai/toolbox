@@ -18,7 +18,7 @@ This is the product brain of the system.
 
 ## Who depends on this package
 
-### `api`
+### `service`
 Uses `toolset` to turn harness input into a resolved request-scoped execution context.
 
 ### `invoke`

@@ -14,7 +14,7 @@ It owns:
 
 ## Who depends on this package
 
-### `api`
+### `service`
 Uses `codemode` to run agent-authored code sessions exposed over MCP or HTTP.
 
 ## What they use it for

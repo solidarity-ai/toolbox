@@ -7,7 +7,7 @@
 A runtime receives a prepared execution request and runs it inside a sandbox or process boundary. Runtimes do not decide whether a tool call is allowed; they only execute what has already been prepared and validated.
 
 Current planned runtimes:
-- `runtime/quickjs` — TypeScript/JavaScript tool execution
+- `runtime/quickts` — TypeScript/JavaScript tool execution
 - `runtime/tswasmcli` — WASM sandbox execution (wasix-cli, wasip2-cli) via the Rust host
 
 ## Who depends on this package area

@@ -14,7 +14,7 @@ interface BatchParams {
 
 /**
  * Process a batch of items with a specified action.
- * @accessMode canDestruct
+ * @accessMode irreversible
  * @idempotent
  * @param params - The batch operation parameters
  */

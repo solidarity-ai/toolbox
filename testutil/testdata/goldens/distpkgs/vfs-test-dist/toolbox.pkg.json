@@ -1,7 +1,7 @@
 {
   "name": "vfs-test",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "50e74b342ea276313a69edeac833cab1e89daa146391206c26abdce61ff2a7f1",
+  "sha256": "a569736b91a8279671b95626567658bcd954103fcc77dda41a67a59c34f0891d",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },
@@ -9,7 +9,7 @@
     {
       "entry_ts": "tools/vfs-test.run.ts",
       "idempotent": true,
-      "accessMode": "canDestruct",
+      "accessMode": "irreversible",
       "description": "Run a WASM guest that can round-trip, delete, or rename files through the shared VFS."
     }
   ]

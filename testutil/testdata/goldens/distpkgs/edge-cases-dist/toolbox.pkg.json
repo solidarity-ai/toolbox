@@ -1,7 +1,7 @@
 {
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "c49e8342bf8cbfd10a35f1d3d77a6dfad36a72b22032f665322b877fb7e518d8",
+  "sha256": "ea5afc0c9b4ca9a458fb46c568d7f042294fadeb5509b3944721e51c16513db0",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",
@@ -12,7 +12,7 @@
     {
       "entry_ts": "tools/edge-cases.params-object.ts",
       "idempotent": true,
-      "accessMode": "canDestruct",
+      "accessMode": "irreversible",
       "description": "Process a batch of items with a specified action."
     },
     {

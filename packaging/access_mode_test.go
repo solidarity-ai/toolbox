@@ -60,27 +60,27 @@ func devAccessModeInferenceCases() []inferAccessModeTestCase {
 		{verb: "search", mode: tooldef.AccessModeReadOnly},
 		{verb: "find", mode: tooldef.AccessModeReadOnly},
 		{verb: "describe", mode: tooldef.AccessModeReadOnly},
-		{verb: "create", mode: tooldef.AccessModeAppendOnly},
-		{verb: "add", mode: tooldef.AccessModeAppendOnly},
-		{verb: "send", mode: tooldef.AccessModeAppendOnly},
-		{verb: "post", mode: tooldef.AccessModeAppendOnly},
-		{verb: "clone", mode: tooldef.AccessModeAppendOnly},
-		{verb: "new", mode: tooldef.AccessModeAppendOnly},
-		{verb: "update", mode: tooldef.AccessModeCanDestruct},
-		{verb: "delete", mode: tooldef.AccessModeCanDestruct},
-		{verb: "remove", mode: tooldef.AccessModeCanDestruct},
-		{verb: "set", mode: tooldef.AccessModeCanDestruct},
-		{verb: "put", mode: tooldef.AccessModeCanDestruct},
-		{verb: "patch", mode: tooldef.AccessModeCanDestruct},
-		{verb: "replace", mode: tooldef.AccessModeCanDestruct},
-		{verb: "edit", mode: tooldef.AccessModeCanDestruct},
+		{verb: "create", mode: tooldef.AccessModeReversible},
+		{verb: "add", mode: tooldef.AccessModeReversible},
+		{verb: "send", mode: tooldef.AccessModeReversible},
+		{verb: "post", mode: tooldef.AccessModeReversible},
+		{verb: "clone", mode: tooldef.AccessModeReversible},
+		{verb: "new", mode: tooldef.AccessModeReversible},
+		{verb: "update", mode: tooldef.AccessModeIrreversible},
+		{verb: "delete", mode: tooldef.AccessModeIrreversible},
+		{verb: "remove", mode: tooldef.AccessModeIrreversible},
+		{verb: "set", mode: tooldef.AccessModeIrreversible},
+		{verb: "put", mode: tooldef.AccessModeIrreversible},
+		{verb: "patch", mode: tooldef.AccessModeIrreversible},
+		{verb: "replace", mode: tooldef.AccessModeIrreversible},
+		{verb: "edit", mode: tooldef.AccessModeIrreversible},
 	}
 
 	out := make([]inferAccessModeTestCase, 0, len(cases)+1)
 	for _, tc := range cases {
 		out = append(out, inferredAccessModeCase(tc.verb, tc.mode))
 	}
-	out = append(out, inferredAccessModeCase("sync", tooldef.AccessModeCanDestruct))
+	out = append(out, inferredAccessModeCase("sync", tooldef.AccessModeIrreversible))
 	return out
 }
 

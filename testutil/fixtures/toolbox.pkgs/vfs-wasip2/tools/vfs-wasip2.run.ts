@@ -10,7 +10,7 @@ declare const fs: {
 
 /**
  * Run a wasip2 WASM guest that reads /input.txt and writes /output.txt, then read the output via fs.
- * @accessMode canDestruct
+ * @accessMode irreversible
  * @idempotent
  */
 export default async function tool(): Promise<string> {

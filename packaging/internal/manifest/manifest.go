@@ -176,11 +176,11 @@ func InferAccessMode(entryTS string) tooldef.AccessMode {
 	case "list", "get", "read", "fetch", "search", "find", "describe":
 		return tooldef.AccessModeReadOnly
 	case "create", "add", "send", "post", "clone", "new":
-		return tooldef.AccessModeAppendOnly
+		return tooldef.AccessModeReversible
 	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit":
-		return tooldef.AccessModeCanDestruct
+		return tooldef.AccessModeIrreversible
 	default:
-		return tooldef.AccessModeCanDestruct
+		return tooldef.AccessModeIrreversible
 	}
 }
 

@@ -27,9 +27,9 @@ const RuntimeTypeScriptWasip2Sandbox ToolRuntime = "typescript+wasip2-sandbox"
 type AccessMode string
 
 const (
-	AccessModeReadOnly    AccessMode = "readOnly"
-	AccessModeAppendOnly  AccessMode = "appendOnly"
-	AccessModeCanDestruct AccessMode = "canDestruct"
+	AccessModeReadOnly     AccessMode = "readOnly"
+	AccessModeReversible   AccessMode = "reversible"
+	AccessModeIrreversible AccessMode = "irreversible"
 )
 
 // ResourceParam describes one inferred resource parameter and its canonical binding name.

@@ -6,14 +6,17 @@
   "properties": {
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Package name used as the tool namespace prefix."
     },
     "runtime": {
       "type": "string",
-      "enum": ["typescript-sandbox", "typescript+wasix-sandbox", "typescript+wasip2-sandbox"]
+      "enum": ["typescript-sandbox", "typescript+wasix-sandbox", "typescript+wasip2-sandbox"],
+      "description": "Execution runtime for the tool's TypeScript code."
     },
     "additionalTypeScriptGlobs": {
       "type": "array",
+      "description": "Extra glob patterns for TypeScript files to include beyond tool entries.",
       "items": {
         "type": "string",
         "minLength": 1
@@ -24,6 +27,7 @@
     },
     "executables": {
       "type": "object",
+      "description": "Map of binary name to WASM file path for WASM-based tools.",
       "additionalProperties": {
         "type": "string",
         "minLength": 1
@@ -31,6 +35,7 @@
     },
     "tools": {
       "type": "array",
+      "description": "Tool definitions. Each tool has an entry TypeScript file.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -38,20 +43,25 @@
         "properties": {
           "entry_ts": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Path to the tool's TypeScript entry file, relative to the package root."
           },
           "accessMode": {
             "type": "string",
-            "enum": ["readOnly", "appendOnly", "canDestruct"]
+            "enum": ["readOnly", "reversible", "irreversible"],
+            "description": "Data access level. readOnly: no side effects (e.g. list, get, search). reversible: creates data that can be undone (e.g. create draft, add tag). irreversible: may edit or delete data, or cause irreversible side effects (e.g. send message, update record, delete)."
           },
           "idempotent": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether calling this tool multiple times with the same input produces the same result."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable description of what the tool does."
           },
           "paramsSchema": {
-            "type": "object"
+            "type": "object",
+            "description": "JSON Schema for the tool's input parameters."
           }
         }
       }

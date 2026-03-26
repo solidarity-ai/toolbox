@@ -129,7 +129,7 @@ func TestLoadDirWithMode(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "accessMode": "appendOnly" }
+    { "entry_ts": "tools/calc.add.ts", "accessMode": "reversible" }
   ]
 }`)
 		_, err := LoadDirWithMode(dir, manifest.ValidationModeDist)

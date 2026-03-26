@@ -288,7 +288,7 @@ func TestPackBundlesExecutables(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "guest": "dist/guest.wasm" },
   "tools": [
-    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "canDestruct" }
+    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "irreversible" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "run.ts"), `export default function tool() { return "ok"; }`)

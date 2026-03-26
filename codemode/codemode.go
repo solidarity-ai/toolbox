@@ -12,6 +12,7 @@ import (
 	"github.com/fastschema/qjs"
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/invoke"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -241,10 +242,60 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			hidden := tool.HiddenParams()
 			literals := tool.BoundLiterals()
 
-			// Single-line JSDoc for description only.
+			// Build the access mode label suffix for the JSDoc description.
+			modeLabel := accessModeLabel(tool.AccessMode, tool.Idempotent)
+
+			// Collect multi-line param descriptions for @param tags.
+			var multiLineParams []struct {
+				name string
+				desc string
+			}
 			if tool.Sig != nil {
-				if desc := tool.Sig.Description(); desc != "" {
-					fmt.Fprintf(&b, "    /** %s */\n", desc)
+				for _, p := range tool.Sig.Params() {
+					if hidden[p.Name()] {
+						continue
+					}
+					desc := p.Description()
+					if desc != "" && strings.Contains(desc, "\n") {
+						multiLineParams = append(multiLineParams, struct {
+							name string
+							desc string
+						}{name: p.Name(), desc: desc})
+					}
+				}
+			}
+
+			// JSDoc block: description + access mode label + multi-line @param tags.
+			if tool.Sig != nil {
+				desc := tool.Sig.Description()
+				if len(multiLineParams) > 0 {
+					// Multi-line JSDoc block.
+					b.WriteString("    /**\n")
+					if desc != "" {
+						descLine := desc
+						if modeLabel != "" {
+							descLine += " " + modeLabel
+						}
+						fmt.Fprintf(&b, "     * %s\n", descLine)
+					} else if modeLabel != "" {
+						fmt.Fprintf(&b, "     * %s\n", modeLabel)
+					}
+					for _, mp := range multiLineParams {
+						lines := strings.Split(mp.desc, "\n")
+						fmt.Fprintf(&b, "     * @param %s - %s\n", mp.name, lines[0])
+						for _, line := range lines[1:] {
+							fmt.Fprintf(&b, "     *   %s\n", line)
+						}
+					}
+					b.WriteString("     */\n")
+				} else if desc != "" {
+					descLine := desc
+					if modeLabel != "" {
+						descLine += " " + modeLabel
+					}
+					fmt.Fprintf(&b, "    /** %s */\n", descLine)
+				} else if modeLabel != "" {
+					fmt.Fprintf(&b, "    /** %s */\n", modeLabel)
 				}
 			}
 
@@ -267,7 +318,14 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 					if p.Optional() {
 						name += "?"
 					}
-					paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
+
+					// Add inline comment for single-line param descriptions.
+					desc := p.Description()
+					if desc != "" && !strings.Contains(desc, "\n") {
+						paramParts = append(paramParts, fmt.Sprintf("/** %s */ %s: %s", desc, name, tsType))
+					} else {
+						paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
+					}
 				}
 			}
 
@@ -285,6 +343,28 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	b.WriteString("};\n")
 
 	return b.String()
+}
+
+// accessModeLabel returns the parenthesized label for the access mode and
+// idempotent flag, or "" if no access mode is set.
+func accessModeLabel(mode tooldef.AccessMode, idempotent *bool) string {
+	isIdempotent := idempotent != nil && *idempotent
+	switch mode {
+	case tooldef.AccessModeReadOnly:
+		return "(readonly)"
+	case tooldef.AccessModeReversible:
+		if isIdempotent {
+			return "(reversible, idempotent)"
+		}
+		return "(reversible)"
+	case tooldef.AccessModeIrreversible:
+		if isIdempotent {
+			return "(irreversible, idempotent)"
+		}
+		return "(irreversible)"
+	default:
+		return ""
+	}
 }
 
 // literalToTS formats a Go value as a TypeScript literal type.

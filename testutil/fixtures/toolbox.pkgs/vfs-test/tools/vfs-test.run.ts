@@ -10,7 +10,7 @@ declare const fs: {
 
 /**
  * Run a WASM guest that can round-trip, delete, or rename files through the shared VFS.
- * @accessMode canDestruct
+ * @accessMode irreversible
  * @idempotent
  * @param action - The VFS action to perform
  */

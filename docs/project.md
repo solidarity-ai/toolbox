@@ -92,7 +92,7 @@ A distinct execution mode where agent-authored code runs against a resolved tool
 
 CodeMode is not just “tool invocation with extra steps.” It is its own product concept, but it should still delegate actual tool execution to `invoke`.
 
-### `runtime/quickjs`
+### `runtime/quickts`
 Execution backend for TypeScript/JavaScript tools.
 
 ### `runtime/wasix`

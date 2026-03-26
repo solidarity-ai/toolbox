@@ -13,17 +13,19 @@ type AgentView struct {
 
 // AgentTool is a single tool visible to the agent.
 type AgentTool struct {
-	Name         string
-	Description  string
-	ParamsSchema map[string]any
-	Sig          *toolbox.FuncSig
-	hiddenParams map[string]bool
-	AccessMode   tooldef.AccessMode
-	Idempotent   *bool
+	Name           string
+	Description    string
+	ParamsSchema   map[string]any
+	Sig            *toolbox.FuncSig
+	hiddenParams   map[string]bool
+	boundLiterals  map[string]any // param name -> constant value for non-hidden bindings
+	AccessMode     tooldef.AccessMode
+	Idempotent     *bool
 }
 
 // ParamsType returns the combined parameter type from the function signature,
-// with hidden bound params removed. Returns nil if no signature is available.
+// with hidden bound params removed and non-hidden bound params narrowed to
+// literal types. Returns nil if no signature is available.
 func (t AgentTool) ParamsType() *toolbox.ParamsType {
 	if t.Sig == nil {
 		return nil
@@ -39,24 +41,57 @@ func (t AgentTool) ParamsType() *toolbox.ParamsType {
 		}
 		pt = pt.RemoveProperties(names...)
 	}
+	for name, val := range t.boundLiterals {
+		pt = pt.SetPropertyLiteral(name, val)
+	}
 	return pt
 }
 
 // AgentView produces the agent-visible tool surface from the resolved toolset.
-// Hidden params are removed from each tool's ParamsSchema.
+// Hidden params are removed; non-hidden bound params are narrowed to literals.
 func (r ResolvedToolset) AgentView() AgentView {
 	tools := make([]AgentTool, 0, len(r.tools))
 	for _, rt := range r.tools {
 		hidden := r.hiddenParams[rt.Name]
-		tools = append(tools, AgentTool{
-			Name:         rt.Name,
-			Description:  rt.Description,
-			ParamsSchema: filterHiddenParams(rt.ParamsSchema(), hidden),
-			Sig:          rt.Sig,
-			hiddenParams: hidden,
-			AccessMode:   rt.AccessMode,
-			Idempotent:   rt.Idempotent,
-		})
+
+		// Resolve non-hidden bindings to constant values where possible.
+		var literals map[string]any
+		if toolBindings := r.bindings[rt.Name]; len(toolBindings) > 0 {
+			for paramName, cb := range toolBindings {
+				if hidden[paramName] || cb.valueProgram == nil {
+					continue
+				}
+				// Evaluate with empty params — if it succeeds, the binding
+				// doesn't depend on agent input and is a constant.
+				val, err := evalBinding(cb.valueProgram, map[string]any{}, r.context)
+				if err == nil {
+					if literals == nil {
+						literals = make(map[string]any)
+					}
+					literals[paramName] = val
+				}
+			}
+		}
+
+		at := AgentTool{
+			Name:          rt.Name,
+			Description:   rt.Description,
+			Sig:           rt.Sig,
+			hiddenParams:  hidden,
+			boundLiterals: literals,
+			AccessMode:    rt.AccessMode,
+			Idempotent:    rt.Idempotent,
+		}
+
+		// Derive ParamsSchema from ParamsType when available (includes
+		// hidden removal + literal narrowing); fall back to raw schema.
+		if pt := at.ParamsType(); pt != nil {
+			at.ParamsSchema = pt.ToJSONSchema()
+		} else {
+			at.ParamsSchema = filterHiddenParams(rt.ParamsSchema(), hidden)
+		}
+
+		tools = append(tools, at)
 	}
 	return AgentView{Tools: tools}
 }

@@ -2,7 +2,7 @@
   "calc.add": {
     "properties": {
       "a": {
-        "description": "The first number",
+        "const": 42,
         "type": "number"
       },
       "b": {

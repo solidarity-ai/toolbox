@@ -44,8 +44,8 @@ type PackageTool struct {
 	AccessMode     AccessMode          `json:"accessMode,omitempty"`
 	Description    string              `json:"description,omitempty"`
 	ParamsSchema   map[string]any      `json:"paramsSchema,omitempty"`
-	ParamsType   *toolbox.ParamsType     `json:"-"`
-	Sig        *toolbox.FuncSig  `json:"-"`
+	ParamsType     *toolbox.ParamsType `json:"-"`
+	Sig            *toolbox.FuncSig    `json:"-"`
 	ResourceParams []ResourceParam     `json:"resourceParams,omitempty"`
 }
 
@@ -56,8 +56,8 @@ type ResolvedTool struct {
 	Name           string
 	Description    string
 	ParamsSchema   map[string]any
-	ParamsType   *toolbox.ParamsType
-	Sig        *toolbox.FuncSig
+	ParamsType     *toolbox.ParamsType
+	Sig            *toolbox.FuncSig
 	AccessMode     AccessMode
 	Idempotent     *bool
 	ResourceParams []ResourceParam

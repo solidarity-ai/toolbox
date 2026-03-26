@@ -16,8 +16,8 @@ type AgentTool struct {
 	Name         string
 	Description  string
 	ParamsSchema map[string]any
-	ParamsType *toolbox.ParamsType
-	Sig      *toolbox.FuncSig
+	ParamsType   *toolbox.ParamsType
+	Sig          *toolbox.FuncSig
 	AccessMode   tooldef.AccessMode
 	Idempotent   *bool
 }
@@ -31,8 +31,8 @@ func (r ResolvedToolset) AgentView() AgentView {
 			Name:         rt.Name,
 			Description:  rt.Description,
 			ParamsSchema: filterHiddenParams(rt.ParamsSchema, r.hiddenParams[rt.Name]),
-			ParamsType: filterHiddenParamsType(rt.ParamsType, r.hiddenParams[rt.Name]),
-			Sig:      rt.Sig,
+			ParamsType:   filterHiddenParamsType(rt.ParamsType, r.hiddenParams[rt.Name]),
+			Sig:          rt.Sig,
 			AccessMode:   rt.AccessMode,
 			Idempotent:   rt.Idempotent,
 		})

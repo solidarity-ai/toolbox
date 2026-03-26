@@ -1,0 +1,275 @@
+# Requirements
+
+This file is the explicit capability and coverage contract for the project.
+
+Use it to track what is actively in scope, what has been validated by completed work, what is intentionally deferred, and what is explicitly out of scope.
+
+Guidelines:
+- Keep requirements capability-oriented, not a giant feature wishlist.
+- Requirements should be atomic, testable, and stated in plain language.
+- Every **Active** requirement should be mapped to a slice, deferred, blocked with reason, or moved out of scope.
+- Each requirement should have one accountable primary owner and may have supporting slices.
+- Research may suggest requirements, but research does not silently make them binding.
+- Validation means the requirement was actually proven by completed work and verification, not just discussed.
+
+## Active
+
+### R001 — FQN identity system
+- Class: core-capability
+- Status: active
+- Description: Every tool is uniquely identified by `{module_path}@{version}/{tool_path}`. Module paths, versions, tool paths, and full FQNs are parseable, formattable, and round-trip faithful. Pseudo-versions (v0.0.0-timestamp-commitsha) are valid version strings.
+- Why it matters: FQNs are the identity foundation — every other capability (cache, resolve, toolset) keys off them
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S03
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §1 for full FQN spec
+
+### R002 — Local package cache
+- Class: core-capability
+- Status: active
+- Description: Resolved packages are stored in a content-addressable local cache at `~/.cache/toolbox/pkg/` keyed by module path + version. Archives are verified on load via sha256. The cache layout mirrors the proxy protocol path structure.
+- Why it matters: Avoids re-downloading packages on every resolve; enables offline work after first fetch
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S04
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §3 for cache layout spec
+
+### R003 — GitHub Releases resolver
+- Class: core-capability
+- Status: active
+- Description: Given a module path + version, the resolver fetches `.toolbox.pkg` and `toolbox.pkg.json` from the corresponding GitHub Release's assets. Supports `GITHUB_BASE_URL` override for testing against emulate. Handles auth via token for private repos.
+- Why it matters: GitHub Releases is the primary distribution path — most packages will be fetched this way
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S05
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §2 for GitHub Releases source spec
+
+### R004 — Git-source fallback resolver
+- Class: core-capability
+- Status: active
+- Description: When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
+- Why it matters: Ensures the system works with any git host, even without CI-published release artifacts
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S06
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §2 (git-source fallback) and §3
+
+### R005 — Pseudo-version resolution
+- Class: core-capability
+- Status: active
+- Description: Packages can be pinned to a specific untagged git commit using pseudo-version format `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`. The resolver fetches the specified commit, runs Pack locally, and caches the result.
+- Why it matters: Enables depending on unreleased commits during development and testing
+- Source: user
+- Primary owning slice: M001-zku9aj/S07
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §4 (pseudo-versions)
+
+### R006 — Builder.AddFromRegistry integration
+- Class: core-capability
+- Status: active
+- Description: `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
+- Why it matters: This is the integration point — downstream code (invoke, codemode) doesn't change; the Builder just has a new way to acquire packages
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S08
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
+
+### R007 — Declarative toolset file (packages + tools)
+- Class: core-capability
+- Status: active
+- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
+- Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S09
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
+
+### R008 — Lockfile generation and verification
+- Class: core-capability
+- Status: active
+- Description: `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
+- Why it matters: Reproducibility and integrity — same lockfile = same packages on any machine
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S10
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §4 (lockfile)
+
+### R009 — Replace directives for local dev
+- Class: core-capability
+- Status: active
+- Description: A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
+- Why it matters: Essential for the "developing a package and consuming it" workflow
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S11
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §7 (replace directives)
+
+### R010 — CLI: resolve, versions, upgrade
+- Class: core-capability
+- Status: active
+- Description: `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
+- Why it matters: Makes the workflow tangible — humans and CI can invoke resolution directly
+- Source: user
+- Primary owning slice: M001-zku9aj/S12
+- Supporting slices: none
+- Validation: unmapped
+- Notes: See `docs/rfc-tool-registry.md` §5 (upgrade workflow)
+
+### R011 — Emulate-based integration test infrastructure
+- Class: quality-attribute
+- Status: active
+- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI.
+- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients
+- Source: user
+- Primary owning slice: M001-zku9aj/S01
+- Supporting slices: M001-zku9aj/S02
+- Validation: unmapped
+- Notes: Uses https://github.com/vercel-labs/emulate
+
+## Validated
+
+(none yet)
+
+## Deferred
+
+### R020 — Proxy server and protocol
+- Class: core-capability
+- Status: deferred
+- Description: Registry proxy at proxy.include.tools providing discovery, stats, availability caching, and download pass-through
+- Why it matters: Ecosystem discovery and organizational visibility
+- Source: user (RFC)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Deferred to separate milestone. See `docs/rfc-tool-registry.md` §2 (registry proxy) and §9
+
+### R021 — Search and discovery API
+- Class: core-capability
+- Status: deferred
+- Description: Proxy search API and `toolbox search` CLI command for ecosystem-wide package discovery
+- Why it matters: Enables finding packages without knowing module paths
+- Source: user (RFC)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Deferred to separate milestone. See `docs/rfc-tool-registry.md` §10
+
+### R022 — Package aliasing for name conflicts
+- Class: core-capability
+- Status: deferred
+- Description: Toolset file supports explicit aliases when two packages share the same short name
+- Why it matters: Prevents ambiguity in short-name resolution
+- Source: user (RFC)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Deferred — rare edge case for initial release. See `docs/rfc-tool-registry.md` §4 (aliasing)
+
+### R023 — Toolset bindings, credentials, context
+- Class: core-capability
+- Status: deferred
+- Description: Full toolset file format with resource_bindings, credentials, context sections
+- Why it matters: Completes the declarative toolset format for production use
+- Source: user (RFC)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Deferred — orthogonal to registry resolution. See `docs/rfc-tool-registry.md` §4 and §8
+
+### R024 — GitHub Action for pack/publish
+- Class: operability
+- Status: deferred
+- Description: solidarity-ai/toolbox-pack-action that automates Pack + GitHub Release on tag push
+- Why it matters: One-step publish workflow for package authors
+- Source: user (RFC)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: unmapped
+- Notes: Deferred — separate repo/effort. See `docs/rfc-tool-registry.md` §2 (GitHub Action)
+
+## Out of Scope
+
+### R030 — Package signing
+- Class: compliance/security
+- Status: out-of-scope
+- Description: Detached signatures alongside archives, configurable trust store
+- Why it matters: Prevents scope creep into cryptographic verification infrastructure
+- Source: RFC (future)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: n/a
+- Notes: See `docs/rfc-tool-registry.md` §6 (package signing future)
+
+### R031 — Capability declarations
+- Class: compliance/security
+- Status: out-of-scope
+- Description: Packages declare network, exec, and other capabilities for transparency and future enforcement
+- Why it matters: Prevents scope creep into capability policy infrastructure
+- Source: RFC (future)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: n/a
+- Notes: See `docs/rfc-tool-registry.md` §6 (capability declarations future)
+
+### R032 — Toolset inheritance/composition
+- Class: core-capability
+- Status: out-of-scope
+- Description: Toolsets extending other toolsets via `extends` directive
+- Why it matters: Prevents scope creep into merge semantics and conflict resolution
+- Source: RFC (future)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: n/a
+- Notes: See `docs/rfc-tool-registry.md` alternatives considered
+
+### R033 — Multi-package monorepos
+- Class: core-capability
+- Status: out-of-scope
+- Description: Single git repo containing multiple packages with subdirectory module paths and prefixed version tags
+- Why it matters: Adds complexity to git-based resolution — not needed for initial release
+- Source: RFC (future)
+- Primary owning slice: none
+- Supporting slices: none
+- Validation: n/a
+- Notes: See `docs/rfc-tool-registry.md` open question §5
+
+## Traceability
+
+| ID | Class | Status | Primary owner | Supporting | Proof |
+|---|---|---|---|---|---|
+| R001 | core-capability | active | M001-zku9aj/S03 | none | unmapped |
+| R002 | core-capability | active | M001-zku9aj/S04 | none | unmapped |
+| R003 | core-capability | active | M001-zku9aj/S05 | none | unmapped |
+| R004 | core-capability | active | M001-zku9aj/S06 | none | unmapped |
+| R005 | core-capability | active | M001-zku9aj/S07 | none | unmapped |
+| R006 | core-capability | active | M001-zku9aj/S08 | none | unmapped |
+| R007 | core-capability | active | M001-zku9aj/S09 | none | unmapped |
+| R008 | core-capability | active | M001-zku9aj/S10 | none | unmapped |
+| R009 | core-capability | active | M001-zku9aj/S11 | none | unmapped |
+| R010 | core-capability | active | M001-zku9aj/S12 | none | unmapped |
+| R011 | quality-attribute | active | M001-zku9aj/S01 | M001-zku9aj/S02 | unmapped |
+| R020 | core-capability | deferred | none | none | unmapped |
+| R021 | core-capability | deferred | none | none | unmapped |
+| R022 | core-capability | deferred | none | none | unmapped |
+| R023 | core-capability | deferred | none | none | unmapped |
+| R024 | operability | deferred | none | none | unmapped |
+| R030 | compliance/security | out-of-scope | none | none | n/a |
+| R031 | compliance/security | out-of-scope | none | none | n/a |
+| R032 | core-capability | out-of-scope | none | none | n/a |
+| R033 | core-capability | out-of-scope | none | none | n/a |
+
+## Coverage Summary
+
+- Active requirements: 11
+- Mapped to slices: 11
+- Validated: 0
+- Unmapped active requirements: 0

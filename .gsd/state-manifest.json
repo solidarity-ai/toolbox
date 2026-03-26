@@ -1,0 +1,507 @@
+{
+  "version": 1,
+  "exported_at": "2026-03-26T22:19:54.777Z",
+  "milestones": [
+    {
+      "id": "M001-zku9aj",
+      "title": "M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context",
+      "status": "active",
+      "depends_on": [],
+      "created_at": "2026-03-26T21:56:03.311Z",
+      "completed_at": null,
+      "vision": "",
+      "success_criteria": [],
+      "key_risks": [],
+      "proof_strategy": [],
+      "verification_contract": "",
+      "verification_integration": "",
+      "verification_operational": "",
+      "verification_uat": "",
+      "definition_of_done": [],
+      "requirement_coverage": "",
+      "boundary_map_markdown": ""
+    }
+  ],
+  "slices": [
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S01",
+      "title": "Emulate lifecycle + happy-path fixtures",
+      "status": "pending",
+      "risk": "high",
+      "depends": [],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.311Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Build shared Go test infrastructure — emulate lifecycle manager, GitHub API seed builder, and local git fixture builder — that all downstream registry slices (S02, S05, S06, S07, S08) depend on.",
+      "success_criteria": "## Must-Haves\n\n- Emulate lifecycle manager starts `emulate` once per test binary via `sync.Once`, polls for readiness, provides `BaseURL()` and `Client()` with auth pre-configured\n- Seed builder API creates repos, releases, and uploads real `.toolbox.pkg` assets (produced by `packaging.Pack()`) via emulate's GitHub REST API\n- Local git fixture builder creates temporary repos with tagged commits containing real package files\n- Integration tests prove all three subsystems work with real subprocess and git operations\n- CI workflow adds `setup-node` with Node.js and pre-installs the `emulate` npm package\n- All code lives in `registry/testutil/` (not top-level `testutil/`)\n\n## Requirement Impact\n\n- **Requirements touched**: R011 — this slice directly advances R011 (shared test fixtures, emulate lifecycle, CI support). Failure scenarios deferred to S02.\n- **Re-verify**: N/A — no prior functionality affected\n- **Decisions revisited**: none — D001 (emulate strategy) is confirmed and implemented here\n\n## Proof Level\n\n- This slice proves: integration (real subprocess lifecycle, real HTTP calls to emulate, real git operations)\n- Real runtime required: yes (emulate Node.js subprocess, git CLI commands)\n- Human/UAT required: no\n\n## Verification\n\n- `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` — emulate starts, repo + release + asset created, release-by-tag returns correct metadata\n- `go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 30s` — tagged repo created, clone works, files present at tag\n- `go test ./registry/... -v -count=1 -timeout 60s` — all registry tests pass together\n\n## Observability / Diagnostics\n\n- Runtime signals: emulate subprocess stderr captured and logged on startup failure; HTTP response status codes from seed API calls logged in tests\n- Inspection surfaces: `t.Log()` output in test verbose mode; emulate process stderr for debugging startup issues\n- Failure visibility: emulate start timeout includes captured stderr; seed API errors include HTTP status + response body; git fixture errors include git command stderr\n- Redaction constraints: none (test-only tokens)\n\n## Integration Closure\n\n- Upstream surfaces consumed: `packaging.Pack()` from `packaging/packaging.go`; `testutil/fixtures/fixtures.go` SourceDirs(); fixture packages in `testutil/fixtures/toolbox.pkgs/calc/`\n- New wiring introduced: `registry/testutil/emulatetest/` and `registry/testutil/gitfixture/` packages — no runtime hookup, test infrastructure only\n- What remains: S02 extends seed builder for failure scenarios; S05/S06/S07/S08 import these fixtures for resolver integration tests",
+      "proof_level": "integration",
+      "integration_closure": "Consumes `packaging.Pack()` and `testutil/fixtures/`. Produces test infrastructure consumed by S02, S05, S06, S07, S08.",
+      "observability_impact": "Emulate subprocess stderr captured on failure; HTTP response details logged in seed API errors; git command stderr captured in fixture builder errors.",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S02",
+      "title": "Failure scenario test builders",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S01"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Extend test infrastructure with a builder pattern for constructing failure scenarios that S05/S06 resolver tests need.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S03",
+      "title": "FQN types and parsing",
+      "status": "pending",
+      "risk": "low",
+      "depends": [],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Add ModulePath, Version, ToolFQN, PseudoVersion types to the tool package with full parsing, formatting, and validation.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S04",
+      "title": "Local cache layout",
+      "status": "pending",
+      "risk": "low",
+      "depends": [
+        "S03"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement the local cache at ~/.cache/toolbox/pkg/ with store, load, verify, and path derivation.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S05",
+      "title": "GitHub Releases source + PackageSource interface",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Define the PackageSource interface and implement GitHubReleaseSource that fetches .toolbox.pkg from GitHub Release assets. Prove it works against emulate with both happy-path and failure cases.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S06",
+      "title": "Git-source fallback resolver",
+      "status": "pending",
+      "risk": "high",
+      "depends": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement GitSource as a PackageSource that clones a git repo at a version tag, runs packaging.Pack, and stores the result in cache.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S07",
+      "title": "Pseudo-version resolution",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S03",
+        "S06"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Extend GitSource to handle pseudo-versions: parse v0.0.0-timestamp-commitsha, fetch the specific commit, run Pack, cache.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S08",
+      "title": "Resolver orchestration + Builder.AddFromRegistry",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S05",
+        "S06"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.312Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Build the Resolver that orchestrates sources (cache → GitHub Release → git-source) and wire it into Builder.AddFromRegistry.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S09",
+      "title": "Toolset file parsing",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S08"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.313Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement toolbox.toolset.json parsing with packages map and tools list. Wire into Resolver for package resolution.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S10",
+      "title": "Lockfile generation and verification",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S09"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.313Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement lockfile generation on resolve and verification on subsequent resolves.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S11",
+      "title": "Replace directives",
+      "status": "pending",
+      "risk": "low",
+      "depends": [
+        "S09"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.313Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement replace directive support via toolbox.toolset.local.json overlay file.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "id": "S12",
+      "title": "CLI commands + end-to-end UAT",
+      "status": "pending",
+      "risk": "low",
+      "depends": [
+        "S10",
+        "S11"
+      ],
+      "demo": "",
+      "created_at": "2026-03-26T21:56:03.313Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Build the toolbox CLI with resolve, versions, and upgrade subcommands. Prove end-to-end against emulate.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 0,
+      "replan_triggered_at": null
+    }
+  ],
+  "tasks": [
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S01",
+      "id": "T01",
+      "title": "Added shared emulate lifecycle and GitHub release seeding helpers with integration coverage for the real emulator API.",
+      "status": "complete",
+      "one_liner": "Added shared emulate lifecycle and GitHub release seeding helpers with integration coverage for the real emulator API.",
+      "narrative": "Built the new registry/testutil/emulatetest package for shared emulate-backed registry tests. The lifecycle manager starts npx emulate exactly once per test binary, waits for /rate_limit readiness on a dynamically chosen port, exposes an authenticated HTTP client, captures subprocess output for startup diagnostics, and cleans the process up at test-binary exit. The seed client now creates repos, releases, and release assets against the real emulate GitHub API, and SeedPackageRelease packs the calc fixture with packaging.Pack, uploads both generated artifacts, and returns the raw uploaded bytes for downstream slices. Integration coverage now proves the full happy path plus the required missing-source and missing-repo failure modes.",
+      "verification_result": "Ran go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s from the worktree root. The suite passed end-to-end, logging emulate startup on a chosen port, successful /rate_limit checks, repo and release creation, package asset uploads, release-by-tag metadata verification, and descriptive 404 handling for missing repos.",
+      "duration": "",
+      "completed_at": "2026-03-26T22:19:54.544Z",
+      "blocker_discovered": false,
+      "deviations": "Added Linux/non-Linux platform helper files for Pdeathsig portability, used os.MkdirTemp inside SeedPackageRelease because the planned method signature had no testing.T, and implemented repo creation via /user/repos after confirming emulate v0.3.0 does not expose the org creation endpoints.",
+      "known_issues": "Emulate v0.3.0 still does not reliably return uploaded release asset bytes from the download path, so SeedResult preserves the uploaded archive and manifest bytes for downstream workaround code.",
+      "key_files": [
+        "registry/testutil/emulatetest/emulatetest.go",
+        "registry/testutil/emulatetest/seed.go",
+        "registry/testutil/emulatetest/emulatetest_test.go",
+        "registry/testutil/emulatetest/sysproc_linux.go",
+        "registry/testutil/emulatetest/sysproc_other.go"
+      ],
+      "key_decisions": [
+        "Use POST /user/repos and the auto-created admin user as the fixture owner because emulate v0.3.0 returns 404 for org creation endpoints.",
+        "Keep the emulate subprocess shared per test binary with sync.Once and shut it down in TestMain so lifecycle tests reuse one server without leaking processes."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S01\nmilestone: M001-zku9aj\nkey_files:\n  - registry/testutil/emulatetest/emulatetest.go\n  - registry/testutil/emulatetest/seed.go\n  - registry/testutil/emulatetest/emulatetest_test.go\n  - registry/testutil/emulatetest/sysproc_linux.go\n  - registry/testutil/emulatetest/sysproc_other.go\nkey_decisions:\n  - Use POST /user/repos and the auto-created admin user as the fixture owner because emulate v0.3.0 returns 404 for org creation endpoints.\n  - Keep the emulate subprocess shared per test binary with sync.Once and shut it down in TestMain so lifecycle tests reuse one server without leaking processes.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-26T22:19:54.593Z\nblocker_discovered: false\n---\n\n# T01: Added shared emulate lifecycle and GitHub release seeding helpers with integration coverage for the real emulator API.\n\n**Added shared emulate lifecycle and GitHub release seeding helpers with integration coverage for the real emulator API.**\n\n## What Happened\n\nBuilt the new registry/testutil/emulatetest package for shared emulate-backed registry tests. The lifecycle manager starts npx emulate exactly once per test binary, waits for /rate_limit readiness on a dynamically chosen port, exposes an authenticated HTTP client, captures subprocess output for startup diagnostics, and cleans the process up at test-binary exit. The seed client now creates repos, releases, and release assets against the real emulate GitHub API, and SeedPackageRelease packs the calc fixture with packaging.Pack, uploads both generated artifacts, and returns the raw uploaded bytes for downstream slices. Integration coverage now proves the full happy path plus the required missing-source and missing-repo failure modes.\n\n## Verification\n\nRan go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s from the worktree root. The suite passed end-to-end, logging emulate startup on a chosen port, successful /rate_limit checks, repo and release creation, package asset uploads, release-by-tag metadata verification, and descriptive 404 handling for missing repos.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` | 0 | ✅ pass | 4456ms |\n\n\n## Deviations\n\nAdded Linux/non-Linux platform helper files for Pdeathsig portability, used os.MkdirTemp inside SeedPackageRelease because the planned method signature had no testing.T, and implemented repo creation via /user/repos after confirming emulate v0.3.0 does not expose the org creation endpoints.\n\n## Known Issues\n\nEmulate v0.3.0 still does not reliably return uploaded release asset bytes from the download path, so SeedResult preserves the uploaded archive and manifest bytes for downstream workaround code.\n\n## Files Created/Modified\n\n- `registry/testutil/emulatetest/emulatetest.go`\n- `registry/testutil/emulatetest/seed.go`\n- `registry/testutil/emulatetest/emulatetest_test.go`\n- `registry/testutil/emulatetest/sysproc_linux.go`\n- `registry/testutil/emulatetest/sysproc_other.go`\n",
+      "description": "## Description\n\nBuild the emulate subprocess lifecycle manager and GitHub API seed builder that all downstream registry slices depend on. This is the highest-risk piece of S01 — managing a Node.js subprocess from Go tests with HTTP-based seeding.\n\n**Slice context:** S01 builds shared test infrastructure for the registry milestone. This task creates the emulate subsystem. T02 creates the git fixture subsystem independently.\n\n**Key facts the executor must know:**\n- The npm package is `emulate` (NOT `@vercel-labs/emulate`). CLI: `npx emulate start --service github --port <PORT>`\n- Auth works with `Authorization: token ghp_test123` — an `admin` user is auto-created\n- Health check: `GET http://localhost:<PORT>/rate_limit` returns HTTP 200 when emulate is ready\n- GitHub REST API works: POST `/user/repos`, POST `/repos/:owner/:repo/releases`, asset upload via `upload_url`\n- **Known limitation:** Asset binary download does NOT work in emulate v0.3.0 (returns JSON instead of binary). This is S05's problem — S01 just uploads assets and verifies metadata. Document this in a code comment.\n- No new Go dependencies. Use stdlib `net/http` and `os/exec`. Use `google/go-cmp` for test assertions.\n- The `packaging.Pack(srcDir, outDir)` function produces real `.toolbox.pkg` + `toolbox.pkg.json` from a source package directory.\n- Use `testutil/fixtures/toolbox.pkgs/calc/` as the source package for seeding.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| emulate subprocess | Log captured stderr, return descriptive error | 30s startup timeout, kill process, fail test with stderr dump | N/A — subprocess, not HTTP |\n| emulate HTTP API | Return HTTP status + response body in error | Use http.Client timeout (10s default) | Return raw body in error for debugging |\n| npx / Node.js | `t.Skip(\"npx not found\")` to skip gracefully in environments without Node | N/A | N/A |\n| packaging.Pack() | Propagate error — indicates broken fixture source | N/A | N/A |\n\n## Negative Tests\n\n- Verify that `SeedPackageRelease` with a nonexistent source dir returns a clear Pack error\n- Verify that creating a release on a nonexistent repo returns a descriptive HTTP error\n\n## Steps\n\n1. **Create `registry/testutil/emulatetest/emulatetest.go`** — the lifecycle manager:\n   - `Start(t *testing.T) *Server` — uses `sync.Once` to start emulate exactly once per test binary\n   - Find a free port dynamically: `net.Listen(\"tcp\", \"127.0.0.1:0\")`, get port, close listener\n   - Start subprocess: `exec.Command(\"npx\", \"emulate\", \"start\", \"--service\", \"github\", \"--port\", portStr)`\n   - Redirect stderr to a `bytes.Buffer` for diagnostics; stdout can go to the buffer too\n   - Poll `GET http://127.0.0.1:<port>/rate_limit` with 200ms intervals, 30s timeout\n   - If `npx` is not found (exec.ErrNotFound), call `t.Skip(\"emulatetest: npx not available\")`\n   - `*Server` exposes `BaseURL() string`, `Client() *http.Client` (with auth header via RoundTripper), `Port() int`\n   - Store `*exec.Cmd` for cleanup; kill process on test binary exit\n   - On Linux, set `SysProcAttr.Pdeathsig = syscall.SIGTERM` for automatic cleanup\n\n2. **Create `registry/testutil/emulatetest/seed.go`** — the seed builder API:\n   - `Server.Seed() *SeedClient` returns a client pre-configured with base URL and auth\n   - Response types (thin structs): `Repo{ID, FullName}`, `Release{ID, TagName, UploadURL}`, `Asset{ID, Name, Size, ContentType}`\n   - `CreateRepo(owner, name string) (*Repo, error)` — POST `/orgs/:owner/repos` with `{\"name\": name}`. Create the org first via POST `/admin/orgs` if needed, or use POST `/user/repos` and ignore the owner (emulate auto-assigns to `admin` user).\n   - `CreateRelease(owner, repo, tag string) (*Release, error)` — POST `/repos/:owner/:repo/releases` with `{\"tag_name\": tag}`\n   - `UploadReleaseAsset(owner, repo string, releaseID int, filename string, data []byte) (*Asset, error)` — POST to `upload_url?name=<filename>` with `Content-Type: application/octet-stream` body\n   - `SeedPackageRelease(owner, repo, tag, pkgDir string) (*SeedResult, error)` — high-level helper:\n     a. Call `packaging.Pack(pkgDir, t.TempDir())` to produce archive + manifest\n     b. Read the archive and manifest bytes\n     c. CreateRepo (ignore already-exists)\n     d. CreateRelease with tag\n     e. Upload archive as `<name>.toolbox.pkg`\n     f. Upload manifest as `toolbox.pkg.json`\n     g. Return `SeedResult{Owner, Repo, Tag, ReleaseID, ArchiveAssetID, ManifestAssetID, ArchiveBytes, ManifestBytes}`\n   - Store uploaded asset bytes in `SeedResult` — downstream S05 needs these for its download workaround\n\n3. **Create `registry/testutil/emulatetest/emulatetest_test.go`** — integration tests:\n   - `TestEmulateLifecycle`: Start emulate, verify `BaseURL()` returns non-empty, verify `GET /rate_limit` returns 200\n   - `TestSeedRepoAndRelease`: Create repo, verify 201; create release with tag \"v1.0.0\", verify release ID > 0\n   - `TestSeedPackageRelease`: Call `SeedPackageRelease` with `testutil/fixtures/toolbox.pkgs/calc` as source dir. Verify:\n     a. No error returned\n     b. `GET /repos/:owner/:repo/releases/tags/v1.0.0` returns release with 2 assets\n     c. Assets have names `calc.toolbox.pkg` and `toolbox.pkg.json`\n     d. Asset sizes are > 0\n   - Use `google/go-cmp` for struct comparisons where appropriate\n\n## Must-Haves\n\n- [ ] `emulatetest.Start(t)` starts emulate once per binary and returns `*Server` with `BaseURL()` and `Client()`\n- [ ] `SeedClient` can create repos, releases, and upload assets via emulate's API\n- [ ] `SeedPackageRelease` produces real `.toolbox.pkg` archives via `packaging.Pack()` and uploads them\n- [ ] `SeedResult` includes uploaded asset bytes for downstream workaround\n- [ ] Integration test verifies full lifecycle: start → create repo → create release → upload assets → verify release-by-tag\n- [ ] Graceful skip when `npx` is not available\n- [ ] Known limitation (asset download broken in emulate) documented in code comment\n\n## Verification\n\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` passes with all tests green\n- Test output shows emulate starting on a port, HTTP calls succeeding, and release metadata verified\n\n## Observability Impact\n\n- Signals added: emulate stderr captured in buffer and logged on startup failure; HTTP error responses include status code and body\n- How a future agent inspects this: run tests with `-v` flag; startup failures show captured emulate stderr; seed API failures show HTTP status + body\n- Failure state exposed: emulate startup timeout message includes the captured stderr buffer contents",
+      "estimate": "2h",
+      "files": [
+        "registry/testutil/emulatetest/emulatetest.go",
+        "registry/testutil/emulatetest/seed.go",
+        "registry/testutil/emulatetest/emulatetest_test.go"
+      ],
+      "verify": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s",
+      "inputs": [
+        "`packaging/packaging.go` — Pack() function to produce real .toolbox.pkg archives",
+        "`packaging/internal/archive/archive.go` — ArchiveExtension constant and PackResult type",
+        "`testutil/fixtures/toolbox.pkgs/calc/` — source package directory for seeding",
+        "`testutil/fixtures/fixtures.go` — SourceDirs() for discovering fixture packages"
+      ],
+      "expected_output": [
+        "`registry/testutil/emulatetest/emulatetest.go` — lifecycle manager with Start(), Server, BaseURL(), Client()",
+        "`registry/testutil/emulatetest/seed.go` — SeedClient with CreateRepo, CreateRelease, UploadReleaseAsset, SeedPackageRelease",
+        "`registry/testutil/emulatetest/emulatetest_test.go` — integration tests proving full lifecycle"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S01",
+      "id": "T02",
+      "title": "Build local git fixture builder with tagged-repo test",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "## Description\n\nBuild the local git fixture builder that creates temporary bare-compatible git repos with tagged commits containing real package files. This is the test infrastructure for S06 (git-source fallback) — it produces repos that the git-source resolver will clone from using `file://` URLs.\n\n**Slice context:** S01 builds two independent test subsystems. T01 built the emulate subsystem. This task builds the git fixture subsystem. They share no code.\n\n**Key facts the executor must know:**\n- Use `exec.Command(\"git\", ...)` for all git operations — no Go git libraries\n- Must set git user config explicitly for CI: use `-c user.name=test -c user.email=test@test.com` on commit commands\n- Create non-bare repos (simpler: init, write files, add, commit, tag). The git-source resolver in S06 will clone from the directory path.\n- Use `t.TempDir()` for automatic cleanup\n- The test should clone the created repo to a separate temp dir and verify the tag and files\n- Use `testutil/fixtures/toolbox.pkgs/calc/` as a real package source directory for one test\n- No new Go dependencies — `os/exec` and `os` only\n\n## Steps\n\n1. **Create `registry/testutil/gitfixture/gitfixture.go`**:\n   - `CreateTaggedRepo(t *testing.T, tag string, files map[string][]byte) string` — creates temp dir, `git init`, writes files at given paths, `git add .`, `git -c user.name=test -c user.email=test@test.com commit -m \"initial\"`, `git tag <tag>`, returns absolute path to the repo directory\n   - `CreateTaggedRepoFromDir(t *testing.T, tag string, srcDir string) string` — copies all files from srcDir into temp repo, commits and tags. Uses `filepath.WalkDir` to copy. Returns absolute path.\n   - Helper: `runGit(t *testing.T, dir string, args ...string) string` — runs `git` with args in the given dir, returns stdout, fails test on non-zero exit. Captures stderr for diagnostics.\n   - All temp dirs created via `t.TempDir()` for automatic cleanup\n\n2. **Create `registry/testutil/gitfixture/gitfixture_test.go`**:\n   - `TestCreateTaggedRepo`: Create repo with tag \"v1.0.0\" and files `{\"hello.txt\": []byte(\"hello\")}`. Clone to separate temp dir. Verify: `git tag -l` includes \"v1.0.0\", `git checkout v1.0.0` succeeds, `hello.txt` contains \"hello\".\n   - `TestCreateTaggedRepoFromDir`: Create repo from `testutil/fixtures/toolbox.pkgs/calc/` with tag \"v2.0.0\". Clone to separate temp dir. Checkout tag. Verify `toolbox.devpkg.json` exists and contains `\"name\": \"calc\"`.\n   - `TestMultipleTags`: Create repo, add first tag, modify a file, add second tag. Verify both tags exist and files differ between them.\n\n## Must-Haves\n\n- [ ] `CreateTaggedRepo` creates a git repo with specified files at a given tag\n- [ ] `CreateTaggedRepoFromDir` copies files from an existing directory into a tagged repo\n- [ ] Git user config is set explicitly (works in CI without global git config)\n- [ ] Tests verify repos are cloneable and tags contain expected files\n- [ ] All temp dirs use `t.TempDir()` for automatic cleanup\n\n## Verification\n\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 30s` passes with all tests green\n- Test output shows repos created, cloned, tags verified, files checked",
+      "estimate": "45m",
+      "files": [
+        "registry/testutil/gitfixture/gitfixture.go",
+        "registry/testutil/gitfixture/gitfixture_test.go"
+      ],
+      "verify": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 30s",
+      "inputs": [
+        "`testutil/fixtures/toolbox.pkgs/calc/` — source package directory for CreateTaggedRepoFromDir test",
+        "`testutil/fixtures/toolbox.pkgs/calc/toolbox.devpkg.json` — manifest file verified in test assertions"
+      ],
+      "expected_output": [
+        "`registry/testutil/gitfixture/gitfixture.go` — CreateTaggedRepo, CreateTaggedRepoFromDir, runGit helper",
+        "`registry/testutil/gitfixture/gitfixture_test.go` — tests proving tagged repos are cloneable with correct files"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S01",
+      "id": "T03",
+      "title": "Add setup-node to CI workflow and verify full registry test suite",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "## Description\n\nUpdate the GitHub Actions CI workflow to install Node.js and pre-install the `emulate` npm package, then verify the full registry test suite passes locally.\n\n**Slice context:** T01 built the emulate subsystem and T02 built the git fixture subsystem. This task ensures both work in CI and verifies them together.\n\n**Key facts the executor must know:**\n- The CI file is `.github/workflows/ci.yml`\n- Currently it has: checkout → setup-go → rust-toolchain → cache rust → build rust → rust tests → go fmt → go vet → go test\n- Node.js is needed because emulate is an npm package started via `npx emulate start`\n- Pre-installing emulate avoids the `npx` download delay during tests: `npm install -g emulate`\n- The `emulate` package is at version 0.3.0 on npm\n- Add `actions/setup-node@v4` with `node-version: '22'` BEFORE the Go test step\n- The emulate tests use `t.Skip()` when npx is not available, so existing CI without node would just skip — but we want them to actually run\n\n## Steps\n\n1. **Edit `.github/workflows/ci.yml`**:\n   - Add `actions/setup-node@v4` step with `node-version: '22'` after the checkout step (before Go/Rust setup is fine, order among setup steps doesn't matter)\n   - Add a step: `name: Install emulate` with `run: npm install -g emulate` to pre-install so npx doesn't download on first use\n   - Keep all existing steps unchanged\n\n2. **Run full registry test suite locally**:\n   - `go test ./registry/... -v -count=1 -timeout 60s` — verify all emulate and git fixture tests pass together\n   - Verify no port conflicts or race conditions between test packages\n\n3. **Validate CI config**:\n   - Ensure YAML is valid (no syntax errors)\n   - Verify the step ordering makes sense\n\n## Must-Haves\n\n- [ ] CI workflow includes `setup-node` with Node.js 22\n- [ ] CI workflow pre-installs `emulate` npm package\n- [ ] `go test ./registry/... -v -count=1 -timeout 60s` passes locally\n- [ ] All existing CI steps remain unchanged\n\n## Verification\n\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\" && echo 'YAML valid'` — CI config is valid YAML\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'setup-node' .github/workflows/ci.yml && echo 'setup-node present'`\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'emulate' .github/workflows/ci.yml && echo 'emulate install present'`\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s` passes",
+      "estimate": "30m",
+      "files": [
+        ".github/workflows/ci.yml"
+      ],
+      "verify": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'setup-node' .github/workflows/ci.yml && grep -q 'emulate' .github/workflows/ci.yml && go test ./registry/... -v -count=1 -timeout 60s",
+      "inputs": [
+        "`.github/workflows/ci.yml` — existing CI configuration to modify",
+        "`registry/testutil/emulatetest/emulatetest.go` — emulate lifecycle manager (from T01)",
+        "`registry/testutil/emulatetest/emulatetest_test.go` — emulate tests (from T01)",
+        "`registry/testutil/gitfixture/gitfixture.go` — git fixture builder (from T02)",
+        "`registry/testutil/gitfixture/gitfixture_test.go` — git fixture tests (from T02)"
+      ],
+      "expected_output": [
+        "`.github/workflows/ci.yml` — updated with setup-node and emulate install steps"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 6,
+      "id": "D001",
+      "when_context": "M001-zku9aj",
+      "scope": "library",
+      "decision": "GitHub API testing strategy",
+      "choice": "vercel-labs/emulate started as Go exec.Command subprocess",
+      "rationale": "Production-fidelity GitHub API emulation without mocked HTTP. Real API responses, stateful repos/releases. User specifically requested emulate.",
+      "revisable": "No",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 7,
+      "id": "D002",
+      "when_context": "M001-zku9aj",
+      "scope": "arch",
+      "decision": "FQN type location",
+      "choice": "In the tool package alongside Package and ResolvedTool",
+      "rationale": "FQN types are identity types that Package will eventually carry. tool package is tiny (62 lines) and the natural home for static identity types.",
+      "revisable": "No",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 8,
+      "id": "D003",
+      "when_context": "M001-zku9aj",
+      "scope": "arch",
+      "decision": "When to define the PackageSource abstraction",
+      "choice": "PackageSource interface defined in S05 alongside first implementation (GitHubReleaseSource)",
+      "rationale": "Defining the interface alongside its first real implementation ensures the contract is grounded. S06 implements the same interface. S08 composes both trivially because the contract is already proven.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 9,
+      "id": "D004",
+      "when_context": "M001-zku9aj",
+      "scope": "scope",
+      "decision": "Toolset file scope for M001",
+      "choice": "Minimal: packages map + tools list only. No bindings, credentials, context, resource_bindings.",
+      "rationale": "Bindings and credentials are orthogonal to registry resolution. Including them would bloat the milestone without proving the registry works. Deferred to R023.",
+      "revisable": "Yes — when bindings milestone starts",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 10,
+      "id": "D005",
+      "when_context": "M001-zku9aj",
+      "scope": "convention",
+      "decision": "Design authority for registry implementation",
+      "choice": "docs/rfc-tool-registry.md is the authoritative design document. All context files and research artifacts must reference it.",
+      "rationale": "RFC contains all design decisions, open questions, alternative analysis, and detailed specs. Prevents agents from reinventing answers already decided in the RFC.",
+      "revisable": "No",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 11,
+      "id": "D006",
+      "when_context": "M001-zku9aj/S01/T01",
+      "scope": "test-infrastructure",
+      "decision": "How emulate-based test fixtures create GitHub repositories",
+      "choice": "Use POST /user/repos and treat repository ownership as the auto-created admin user in emulate v0.3.0 instead of relying on org creation endpoints.",
+      "rationale": "A live probe against emulate v0.3.0 showed /admin/orgs and /orgs/:owner/repos returning 404, while /user/repos succeeds and returns full_name admin/<repo>. Aligning the seed helper with that real behavior keeps the lifecycle tests stable and gives downstream registry slices a consistent owner model.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    }
+  ],
+  "verification_evidence": [
+    {
+      "id": 1,
+      "task_id": "T01",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 4456,
+      "created_at": "2026-03-26T22:19:54.544Z"
+    }
+  ]
+}

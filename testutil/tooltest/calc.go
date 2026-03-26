@@ -120,3 +120,15 @@ func calcFixtureDir() string {
 	}
 	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc")
 }
+
+// CalcBuilder returns a *toolset.Builder loaded with the calc fixture package.
+// The caller can then call builder.Resolve(cfg) with any desired Config.
+func CalcBuilder(t testing.TB) *toolset.Builder {
+	t.Helper()
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(calcFixtureDir()); err != nil {
+		t.Fatalf("add calc package dir: %v", err)
+	}
+	return builder
+}

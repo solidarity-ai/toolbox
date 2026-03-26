@@ -140,8 +140,8 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 
 	// Emit type declarations for any $ref definitions
 	for _, tool := range tools {
-		if tool.ParamsType != nil {
-			decls := tool.ParamsType.Declarations()
+		if pt := tool.ParamsType(); pt != nil {
+			decls := pt.Declarations()
 			if decls != "" {
 				b.WriteString(decls)
 				b.WriteString("\n")
@@ -158,8 +158,8 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 		}
 
 		paramType := "Record<string, unknown>"
-		if tool.ParamsType != nil {
-			paramType = tool.ParamsType.ToTS()
+		if pt := tool.ParamsType(); pt != nil {
+			paramType = pt.ToTS()
 		}
 
 		namespaces[parts[0]] = append(namespaces[parts[0]], fmt.Sprintf(

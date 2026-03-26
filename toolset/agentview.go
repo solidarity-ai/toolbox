@@ -16,10 +16,31 @@ type AgentTool struct {
 	Name         string
 	Description  string
 	ParamsSchema map[string]any
-	ParamsType   *toolbox.ParamsType
 	Sig          *toolbox.FuncSig
+	hiddenParams map[string]bool
 	AccessMode   tooldef.AccessMode
 	Idempotent   *bool
+}
+
+// ParamsType returns the first parameter's type from the function signature,
+// with hidden bound params removed. Returns nil if no signature is available.
+func (t AgentTool) ParamsType() *toolbox.ParamsType {
+	if t.Sig == nil {
+		return nil
+	}
+	params := t.Sig.Params()
+	if len(params) == 0 {
+		return nil
+	}
+	pt := params[0].Type()
+	if len(t.hiddenParams) > 0 && pt != nil {
+		names := make([]string, 0, len(t.hiddenParams))
+		for n := range t.hiddenParams {
+			names = append(names, n)
+		}
+		pt = pt.RemoveProperties(names...)
+	}
+	return pt
 }
 
 // AgentView produces the agent-visible tool surface from the resolved toolset.
@@ -27,30 +48,18 @@ type AgentTool struct {
 func (r ResolvedToolset) AgentView() AgentView {
 	tools := make([]AgentTool, 0, len(r.tools))
 	for _, rt := range r.tools {
+		hidden := r.hiddenParams[rt.Name]
 		tools = append(tools, AgentTool{
 			Name:         rt.Name,
 			Description:  rt.Description,
-			ParamsSchema: filterHiddenParams(rt.ParamsSchema, r.hiddenParams[rt.Name]),
-			ParamsType:   filterHiddenParamsType(rt.ParamsType, r.hiddenParams[rt.Name]),
+			ParamsSchema: filterHiddenParams(rt.ParamsSchema, hidden),
 			Sig:          rt.Sig,
+			hiddenParams: hidden,
 			AccessMode:   rt.AccessMode,
 			Idempotent:   rt.Idempotent,
 		})
 	}
 	return AgentView{Tools: tools}
-}
-
-// filterHiddenParamsType returns a copy of the ParamsType with hidden properties removed.
-// This only handles top-level properties, matching the binding model constraint.
-func filterHiddenParamsType(t *toolbox.ParamsType, hidden map[string]bool) *toolbox.ParamsType {
-	if len(hidden) == 0 || t == nil {
-		return t
-	}
-	names := make([]string, 0, len(hidden))
-	for n := range hidden {
-		names = append(names, n)
-	}
-	return t.RemoveProperties(names...)
 }
 
 // filterHiddenParams returns a copy of the JSON Schema with hidden params removed.

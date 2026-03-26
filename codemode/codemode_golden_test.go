@@ -119,8 +119,8 @@ func buildSchemaMap(view toolset.AgentView) map[string]any {
 
 	out := make(map[string]any, len(tools))
 	for _, tool := range tools {
-		if tool.ParamsType != nil {
-			out[tool.Name] = tool.ParamsType.ToJSONSchema()
+		if pt := tool.ParamsType(); pt != nil {
+			out[tool.Name] = pt.ToJSONSchema()
 		} else {
 			out[tool.Name] = map[string]any{}
 		}

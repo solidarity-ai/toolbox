@@ -48,7 +48,7 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 		},
 	}
 
-	testdataDir := filepath.Join(testfileDir(), "testdata")
+	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
 	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
 
 	for _, v := range variants {

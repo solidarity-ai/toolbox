@@ -65,7 +65,7 @@ func calcDistFixtureDir() string {
 	if !ok {
 		panic("tooltest: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc-dist")
+	return filepath.Join(filepath.Dir(file), "..", "testdata", "goldens", "distpkgs", "calc-dist")
 }
 
 // VFSTestDistToolset loads the vfs-test-dist golden fixture (archive) into a resolved toolset.
@@ -91,7 +91,7 @@ func vfsTestDistFixtureDir() string {
 	if !ok {
 		panic("tooltest: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "vfs-test-dist")
+	return filepath.Join(filepath.Dir(file), "..", "testdata", "goldens", "distpkgs", "vfs-test-dist")
 }
 
 func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {

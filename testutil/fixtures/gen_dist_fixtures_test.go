@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -20,10 +21,12 @@ import (
 func TestDistGoldens(t *testing.T) {
 	generate := os.Getenv("GENERATE_DIST_FIXTURES") != ""
 
+	distpkgsDir := filepath.Join(testfilesDir(), "..", "testdata", "goldens", "distpkgs")
+
 	for _, srcDir := range SourceDirs() {
 		name := filepath.Base(srcDir)
 		distName := name + "-dist"
-		goldenDir := filepath.Join(filepath.Dir(srcDir), distName)
+		goldenDir := filepath.Join(distpkgsDir, distName)
 
 		t.Run(distName, func(t *testing.T) {
 			tmpDir := t.TempDir()
@@ -67,6 +70,14 @@ func TestDistGoldens(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testfilesDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("fixtures: runtime.Caller failed")
+	}
+	return filepath.Dir(file)
 }
 
 func copyOrFail(t *testing.T, src, dst string) {

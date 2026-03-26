@@ -96,7 +96,7 @@ Build the emulate subprocess lifecycle manager and GitHub API seed builder that 
   - Estimate: 2h
   - Files: registry/testutil/emulatetest/emulatetest.go, registry/testutil/emulatetest/seed.go, registry/testutil/emulatetest/emulatetest_test.go
   - Verify: cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s
-- [ ] **T02: Build local git fixture builder with tagged-repo test** — ## Description
+- [x] **T02: Built local tagged git fixture helpers with clone-based verification.** — ## Description
 
 Build the local git fixture builder that creates temporary bare-compatible git repos with tagged commits containing real package files. This is the test infrastructure for S06 (git-source fallback) — it produces repos that the git-source resolver will clone from using `file://` URLs.
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-26T22:38:47.214Z",
+  "exported_at": "2026-03-26T22:41:58.777Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -304,7 +304,7 @@
       "narrative": "",
       "verification_result": "",
       "duration": "",
-      "completed_at": "2026-03-26T22:36:20.866Z",
+      "completed_at": "2026-03-26T22:39:39.339Z",
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
@@ -380,19 +380,22 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S01",
       "id": "T03",
-      "title": "Add setup-node to CI workflow and verify full registry test suite",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Updated CI to install Node.js 22 and pre-install emulate so the registry integration suite runs in GitHub Actions.",
+      "status": "complete",
+      "one_liner": "Updated CI to install Node.js 22 and pre-install emulate so the registry integration suite runs in GitHub Actions.",
+      "narrative": "Updated `.github/workflows/ci.yml` by inserting `actions/setup-node@v4` with `node-version: '22'` immediately after checkout and adding an `Install emulate` step that runs `npm install -g emulate`. All existing Go and Rust setup, build, lint, vet, and test steps were preserved unchanged. Verified the workflow from the explicit `/home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj` path because the shell tool's default cwd differs from the user-facing worktree path in this auto-mode run.",
+      "verification_result": "Confirmed `setup-node` and the emulate install step are present in `.github/workflows/ci.yml`. The task-plan Python YAML validation command failed locally because PyYAML is not installed, so I validated the file with Ruby's YAML loader instead. Ran `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s`, which passed and exercised both `registry/testutil/emulatetest` and `registry/testutil/gitfixture`. Ran the slice-level verification `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s`, which passed and showed emulate starting on a port, HTTP calls succeeding, and release metadata being verified.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-26T22:41:58.747Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
+      "deviations": "The task plan specified `python3 -c \"import yaml; ...\"` for YAML validation, but the local environment does not have PyYAML installed. I used Ruby's built-in YAML loader as an equivalent parser-based validation instead.",
+      "known_issues": "None. For this auto-mode run, shell-based verification commands need an explicit `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && ...` prefix because the shell tool defaults to a different worktree root than the user-facing path.",
+      "key_files": [
+        ".github/workflows/ci.yml",
+        ".gsd/milestones/M001-zku9aj/slices/S01/tasks/T03-SUMMARY.md"
+      ],
       "key_decisions": [],
-      "full_summary_md": "",
+      "full_summary_md": "---\nid: T03\nparent: S01\nmilestone: M001-zku9aj\nkey_files:\n  - .github/workflows/ci.yml\n  - .gsd/milestones/M001-zku9aj/slices/S01/tasks/T03-SUMMARY.md\nkey_decisions:\n  - (none)\nduration: \"\"\nverification_result: mixed\ncompleted_at: 2026-03-26T22:41:58.753Z\nblocker_discovered: false\n---\n\n# T03: Updated CI to install Node.js 22 and pre-install emulate so the registry integration suite runs in GitHub Actions.\n\n**Updated CI to install Node.js 22 and pre-install emulate so the registry integration suite runs in GitHub Actions.**\n\n## What Happened\n\nUpdated `.github/workflows/ci.yml` by inserting `actions/setup-node@v4` with `node-version: '22'` immediately after checkout and adding an `Install emulate` step that runs `npm install -g emulate`. All existing Go and Rust setup, build, lint, vet, and test steps were preserved unchanged. Verified the workflow from the explicit `/home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj` path because the shell tool's default cwd differs from the user-facing worktree path in this auto-mode run.\n\n## Verification\n\nConfirmed `setup-node` and the emulate install step are present in `.github/workflows/ci.yml`. The task-plan Python YAML validation command failed locally because PyYAML is not installed, so I validated the file with Ruby's YAML loader instead. Ran `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s`, which passed and exercised both `registry/testutil/emulatetest` and `registry/testutil/gitfixture`. Ran the slice-level verification `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s`, which passed and showed emulate starting on a port, HTTP calls succeeding, and release metadata being verified.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\" && echo 'YAML valid'` | 1 | ❌ fail | 20000ms |\n| 2 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'YAML valid'\"` | 0 | ✅ pass | 17100ms |\n| 3 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'setup-node' .github/workflows/ci.yml && echo 'setup-node present'` | 0 | ✅ pass | 14300ms |\n| 4 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'npm install -g emulate' .github/workflows/ci.yml && echo 'emulate install present'` | 0 | ✅ pass | 11600ms |\n| 5 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s` | 0 | ✅ pass | 8800ms |\n| 6 | `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` | 0 | ✅ pass | 5900ms |\n\n\n## Deviations\n\nThe task plan specified `python3 -c \"import yaml; ...\"` for YAML validation, but the local environment does not have PyYAML installed. I used Ruby's built-in YAML loader as an equivalent parser-based validation instead.\n\n## Known Issues\n\nNone. For this auto-mode run, shell-based verification commands need an explicit `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && ...` prefix because the shell tool defaults to a different worktree root than the user-facing path.\n\n## Files Created/Modified\n\n- `.github/workflows/ci.yml`\n- `.gsd/milestones/M001-zku9aj/slices/S01/tasks/T03-SUMMARY.md`\n",
       "description": "## Description\n\nUpdate the GitHub Actions CI workflow to install Node.js and pre-install the `emulate` npm package, then verify the full registry test suite passes locally.\n\n**Slice context:** T01 built the emulate subsystem and T02 built the git fixture subsystem. This task ensures both work in CI and verifies them together.\n\n**Key facts the executor must know:**\n- The CI file is `.github/workflows/ci.yml`\n- Currently it has: checkout → setup-go → rust-toolchain → cache rust → build rust → rust tests → go fmt → go vet → go test\n- Node.js is needed because emulate is an npm package started via `npx emulate start`\n- Pre-installing emulate avoids the `npx` download delay during tests: `npm install -g emulate`\n- The `emulate` package is at version 0.3.0 on npm\n- Add `actions/setup-node@v4` with `node-version: '22'` BEFORE the Go test step\n- The emulate tests use `t.Skip()` when npx is not available, so existing CI without node would just skip — but we want them to actually run\n\n## Steps\n\n1. **Edit `.github/workflows/ci.yml`**:\n   - Add `actions/setup-node@v4` step with `node-version: '22'` after the checkout step (before Go/Rust setup is fine, order among setup steps doesn't matter)\n   - Add a step: `name: Install emulate` with `run: npm install -g emulate` to pre-install so npx doesn't download on first use\n   - Keep all existing steps unchanged\n\n2. **Run full registry test suite locally**:\n   - `go test ./registry/... -v -count=1 -timeout 60s` — verify all emulate and git fixture tests pass together\n   - Verify no port conflicts or race conditions between test packages\n\n3. **Validate CI config**:\n   - Ensure YAML is valid (no syntax errors)\n   - Verify the step ordering makes sense\n\n## Must-Haves\n\n- [ ] CI workflow includes `setup-node` with Node.js 22\n- [ ] CI workflow pre-installs `emulate` npm package\n- [ ] `go test ./registry/... -v -count=1 -timeout 60s` passes locally\n- [ ] All existing CI steps remain unchanged\n\n## Verification\n\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\" && echo 'YAML valid'` — CI config is valid YAML\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'setup-node' .github/workflows/ci.yml && echo 'setup-node present'`\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'emulate' .github/workflows/ci.yml && echo 'emulate install present'`\n- `cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s` passes",
       "estimate": "30m",
       "files": [
@@ -416,7 +419,7 @@
   ],
   "decisions": [
     {
-      "seq": 12,
+      "seq": 18,
       "id": "D001",
       "when_context": "M001-zku9aj",
       "scope": "library",
@@ -428,7 +431,7 @@
       "superseded_by": null
     },
     {
-      "seq": 13,
+      "seq": 19,
       "id": "D002",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -440,7 +443,7 @@
       "superseded_by": null
     },
     {
-      "seq": 14,
+      "seq": 20,
       "id": "D003",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -452,7 +455,7 @@
       "superseded_by": null
     },
     {
-      "seq": 15,
+      "seq": 21,
       "id": "D004",
       "when_context": "M001-zku9aj",
       "scope": "scope",
@@ -464,7 +467,7 @@
       "superseded_by": null
     },
     {
-      "seq": 16,
+      "seq": 22,
       "id": "D005",
       "when_context": "M001-zku9aj",
       "scope": "convention",
@@ -476,7 +479,7 @@
       "superseded_by": null
     },
     {
-      "seq": 17,
+      "seq": 23,
       "id": "D006",
       "when_context": "M001-zku9aj/S01/T01",
       "scope": "test-infrastructure",
@@ -521,6 +524,72 @@
       "verdict": "✅ pass",
       "duration_ms": 4264,
       "created_at": "2026-03-26T22:38:47.000Z"
+    },
+    {
+      "id": 4,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\" && echo 'YAML valid'",
+      "exit_code": 1,
+      "verdict": "❌ fail",
+      "duration_ms": 20000,
+      "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 5,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && ruby -e \"require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'YAML valid'\"",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 17100,
+      "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 6,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'setup-node' .github/workflows/ci.yml && echo 'setup-node present'",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 14300,
+      "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 7,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && grep -q 'npm install -g emulate' .github/workflows/ci.yml && echo 'emulate install present'",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 11600,
+      "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 8,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/... -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 8800,
+      "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 9,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001-zku9aj",
+      "command": "cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 5900,
+      "created_at": "2026-03-26T22:41:58.747Z"
     }
   ]
 }

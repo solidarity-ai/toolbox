@@ -139,7 +139,7 @@ Build the local git fixture builder that creates temporary bare-compatible git r
   - Estimate: 45m
   - Files: registry/testutil/gitfixture/gitfixture.go, registry/testutil/gitfixture/gitfixture_test.go
   - Verify: cd /home/mackross/dev/toolbox/.gsd/worktrees/M001-zku9aj && go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 30s
-- [ ] **T03: Add setup-node to CI workflow and verify full registry test suite** — ## Description
+- [x] **T03: Updated CI to install Node.js 22 and pre-install emulate so the registry integration suite runs in GitHub Actions.** — ## Description
 
 Update the GitHub Actions CI workflow to install Node.js and pre-install the `emulate` npm package, then verify the full registry test suite passes locally.
 

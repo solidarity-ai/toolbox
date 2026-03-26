@@ -23,6 +23,11 @@ type AgentTool struct {
 	Idempotent     *bool
 }
 
+// HiddenParams returns the set of hidden param names for this tool.
+func (t AgentTool) HiddenParams() map[string]bool {
+	return t.hiddenParams
+}
+
 // ParamsType returns the combined parameter type from the function signature,
 // with hidden bound params removed and non-hidden bound params narrowed to
 // literal types. Returns nil if no signature is available.

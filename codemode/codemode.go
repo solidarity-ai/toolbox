@@ -187,6 +187,109 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 	return b.String()
 }
 
+// DeclarationSource generates a .d.ts file with JSDoc comments for the
+// agent-visible tools. This is the type declaration the agent imports.
+func DeclarationSource(resolved toolset.ResolvedToolset) string {
+	var b strings.Builder
+
+	view := resolved.AgentView()
+	tools := make([]toolset.AgentTool, len(view.Tools))
+	copy(tools, view.Tools)
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name < tools[j].Name
+	})
+
+	// Emit type declarations for any $ref definitions (params and return types).
+	for _, tool := range tools {
+		if pt := tool.ParamsType(); pt != nil {
+			if decls := pt.Declarations(); decls != "" {
+				b.WriteString(decls)
+				b.WriteString("\n")
+			}
+		}
+		if tool.Sig != nil {
+			if rt := tool.Sig.Return(); rt != nil {
+				if decls := rt.Declarations(); decls != "" {
+					b.WriteString(decls)
+					b.WriteString("\n")
+				}
+			}
+		}
+	}
+
+	namespaces := map[string][]toolset.AgentTool{}
+	for _, tool := range tools {
+		parts := strings.Split(tool.Name, ".")
+		if len(parts) != 2 {
+			continue
+		}
+		namespaces[parts[0]] = append(namespaces[parts[0]], tool)
+	}
+	var nsNames []string
+	for ns := range namespaces {
+		nsNames = append(nsNames, ns)
+	}
+	sort.Strings(nsNames)
+
+	b.WriteString("export declare const tools: {\n")
+	for _, ns := range nsNames {
+		fmt.Fprintf(&b, "  %s: {\n", ns)
+		for _, tool := range namespaces[ns] {
+			parts := strings.Split(tool.Name, ".")
+			method := parts[len(parts)-1]
+
+			// Build set of hidden params to exclude from @param tags.
+			hidden := tool.HiddenParams()
+
+			// Emit JSDoc with description, visible @param tags, and @returns.
+			if tool.Sig != nil {
+				desc := tool.Sig.Description()
+				params := tool.Sig.Params()
+				hasContent := desc != ""
+				for _, p := range params {
+					if !hidden[p.Name()] && p.Description() != "" {
+						hasContent = true
+						break
+					}
+				}
+				if hasContent {
+					b.WriteString("    /**\n")
+					if desc != "" {
+						fmt.Fprintf(&b, "     * %s\n", desc)
+					}
+					for _, p := range params {
+						if hidden[p.Name()] {
+							continue
+						}
+						if d := p.Description(); d != "" {
+							fmt.Fprintf(&b, "     * @param %s - %s\n", p.Name(), d)
+						}
+					}
+					b.WriteString("     */\n")
+				}
+			}
+
+			paramType := "Record<string, unknown>"
+			if pt := tool.ParamsType(); pt != nil {
+				paramType = pt.ToTS()
+			}
+
+			returnType := "string"
+			if tool.Sig != nil {
+				if rt := tool.Sig.Return(); rt != nil {
+					returnType = rt.ToTS()
+				}
+			}
+
+			fmt.Fprintf(&b, "    %s(args: %s): %s;\n", method, paramType, returnType)
+		}
+		b.WriteString("  };\n")
+	}
+	b.WriteString("};\n")
+
+	return b.String()
+}
+
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {
 	parts := make([]string, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {

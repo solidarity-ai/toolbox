@@ -80,6 +80,25 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 				}
 			}
 
+			// --- Declaration (.d.ts) golden ---
+			declSource := DeclarationSource(resolved)
+			declFile := filepath.Join(testdataDir, "calc-"+v.name+".d.ts")
+
+			if generateGoldens {
+				if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
+					t.Fatalf("write declaration golden: %v", err)
+				}
+				t.Logf("wrote %s", declFile)
+			} else {
+				want, err := os.ReadFile(declFile)
+				if err != nil {
+					t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
+				}
+				if diff := cmp.Diff(string(want), declSource); diff != "" {
+					t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
+				}
+			}
+
 			// --- MCP schema golden ---
 			view := resolved.AgentView()
 			schemaMap := buildSchemaMap(view)

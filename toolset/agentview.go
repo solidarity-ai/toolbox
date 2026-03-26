@@ -28,6 +28,12 @@ func (t AgentTool) HiddenParams() map[string]bool {
 	return t.hiddenParams
 }
 
+// BoundLiterals returns the map of param name to constant value for
+// non-hidden bound params.
+func (t AgentTool) BoundLiterals() map[string]any {
+	return t.boundLiterals
+}
+
 // ParamsType returns the combined parameter type from the function signature,
 // with hidden bound params removed and non-hidden bound params narrowed to
 // literal types. Returns nil if no signature is available.

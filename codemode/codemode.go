@@ -238,56 +238,77 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			parts := strings.Split(tool.Name, ".")
 			method := parts[len(parts)-1]
 
-			// Build set of hidden params to exclude from @param tags.
 			hidden := tool.HiddenParams()
+			literals := tool.BoundLiterals()
 
-			// Emit JSDoc with description, visible @param tags, and @returns.
+			// Single-line JSDoc for description only.
 			if tool.Sig != nil {
-				desc := tool.Sig.Description()
-				params := tool.Sig.Params()
-				hasContent := desc != ""
-				for _, p := range params {
-					if !hidden[p.Name()] && p.Description() != "" {
-						hasContent = true
-						break
-					}
-				}
-				if hasContent {
-					b.WriteString("    /**\n")
-					if desc != "" {
-						fmt.Fprintf(&b, "     * %s\n", desc)
-					}
-					for _, p := range params {
-						if hidden[p.Name()] {
-							continue
-						}
-						if d := p.Description(); d != "" {
-							fmt.Fprintf(&b, "     * @param %s - %s\n", p.Name(), d)
-						}
-					}
-					b.WriteString("     */\n")
+				if desc := tool.Sig.Description(); desc != "" {
+					fmt.Fprintf(&b, "    /** %s */\n", desc)
 				}
 			}
 
-			paramType := "Record<string, unknown>"
-			if pt := tool.ParamsType(); pt != nil {
-				paramType = pt.ToTS()
+			// Build individual param list.
+			var paramParts []string
+			if tool.Sig != nil {
+				for _, p := range tool.Sig.Params() {
+					if hidden[p.Name()] {
+						continue
+					}
+					// Determine param type: use bound literal if available,
+					// otherwise use the param's TypeScript type.
+					var tsType string
+					if litVal, ok := literals[p.Name()]; ok {
+						tsType = literalToTS(litVal)
+					} else {
+						tsType = p.Type().ToTS()
+					}
+					name := p.Name()
+					if p.Optional() {
+						name += "?"
+					}
+					paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
+				}
 			}
 
 			returnType := "string"
 			if tool.Sig != nil {
 				if rt := tool.Sig.Return(); rt != nil {
-					returnType = rt.ToTS()
+					returnType = rt.UnwrapPromise().ToTS()
 				}
 			}
 
-			fmt.Fprintf(&b, "    %s(args: %s): %s;\n", method, paramType, returnType)
+			fmt.Fprintf(&b, "    %s(%s): %s;\n", method, strings.Join(paramParts, ", "), returnType)
 		}
 		b.WriteString("  };\n")
 	}
 	b.WriteString("};\n")
 
 	return b.String()
+}
+
+// literalToTS formats a Go value as a TypeScript literal type.
+func literalToTS(v any) string {
+	switch val := v.(type) {
+	case string:
+		return fmt.Sprintf("%q", val)
+	case float64:
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {

@@ -9,4 +9,4 @@ use (
 
 replace github.com/solidarity-ai/toolbox v0.0.0-20260321144313-a0f540464d2c => .
 
-replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326203733-93de546094a7
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260326225300-3773e6d6a8fc

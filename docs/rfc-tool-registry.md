@@ -190,10 +190,10 @@ This fallback ensures the system works with any git host, even without CI. But t
 
 #### Registry proxy (optional, for discovery and stats)
 
-The toolbox client ships with a **default proxy** (`https://proxy.toolbox.dev`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own proxy or disable it entirely:
+The toolbox client ships with a **default proxy** (`https://proxy.include.tools`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own proxy or disable it entirely:
 
 ```
-TOOLBOX_PROXY=https://proxy.toolbox.dev   # default, ships with toolbox
+TOOLBOX_PROXY=https://proxy.include.tools   # default, ships with toolbox
 TOOLBOX_PROXY=https://proxy.internal.co   # organization override
 TOOLBOX_PROXY=off                          # disable, fetch directly from sources
 ```
@@ -271,7 +271,7 @@ When a toolset references a package, resolution follows this order:
 ```
 1. Check replace directives (local dev overrides)
 2. Check local cache (content-addressable store)
-3. Fetch from proxy (default: proxy.toolbox.dev, unless overridden or disabled)
+3. Fetch from proxy (default: proxy.include.tools, unless overridden or disabled)
 4. Fetch from package source directly (e.g., GitHub Release assets)
 5. Fetch from git source (clone at tag, build locally with packaging.Pack)
 6. Store in local cache

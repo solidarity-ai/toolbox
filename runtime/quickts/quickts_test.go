@@ -45,7 +45,7 @@ func TestRunnerSourceSpreadsParams(t *testing.T) {
 	)
 
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"export default await tool(7 as Parameters<typeof tool>[0], 4 as Parameters<typeof tool>[1]);\n"
+		"export default await tool((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]));\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}

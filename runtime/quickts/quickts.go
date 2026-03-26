@@ -312,7 +312,7 @@ func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSig) strin
 			sb.WriteString("undefined")
 		} else {
 			valJSON, _ := json.Marshal(val)
-			fmt.Fprintf(&sb, "%s as Parameters<typeof tool>[%d]", string(valJSON), i)
+			fmt.Fprintf(&sb, "(%s satisfies Parameters<typeof tool>[%d])", string(valJSON), i)
 		}
 	}
 	sb.WriteString(");\n")

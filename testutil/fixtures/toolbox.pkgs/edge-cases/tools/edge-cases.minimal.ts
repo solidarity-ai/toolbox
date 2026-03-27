@@ -1,5 +1,4 @@
 /**
- * A minimal no-op tool.
  * @accessMode readOnly
  * @idempotent
  */

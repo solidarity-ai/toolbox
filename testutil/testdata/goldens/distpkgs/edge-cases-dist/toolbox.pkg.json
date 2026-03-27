@@ -1,35 +1,32 @@
 {
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "2b01caf45000c6cdee05750abfbeb59f748d9b544e1bc817ecdbba744c0651b7",
+  "sha256": "720a0e2c1869e78935dd24fcb63d6b6469ba8f6b986adb819cff05b6b54e85ee",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Search for records with complex filtering, pagination, and output options."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.params-object.ts",
       "idempotent": true,
-      "accessMode": "irreversible",
-      "description": "Process a batch of items with a specified action."
+      "accessMode": "irreversible"
     },
     {
       "entry_ts": "tools/edge-cases.minimal.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "A minimal no-op tool."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.no-description.ts",
-      "accessMode": "irreversible"
+      "idempotent": true,
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.multiline-param.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Transform data with a configurable pipeline."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.irreversible.ts",
@@ -39,30 +36,25 @@
     {
       "entry_ts": "tools/edge-cases.reversible.ts",
       "idempotent": true,
-      "accessMode": "reversible",
-      "description": "Create a draft document."
+      "accessMode": "reversible"
     },
     {
       "entry_ts": "tools/edge-cases.named-export.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Compute the hash of input data."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.async-complex.ts",
-      "accessMode": "irreversible",
-      "description": "Process items in batch asynchronously."
+      "accessMode": "irreversible"
     },
     {
       "entry_ts": "tools/edge-cases.no-params.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Return the current server status."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/edge-cases.multiline-return.ts",
-      "accessMode": "readOnly",
-      "description": "Run a detailed analysis on the input data."
+      "accessMode": "readOnly"
     }
   ]
 }

@@ -1,25 +1,22 @@
 {
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "207e750b3374aa15c03976332ea5bd5eb4f9950fbc4852855bd09870b2848204",
+  "sha256": "625ab5714219580c1179c446df070a7138227d06a42ef48f8eba52433bc16c80",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Add two numbers."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/calc.sub.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Subtract two numbers."
+      "accessMode": "readOnly"
     },
     {
       "entry_ts": "tools/calc.async-add.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Add two numbers asynchronously."
+      "accessMode": "readOnly"
     }
   ]
 }

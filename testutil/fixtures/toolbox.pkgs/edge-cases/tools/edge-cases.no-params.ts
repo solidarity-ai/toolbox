@@ -1,5 +1,4 @@
 /**
- * Return the current server status.
  * @accessMode readOnly
  * @idempotent
  */

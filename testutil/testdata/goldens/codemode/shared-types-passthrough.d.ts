@@ -1,13 +1,13 @@
 export declare const tools: {
   tickets: {
-    // Create a new support ticket. (irreversible)
-    create(/** The ticket data */ fields: Fields): Ticket;
-    // Retrieve a ticket by ID. (readonly)
-    get(/** The ticket ID to look up */ id: string): Ticket;
-    // List all tickets, optionally filtered by status. (readonly)
-    list(/** Filter by ticket status */ status?: "closed" | "in_progress" | "open" | "resolved"): Ticket[];
-    // Update an existing ticket. (reversible)
-    update(/** The ticket ID to update */ id: string, /** The fields to update */ fields: Fields): Ticket;
+    // (irreversible)
+    create(fields: Fields): Ticket;
+    // (readonly)
+    get(id: string): Ticket;
+    // (readonly)
+    list(status?: "closed" | "in_progress" | "open" | "resolved"): Ticket[];
+    // (reversible)
+    update(id: string, fields: Fields): Ticket;
   };
 };
 

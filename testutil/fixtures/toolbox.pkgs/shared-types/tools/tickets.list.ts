@@ -11,10 +11,8 @@ interface Ticket {
 }
 
 /**
- * List all tickets, optionally filtered by status.
  * @accessMode readOnly
  * @idempotent
- * @param status - Filter by ticket status
  */
 export default function(status?: "open" | "in_progress" | "resolved" | "closed"): Ticket[] {
   return [];

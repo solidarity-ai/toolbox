@@ -4,7 +4,6 @@ declare function exec(
 ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 /**
- * List Google Workspace users.
  * @accessMode readOnly
  * @idempotent
  */

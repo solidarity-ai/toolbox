@@ -23,9 +23,7 @@ interface Ticket {
 }
 
 /**
- * Create a new support ticket.
  * @accessMode irreversible
- * @param fields - The ticket data
  */
 export default function(fields: TicketFields): Ticket {
   return { id: "T-001", title: fields.title, status: "open" };

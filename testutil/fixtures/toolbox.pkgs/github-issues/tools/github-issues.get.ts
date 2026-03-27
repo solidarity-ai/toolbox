@@ -1,13 +1,6 @@
 import "./shims.ts";
 import { z } from "zod";
 
-const ParamsSchema = z.object({
-  owner: z.string(),
-  repo: z.string(),
-  number: z.number().int().positive(),
-  token: z.string().optional(),
-});
-
 const IssueSchema = z.object({
   number: z.number(),
   title: z.string(),
@@ -19,23 +12,27 @@ const IssueSchema = z.object({
   updated_at: z.string(),
 });
 
+/**
+ * @accessMode readOnly
+ * @idempotent
+ */
 export default async function tool(
-  params: { owner: string; repo: string; number: number; token?: string },
-  ctx: unknown,
+  owner: string,
+  repo: string,
+  number: number,
+  token?: string,
 ) {
-  const parsed = ParamsSchema.parse(params);
-
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "toolbox",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  if (parsed.token) {
-    headers["Authorization"] = `token ${parsed.token}`;
+  if (token) {
+    headers["Authorization"] = `token ${token}`;
   }
 
   const resp = await fetch(
-    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/issues/${parsed.number}`,
+    `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
     { headers },
   );
 

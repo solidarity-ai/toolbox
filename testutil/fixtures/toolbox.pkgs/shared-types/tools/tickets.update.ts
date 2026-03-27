@@ -23,10 +23,7 @@ interface Ticket {
 }
 
 /**
- * Update an existing ticket.
  * @accessMode reversible
- * @param id - The ticket ID to update
- * @param fields - The fields to update
  */
 export default function(id: string, fields: TicketFields): Ticket {
   return { id, title: fields.title, status: "open" };

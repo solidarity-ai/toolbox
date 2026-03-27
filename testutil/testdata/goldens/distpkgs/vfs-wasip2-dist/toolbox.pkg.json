@@ -1,7 +1,7 @@
 {
   "name": "vfs-wasip2",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "418a46f9eeca9ef77b77f9234f4a18824e8fe65c69c86fa27eee347efa2b75f4",
+  "sha256": "a93cca946a31595e7fbfeeb265a9756edae0d0afe952bd17022cffbf3e2d3600",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

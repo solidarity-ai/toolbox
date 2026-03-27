@@ -1,0 +1,15 @@
+{
+  "name": "github-issues",
+  "runtime": "typescript-sandbox",
+  "sha256": "b5ab95751f4b46e36cbdc7f6f5bbc0ace7d2c1d14a371725a43f79059a7b06e0",
+  "additionalTypeScriptGlobs": [
+    "tools/shims.ts"
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/github-issues.get.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

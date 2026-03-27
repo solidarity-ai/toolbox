@@ -1,9 +1,7 @@
 {
   "tickets.create": {
-    "description": "Create a new support ticket.",
     "properties": {
       "fields": {
-        "description": "The ticket data",
         "properties": {
           "description": {
             "description": "Detailed description",
@@ -40,10 +38,8 @@
     "type": "object"
   },
   "tickets.get": {
-    "description": "Retrieve a ticket by ID.",
     "properties": {
       "id": {
-        "description": "The ticket ID to look up",
         "type": "string"
       }
     },
@@ -83,10 +79,8 @@
         "type": "object"
       }
     },
-    "description": "List all tickets, optionally filtered by status.",
     "properties": {
       "status": {
-        "description": "Filter by ticket status",
         "enum": [
           "closed",
           "in_progress",
@@ -99,10 +93,8 @@
     "type": "object"
   },
   "tickets.update": {
-    "description": "Update an existing ticket.",
     "properties": {
       "fields": {
-        "description": "The fields to update",
         "properties": {
           "description": {
             "description": "Detailed description",
@@ -133,7 +125,6 @@
         "type": "object"
       },
       "id": {
-        "description": "The ticket ID to update",
         "type": "string"
       }
     },

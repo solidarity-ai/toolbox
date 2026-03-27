@@ -11,10 +11,8 @@ interface Ticket {
 }
 
 /**
- * Retrieve a ticket by ID.
  * @accessMode readOnly
  * @idempotent
- * @param id - The ticket ID to look up
  */
 export default function(id: string): Ticket {
   return { id, title: "Example", status: "open" };

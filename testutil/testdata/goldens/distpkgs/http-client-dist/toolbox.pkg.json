@@ -1,7 +1,7 @@
 {
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "0bf8be07349d698c1d61b9dea97d302e995241674eac720ab5c29dd07a0a4f05",
+  "sha256": "98162c7efdde1c3d3af35d020d037291e9e430181e4577141d622ee788d27ec3",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },
@@ -9,8 +9,7 @@
     {
       "entry_ts": "tools/http-client.fetch.ts",
       "idempotent": true,
-      "accessMode": "readOnly",
-      "description": "Fetch a URL via HTTP GET using a wasip2 WASM component."
+      "accessMode": "readOnly"
     }
   ]
 }

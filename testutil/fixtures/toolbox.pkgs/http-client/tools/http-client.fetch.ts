@@ -4,7 +4,6 @@ declare function exec(
 ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 /**
- * Fetch a URL via HTTP GET using a wasip2 WASM component.
  * @accessMode readOnly
  * @idempotent
  */

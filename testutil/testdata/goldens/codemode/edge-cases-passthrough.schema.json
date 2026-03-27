@@ -1,13 +1,10 @@
 {
   "edgeCases.asyncComplex": {
-    "description": "Process items in batch asynchronously.",
     "properties": {
       "concurrency": {
-        "description": "Max parallel operations",
         "type": "number"
       },
       "ids": {
-        "description": "Array of item IDs to process",
         "items": {
           "type": "string"
         },
@@ -103,33 +100,26 @@
         "type": "object"
       }
     },
-    "description": "Search for records with complex filtering, pagination, and output options.",
     "properties": {
       "dryRun": {
-        "description": "If true, validate the query without executing",
         "type": "boolean"
       },
       "filters": {
-        "description": "Array of filter criteria to apply",
         "items": {
           "$ref": "#/definitions/SearchFilter"
         },
         "type": "array"
       },
       "output": {
-        "$ref": "#/definitions/OutputConfig",
-        "description": "Output formatting configuration"
+        "$ref": "#/definitions/OutputConfig"
       },
       "pagination": {
-        "$ref": "#/definitions/PageInfo",
-        "description": "Pagination settings"
+        "$ref": "#/definitions/PageInfo"
       },
       "query": {
-        "description": "The search query string",
         "type": "string"
       },
       "tags": {
-        "description": "Optional tags to narrow results",
         "items": {
           "type": "string"
         },
@@ -146,7 +136,7 @@
     "description": "Permanently delete all records matching the filter.",
     "properties": {
       "confirm": {
-        "description": "Must be true to execute",
+        "description": "Must be true to execute deletion",
         "type": "boolean"
       },
       "filter": {
@@ -162,14 +152,11 @@
   },
   "edgeCases.minimal": {},
   "edgeCases.multilineParam": {
-    "description": "Transform data with a configurable pipeline.",
     "properties": {
       "input": {
-        "description": "The raw input string to transform",
         "type": "string"
       },
       "options": {
-        "description": "Optional configuration",
         "properties": {
           "dryRun": {
             "type": "boolean"
@@ -195,10 +182,8 @@
     "type": "object"
   },
   "edgeCases.multilineReturn": {
-    "description": "Run a detailed analysis on the input data.",
     "properties": {
       "input": {
-        "description": "The data to analyze",
         "type": "string"
       }
     },
@@ -208,10 +193,8 @@
     "type": "object"
   },
   "edgeCases.namedExport": {
-    "description": "Compute the hash of input data.",
     "properties": {
       "algorithm": {
-        "description": "Hash algorithm to use",
         "enum": [
           "md5",
           "sha256",
@@ -220,7 +203,6 @@
         "type": "string"
       },
       "data": {
-        "description": "The data to hash",
         "type": "string"
       }
     },
@@ -247,10 +229,8 @@
   },
   "edgeCases.noParams": {},
   "edgeCases.paramsObject": {
-    "description": "Process a batch of items with a specified action.",
     "properties": {
       "params": {
-        "description": "The batch operation parameters",
         "properties": {
           "action": {
             "description": "Action to take on each item",
@@ -286,21 +266,17 @@
     "type": "object"
   },
   "edgeCases.reversible": {
-    "description": "Create a draft document.",
     "properties": {
       "content": {
-        "description": "Initial content",
         "type": "string"
       },
       "tags": {
-        "description": "Optional categorization tags",
         "items": {
           "type": "string"
         },
         "type": "array"
       },
       "title": {
-        "description": "Document title",
         "type": "string"
       }
     },

@@ -13,10 +13,8 @@ interface BatchParams {
 }
 
 /**
- * Process a batch of items with a specified action.
  * @accessMode irreversible
  * @idempotent
- * @param params - The batch operation parameters
  */
 export default function(params: BatchParams): string {
   return JSON.stringify({ processed: params.ids.length, action: params.action });

@@ -430,7 +430,7 @@ func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSig
 // EmitBundle runs esbuild bundling on a tool definition and returns the bundled JS.
 // Exported for testing that npm deps are correctly inlined.
 func EmitBundle(def tooldef.TSToolDef) (string, error) {
-	files, err := withRunner(def.Files, runnerSource(def.Entry, "{}"))
+	files, err := withRunner(def.Files, runnerSource(def.Entry, map[string]any{}, nil))
 	if err != nil {
 		return "", err
 	}

@@ -1,36 +1,34 @@
 export declare const tools: {
   edgeCases: {
-    // Process items in batch asynchronously. (irreversible)
-    asyncComplex(/** Array of item IDs to process */ ids: string[], /** Max parallel operations */ concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number };
-    // Search for records with complex filtering, pagination, and output options. (readonly)
-    complex(/** The search query string */ query: string, /** Array of filter criteria to apply */ filters: SearchFilter[], /** Optional tags to narrow results */ tags?: string[], /** Pagination settings */ pagination?: PageInfo, /** Output formatting configuration */ output?: OutputConfig, /** If true, validate the query without executing */ dryRun?: boolean): string;
+    // (irreversible)
+    asyncComplex(ids: string[], concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number };
+    // (readonly)
+    complex(query: string, filters: SearchFilter[], tags?: string[], pagination?: PageInfo, output?: OutputConfig, dryRun?: boolean): string;
     // Permanently delete all records matching the filter. (irreversible)
-    irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute */ confirm: boolean): string;
-    // A minimal no-op tool. (readonly)
+    irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute deletion */ confirm: boolean): string;
+    // (readonly)
     minimal(): string;
-    // Transform data with a configurable pipeline. (readonly)
+    // (readonly)
     multilineParam(
-      // The raw input string to transform
       input: string,
       // A sequence of transformation steps to apply.
       // Each step is executed in order, and the output of one step
       // becomes the input of the next.
       pipeline: string[],
-      // Optional configuration
       options?: { dryRun?: boolean; verbose?: boolean }
     ): string;
-    // Run a detailed analysis on the input data. (readonly)
-    multilineReturn(/** The data to analyze */ input: string): MultilineReturnResult;
-    // Compute the hash of input data. (readonly)
-    namedExport(/** The data to hash */ data: string, /** Hash algorithm to use */ algorithm: "md5" | "sha256" | "sha512"): string;
-    // (irreversible)
+    // (readonly)
+    multilineReturn(input: string): MultilineReturnResult;
+    // (readonly)
+    namedExport(data: string, algorithm: "md5" | "sha256" | "sha512"): string;
+    // (readonly)
     noDescription(x: number, y: number): number;
-    // Return the current server status. (readonly)
+    // (readonly)
     noParams(): string;
-    // Process a batch of items with a specified action. (irreversible, idempotent)
-    paramsObject(/** The batch operation parameters */ params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string;
-    // Create a draft document. (reversible, idempotent)
-    reversible(/** Document title */ title: string, /** Initial content */ content: string, /** Optional categorization tags */ tags?: string[]): string;
+    // (irreversible, idempotent)
+    paramsObject(params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string;
+    // (reversible, idempotent)
+    reversible(title: string, content: string, tags?: string[]): string;
   };
 };
 
@@ -40,7 +38,6 @@ type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maxi
 type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };
 // Nested config with deeply nested objects
 type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
-// Run a detailed analysis on the input data.
 interface MultilineReturnResult {
   // Detailed recommendations for improvement.
   // Each entry is a separate actionable item

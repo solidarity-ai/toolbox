@@ -1,9 +1,7 @@
 {
   "calc.add": {
-    "description": "Add two numbers.",
     "properties": {
       "b": {
-        "description": "The second number",
         "type": "number"
       }
     },
@@ -13,14 +11,11 @@
     "type": "object"
   },
   "calc.asyncAdd": {
-    "description": "Add two numbers asynchronously.",
     "properties": {
       "a": {
-        "description": "The first number",
         "type": "number"
       },
       "b": {
-        "description": "The second number",
         "type": "number"
       }
     },
@@ -31,14 +26,11 @@
     "type": "object"
   },
   "calc.sub": {
-    "description": "Subtract two numbers.",
     "properties": {
       "a": {
-        "description": "The first number",
         "type": "number"
       },
       "b": {
-        "description": "The second number",
         "type": "number"
       }
     },

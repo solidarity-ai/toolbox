@@ -33,15 +33,8 @@ interface OutputConfig {
 }
 
 /**
- * Search for records with complex filtering, pagination, and output options.
  * @accessMode readOnly
  * @idempotent
- * @param query - The search query string
- * @param filters - Array of filter criteria to apply
- * @param tags - Optional tags to narrow results
- * @param pagination - Pagination settings
- * @param output - Output formatting configuration
- * @param dryRun - If true, validate the query without executing
  */
 export default function(
   query: string,

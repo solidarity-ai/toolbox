@@ -1,5 +1,6 @@
 {
   "calc.add": {
+    "description": "Add two numbers.",
     "properties": {
       "a": {
         "const": 42,
@@ -17,6 +18,7 @@
     "type": "object"
   },
   "calc.asyncAdd": {
+    "description": "Add two numbers asynchronously.",
     "properties": {
       "a": {
         "description": "The first number",
@@ -34,6 +36,7 @@
     "type": "object"
   },
   "calc.sub": {
+    "description": "Subtract two numbers.",
     "properties": {
       "a": {
         "description": "The first number",

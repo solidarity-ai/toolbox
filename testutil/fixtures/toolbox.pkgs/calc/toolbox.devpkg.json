@@ -2,20 +2,8 @@
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    {
-      "entry_ts": "tools/calc.add.ts",
-      "idempotent": true,
-      "accessMode": "readOnly"
-    },
-    {
-      "entry_ts": "tools/calc.sub.ts",
-      "idempotent": true,
-      "accessMode": "readOnly"
-    },
-    {
-      "entry_ts": "tools/calc.asyncAdd.ts",
-      "idempotent": true,
-      "accessMode": "readOnly"
-    }
+    { "entry_ts": "tools/calc.add.ts" },
+    { "entry_ts": "tools/calc.sub.ts" },
+    { "entry_ts": "tools/calc.asyncAdd.ts" }
   ]
 }

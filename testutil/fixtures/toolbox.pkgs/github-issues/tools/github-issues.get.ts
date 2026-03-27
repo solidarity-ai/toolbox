@@ -1,6 +1,17 @@
 import "./shims.ts";
 import { z } from "zod";
 
+interface Issue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  body: string | null;
+  labels: string[];
+  assignees: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 const IssueSchema = z.object({
   number: z.number(),
   title: z.string(),
@@ -21,7 +32,7 @@ export default async function tool(
   repo: string,
   number: number,
   token?: string,
-) {
+): Promise<string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "toolbox",

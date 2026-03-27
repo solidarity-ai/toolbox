@@ -10,6 +10,7 @@ export declare const tools: {
     minimal(): string;
     // (readonly)
     multilineParam(
+      // The raw input string to transform
       input: string,
       // A sequence of transformation steps to apply.
       // Each step is executed in order, and the output of one step

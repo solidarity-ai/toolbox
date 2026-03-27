@@ -1,7 +1,7 @@
 {
   "name": "github-issues",
   "runtime": "typescript-sandbox",
-  "sha256": "b5ab95751f4b46e36cbdc7f6f5bbc0ace7d2c1d14a371725a43f79059a7b06e0",
+  "sha256": "13121a22f4ae7d41f5a63e0732556e7d988baa9c2b2b67cb24c96193e7236ca2",
   "additionalTypeScriptGlobs": [
     "tools/shims.ts"
   ],

@@ -1,7 +1,7 @@
 {
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "720a0e2c1869e78935dd24fcb63d6b6469ba8f6b986adb819cff05b6b54e85ee",
+  "sha256": "be67065143e111a46a42421c1d9d53cade9900751384acea745fcb39c3bf162a",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",

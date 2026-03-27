@@ -154,6 +154,7 @@
   "edgeCases.multilineParam": {
     "properties": {
       "input": {
+        "description": "The raw input string to transform",
         "type": "string"
       },
       "options": {

@@ -20,8 +20,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	view := resolved.AgentView()
 	tools := sortedTools(view)
 
-	// Collect type declarations (emitted after the tools block).
-	declLines := collectUniqueDeclarations(tools)
+	// Collect $ref type declarations (used for both params and returns).
+	refDeclLines := collectUniqueDeclarations(tools)
 
 	namespaces, nsNames := groupToolsByNamespace(tools)
 
@@ -95,15 +95,24 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 	}
 
-	// Collect shared param types for emission after the tools block.
+	// Build declaration lists: shared param types first, then $ref types, then return interfaces.
+	// This gives args-before-return ordering.
+	var inputDeclLines []string
 	declLineSet := map[string]bool{}
-	for _, line := range declLines {
-		declLineSet[line] = true
-	}
+	// Shared param types go first (these are always input types).
 	for _, info := range sharedParamTypes {
 		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
 		if !declLineSet[declLine] {
-			declLines = append(declLines, declLine)
+			inputDeclLines = append(inputDeclLines, declLine)
+			declLineSet[declLine] = true
+		}
+	}
+	// $ref declarations (may be input or output — emitted after shared param types).
+	var refLines []string
+	for _, line := range refDeclLines {
+		if !declLineSet[line] {
+			refLines = append(refLines, line)
+			declLineSet[line] = true
 		}
 	}
 
@@ -262,7 +271,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		// Skip if a $ref type alias with the same name already exists.
 		typeAliasPrefix := "type " + info.typeName + " = "
 		alreadyDeclared := false
-		for _, line := range declLines {
+		for line := range declLineSet {
 			if strings.HasPrefix(line, typeAliasPrefix) {
 				alreadyDeclared = true
 				break
@@ -424,11 +433,16 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	}
 	b.WriteString("};\n")
 
-	// Emit all type definitions after the tools block so the reader sees
-	// the tool surface first and supporting types below.
-	if len(declLines) > 0 || len(interfaceBlocks) > 0 {
+	// Emit type definitions after the tools block: shared param types first,
+	// then $ref types, then return type interfaces.
+	hasTypes := len(inputDeclLines) > 0 || len(refLines) > 0 || len(interfaceBlocks) > 0
+	if hasTypes {
 		b.WriteString("\n")
-		for _, line := range declLines {
+		for _, line := range inputDeclLines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		for _, line := range refLines {
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
@@ -547,6 +561,73 @@ func canonicalReturnTypeKey(props []toolbox.PropertyInfo) string {
 // the declaration is re-rendered with inline /** desc */ comments on each
 // described property. Multi-line descriptions cause the declaration to be
 // rendered as a named interface with JSDoc blocks.
+// collectSplitDeclarations gathers type declarations split into param-sourced
+// and return-sourced lists. Param types are emitted before return types to
+// match how function signatures read (args before return values).
+func collectSplitDeclarations(tools []toolset.AgentTool) (paramLines, returnLines []string) {
+	// Collect all definition types for description enhancement.
+	defTypes := map[string]*toolbox.TSType{}
+	for _, tool := range tools {
+		sources := []*toolbox.TSType{}
+		if pt := tool.ParamsType(); pt != nil {
+			sources = append(sources, pt)
+		}
+		if tool.Sig != nil {
+			if rt := tool.Sig.Return(); rt != nil {
+				sources = append(sources, rt)
+			}
+		}
+		for _, src := range sources {
+			for name, dt := range src.DefinitionTypes() {
+				if _, exists := defTypes[name]; !exists {
+					defTypes[name] = dt
+				}
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+	addLine := func(line string, target *[]string) {
+		enhanced := enhanceDeclWithDescriptions(line, defTypes)
+		if enhanced != "" && !seen[enhanced] {
+			seen[enhanced] = true
+			*target = append(*target, enhanced)
+		} else if !seen[line] {
+			seen[line] = true
+			*target = append(*target, line)
+		}
+	}
+
+	for _, tool := range tools {
+		// Param declarations → paramLines
+		if pt := tool.ParamsType(); pt != nil {
+			if decls := pt.Declarations(); decls != "" {
+				for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
+					if line != "" {
+						addLine(line, &paramLines)
+					}
+				}
+			}
+		}
+		// Return declarations → returnLines
+		if tool.Sig != nil {
+			if rt := tool.Sig.Return(); rt != nil {
+				if decls := rt.Declarations(); decls != "" {
+					for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
+						if line != "" {
+							addLine(line, &returnLines)
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(paramLines)
+	sort.Strings(returnLines)
+	return paramLines, returnLines
+}
+
+// collectUniqueDeclarations is kept for the typecheckSDKSource path.
 func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 	// First pass: collect all definition types keyed by name from all tools'
 	// param and return types. These contain the property-level descriptions.

@@ -269,10 +269,10 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		emittedInterfaces[info.typeName] = true
 
 		// Skip if a $ref type alias with the same name already exists.
-		typeAliasPrefix := "type " + info.typeName + " = "
+		typeAliasLine := "type " + info.typeName + " = "
 		alreadyDeclared := false
 		for line := range declLineSet {
-			if strings.HasPrefix(line, typeAliasPrefix) {
+			if strings.Contains(line, typeAliasLine) {
 				alreadyDeclared = true
 				break
 			}

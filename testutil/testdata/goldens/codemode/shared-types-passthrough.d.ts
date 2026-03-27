@@ -14,14 +14,3 @@ export declare const tools: {
 type Fields = { description?: string; priority?: "high" | "low" | "medium" | "urgent"; tags?: string[]; title?: string };
 // A support ticket
 type Ticket = { /** Name of the assigned agent */ assignee?: string; /** Unique ticket identifier */ id?: string; /** Current ticket status */ status?: "closed" | "in_progress" | "open" | "resolved"; /** Short summary of the issue */ title?: string };
-// Create a new support ticket.
-interface Ticket {
-  // Name of the assigned agent
-  assignee?: string;
-  // Unique ticket identifier
-  id?: string;
-  // Current ticket status
-  status?: "closed" | "in_progress" | "open" | "resolved";
-  // Short summary of the issue
-  title?: string;
-}

@@ -381,12 +381,15 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 					}
 					// Determine param type: use bound literal if available,
 					// then check for shared param type override,
+					// then check if it's a complex object with descriptions to inline,
 					// otherwise use the param's TypeScript type.
 					var tsType string
 					if litVal, ok := literals[p.Name()]; ok {
 						tsType = literalToTS(litVal)
 					} else if sharedName, ok := paramTypeOverrides[tool.Name+"."+p.Name()]; ok {
 						tsType = sharedName
+					} else if props := p.Type().ObjectProperties(); len(props) > 0 && hasDescriptions(props) {
+						tsType = renderReturnTypeInlineComments(p.Type())
 					} else {
 						tsType = p.Type().ToTS()
 					}
@@ -450,6 +453,16 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	}
 
 	return b.String()
+}
+
+// hasDescriptions reports whether any property has a description.
+func hasDescriptions(props []toolbox.PropertyInfo) bool {
+	for _, p := range props {
+		if p.Description != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // accessModeLabel returns the parenthesized label for the access mode and

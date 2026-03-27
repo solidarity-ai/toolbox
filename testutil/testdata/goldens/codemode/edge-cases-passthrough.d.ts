@@ -24,7 +24,7 @@ export declare const tools: {
     // Return the current server status. (readonly)
     noParams(): string;
     // Process a batch of items with a specified action. (irreversible, idempotent)
-    paramsObject(/** The batch operation parameters */ params: { action?: "archive" | "delete" | "restore"; callbackUrl?: string; continueOnError?: boolean; ids?: string[] }): string;
+    paramsObject(/** The batch operation parameters */ params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string;
     // Create a draft document. (reversible, idempotent)
     reversible(/** Document title */ title: string, /** Initial content */ content: string, /** Optional categorization tags */ tags?: string[]): string;
   };

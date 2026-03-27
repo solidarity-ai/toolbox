@@ -968,7 +968,48 @@ func literalToTS(v any) string {
 // that when multiple tools reference the same named type (e.g. TicketFields),
 // it is emitted exactly once. Lines are returned in sorted order for
 // deterministic output.
+//
+// When a definition has properties with descriptions (from the JSON Schema),
+// the declaration is re-rendered with inline /** desc */ comments on each
+// described property. Multi-line descriptions cause the declaration to be
+// rendered as a named interface with JSDoc blocks.
 func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
+	// First pass: collect all definition schemas keyed by name from all tools'
+	// JSON schemas. These contain the property-level descriptions.
+	defSchemas := map[string]map[string]any{}
+	for _, tool := range tools {
+		sources := []*toolbox.ParamsType{}
+		if pt := tool.ParamsType(); pt != nil {
+			sources = append(sources, pt)
+		}
+		if tool.Sig != nil {
+			if rt := tool.Sig.Return(); rt != nil {
+				sources = append(sources, rt)
+			}
+		}
+		for _, src := range sources {
+			schema := src.ToJSONSchema()
+			defsRaw, ok := schema["definitions"]
+			if !ok {
+				continue
+			}
+			defs, ok := defsRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			for name, defRaw := range defs {
+				defMap, ok := defRaw.(map[string]any)
+				if !ok {
+					continue
+				}
+				if _, exists := defSchemas[name]; !exists {
+					defSchemas[name] = defMap
+				}
+			}
+		}
+	}
+
+	// Second pass: collect declaration lines, enhancing them with descriptions.
 	seen := map[string]bool{}
 	var lines []string
 	for _, tool := range tools {
@@ -984,9 +1025,15 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 		for _, src := range sources {
 			if decls := src.Declarations(); decls != "" {
 				for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
-					if line != "" && !seen[line] {
+					if line == "" || seen[line] {
+						continue
+					}
+					// Try to enhance the declaration with property descriptions.
+					enhanced := enhanceDeclWithDescriptions(line, defSchemas)
+					if !seen[enhanced] {
 						seen[line] = true
-						lines = append(lines, line)
+						seen[enhanced] = true
+						lines = append(lines, enhanced)
 					}
 				}
 			}
@@ -994,6 +1041,167 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 	}
 	sort.Strings(lines)
 	return lines
+}
+
+// enhanceDeclWithDescriptions takes a declaration line like
+// "type Foo = { bar?: string; baz?: number };" and, if a matching definition
+// schema with property descriptions exists, re-renders it with inline
+// /** desc */ comments. If any description is multi-line, the result is
+// rendered as an interface with JSDoc blocks instead.
+//
+// Property TS types are extracted from the original declaration to preserve
+// full fidelity (e.g. nested object types) rather than being regenerated
+// from the simplified JSON schema.
+func enhanceDeclWithDescriptions(line string, defSchemas map[string]map[string]any) string {
+	// Parse "type <Name> = <body>;" to extract the name.
+	if !strings.HasPrefix(line, "type ") {
+		return line
+	}
+	rest := line[len("type "):]
+	eqIdx := strings.Index(rest, " = ")
+	if eqIdx < 0 {
+		return line
+	}
+	typeName := rest[:eqIdx]
+
+	defSchema, ok := defSchemas[typeName]
+	if !ok {
+		return line
+	}
+	propsRaw, ok := defSchema["properties"].(map[string]any)
+	if !ok {
+		return line
+	}
+
+	// Build a description map from the JSON schema.
+	descMap := map[string]string{}
+	hasDesc := false
+	hasMultiLineDesc := false
+	for pn, propRaw := range propsRaw {
+		propMap, ok := propRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		desc, _ := propMap["description"].(string)
+		if desc != "" {
+			descMap[pn] = desc
+			hasDesc = true
+			if strings.Contains(desc, "\n") {
+				hasMultiLineDesc = true
+			}
+		}
+	}
+	if !hasDesc {
+		return line
+	}
+
+	// Extract the body between "type Foo = " and the trailing ";".
+	body := rest[eqIdx+3:]           // after " = "
+	body = strings.TrimSuffix(body, ";") // remove trailing ";"
+	body = strings.TrimSpace(body)
+
+	// Parse the body to extract property entries with their original TS types.
+	parsedProps := parseDeclBody(body)
+	if len(parsedProps) == 0 {
+		return line
+	}
+
+	if hasMultiLineDesc {
+		// Render as an interface with JSDoc blocks.
+		var b strings.Builder
+		fmt.Fprintf(&b, "interface %s {\n", typeName)
+		for _, p := range parsedProps {
+			if desc := descMap[p.name]; desc != "" {
+				if strings.Contains(desc, "\n") {
+					b.WriteString("  /**\n")
+					for _, dl := range strings.Split(desc, "\n") {
+						fmt.Fprintf(&b, "   * %s\n", dl)
+					}
+					b.WriteString("   */\n")
+				} else {
+					fmt.Fprintf(&b, "  /** %s */\n", desc)
+				}
+			}
+			fmt.Fprintf(&b, "  %s: %s;\n", p.nameWithOpt, p.tsType)
+		}
+		b.WriteString("}")
+		return b.String()
+	}
+
+	// Render as inline type alias with /** desc */ comments.
+	var parts []string
+	for _, p := range parsedProps {
+		if desc := descMap[p.name]; desc != "" {
+			parts = append(parts, fmt.Sprintf("/** %s */ %s: %s", desc, p.nameWithOpt, p.tsType))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: %s", p.nameWithOpt, p.tsType))
+		}
+	}
+	return fmt.Sprintf("type %s = { %s };", typeName, strings.Join(parts, "; "))
+}
+
+// declProp represents a parsed property from a type alias body.
+type declProp struct {
+	name        string // bare property name (e.g. "foo")
+	nameWithOpt string // name with optional marker (e.g. "foo?")
+	tsType      string // original TS type string
+}
+
+// parseDeclBody parses a type alias body like "{ foo?: string; bar?: number }"
+// into individual property entries, correctly handling nested braces.
+func parseDeclBody(body string) []declProp {
+	// Strip outer braces.
+	body = strings.TrimSpace(body)
+	if !strings.HasPrefix(body, "{") || !strings.HasSuffix(body, "}") {
+		return nil
+	}
+	inner := strings.TrimSpace(body[1 : len(body)-1])
+	if inner == "" {
+		return nil
+	}
+
+	// Split on "; " at brace depth 0.
+	var entries []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case ';':
+			if depth == 0 {
+				entry := strings.TrimSpace(inner[start:i])
+				if entry != "" {
+					entries = append(entries, entry)
+				}
+				start = i + 1
+			}
+		}
+	}
+	// Remaining after last semicolon.
+	if tail := strings.TrimSpace(inner[start:]); tail != "" {
+		entries = append(entries, tail)
+	}
+
+	var props []declProp
+	for _, entry := range entries {
+		// Each entry is like "foo?: type" or "foo: type".
+		colonIdx := strings.Index(entry, ": ")
+		if colonIdx < 0 {
+			continue
+		}
+		nameWithOpt := entry[:colonIdx]
+		tsType := entry[colonIdx+2:]
+		name := strings.TrimSuffix(nameWithOpt, "?")
+		props = append(props, declProp{
+			name:        name,
+			nameWithOpt: nameWithOpt,
+			tsType:      tsType,
+		})
+	}
+	return props
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {

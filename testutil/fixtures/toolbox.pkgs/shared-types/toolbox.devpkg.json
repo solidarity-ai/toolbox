@@ -1,0 +1,10 @@
+{
+  "name": "shared-types",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/tickets.get.ts" },
+    { "entry_ts": "tools/tickets.create.ts" },
+    { "entry_ts": "tools/tickets.update.ts" },
+    { "entry_ts": "tools/tickets.list.ts" }
+  ]
+}

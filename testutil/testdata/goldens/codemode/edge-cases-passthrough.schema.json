@@ -194,6 +194,19 @@
     ],
     "type": "object"
   },
+  "edgeCases.multilineReturn": {
+    "description": "Run a detailed analysis on the input data.",
+    "properties": {
+      "input": {
+        "description": "The data to analyze",
+        "type": "string"
+      }
+    },
+    "required": [
+      "input"
+    ],
+    "type": "object"
+  },
   "edgeCases.namedExport": {
     "description": "Compute the hash of input data.",
     "properties": {

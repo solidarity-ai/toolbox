@@ -2,10 +2,26 @@ type OutputConfig = { columns?: { exclude?: string[]; include?: string[] }; form
 type PageInfo = { page?: number; pageSize?: number };
 type SearchFilter = { field?: string; op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; value?: boolean | number | string };
 
+interface MultilineReturnResult {
+  /**
+   * Detailed recommendations for improvement.
+   * Each entry is a separate actionable item
+   * that should be addressed independently.
+   */
+  recommendations?: string[];
+  /**
+   * Overall score from 0 to 100.
+   * Higher values indicate better quality.
+   */
+  score?: number;
+  /** Short summary of findings */
+  summary?: string;
+}
+
 export declare const tools: {
   edgeCases: {
     /** Process items in batch asynchronously. (irreversible) */
-    asyncComplex(/** Array of item IDs to process */ ids: string[], /** Max parallel operations */ concurrency?: number): { errors?: string[]; failed?: number; succeeded?: number };
+    asyncComplex(/** Array of item IDs to process */ ids: string[], /** Max parallel operations */ concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number };
     /** Search for records with complex filtering, pagination, and output options. (readonly) */
     complex(/** The search query string */ query: string, /** Array of filter criteria to apply */ filters: SearchFilter[], /** Optional tags to narrow results */ tags?: string[], /** Pagination settings */ pagination?: PageInfo, /** Output formatting configuration */ output?: OutputConfig, /** If true, validate the query without executing */ dryRun?: boolean): string;
     /** Permanently delete all records matching the filter. (irreversible) */
@@ -19,6 +35,8 @@ export declare const tools: {
      *   becomes the input of the next.
      */
     multilineParam(/** The raw input string to transform */ input: string, pipeline: string[], /** Optional configuration */ options?: { dryRun?: boolean; verbose?: boolean }): string;
+    /** Run a detailed analysis on the input data. (readonly) */
+    multilineReturn(/** The data to analyze */ input: string): MultilineReturnResult;
     /** Compute the hash of input data. (readonly) */
     namedExport(/** The data to hash */ data: string, /** Hash algorithm to use */ algorithm: "md5" | "sha256" | "sha512"): string;
     /** (irreversible) */

@@ -1,0 +1,146 @@
+{
+  "tickets.create": {
+    "description": "Create a new support ticket.",
+    "properties": {
+      "fields": {
+        "description": "The ticket data",
+        "properties": {
+          "description": {
+            "description": "Detailed description",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Priority level",
+            "enum": [
+              "high",
+              "low",
+              "medium",
+              "urgent"
+            ],
+            "type": "string"
+          },
+          "tags": {
+            "description": "Tags for categorization",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "Short summary of the issue",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "fields"
+    ],
+    "type": "object"
+  },
+  "tickets.get": {
+    "description": "Retrieve a ticket by ID.",
+    "properties": {
+      "id": {
+        "description": "The ticket ID to look up",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
+  "tickets.list": {
+    "definitions": {
+      "Ticket": {
+        "description": "A support ticket",
+        "properties": {
+          "assignee": {
+            "description": "Name of the assigned agent",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique ticket identifier",
+            "type": "string"
+          },
+          "status": {
+            "description": "Current ticket status",
+            "enum": [
+              "closed",
+              "in_progress",
+              "open",
+              "resolved"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Short summary of the issue",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "description": "List all tickets, optionally filtered by status.",
+    "properties": {
+      "status": {
+        "description": "Filter by ticket status",
+        "enum": [
+          "closed",
+          "in_progress",
+          "open",
+          "resolved"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "tickets.update": {
+    "description": "Update an existing ticket.",
+    "properties": {
+      "fields": {
+        "description": "The fields to update",
+        "properties": {
+          "description": {
+            "description": "Detailed description",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Priority level",
+            "enum": [
+              "high",
+              "low",
+              "medium",
+              "urgent"
+            ],
+            "type": "string"
+          },
+          "tags": {
+            "description": "Tags for categorization",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "Short summary of the issue",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "id": {
+        "description": "The ticket ID to update",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "fields"
+    ],
+    "type": "object"
+  }
+}

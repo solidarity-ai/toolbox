@@ -188,6 +188,66 @@ func TestEdgeCaseGoldens(t *testing.T) {
 	}
 }
 
+func TestSharedTypesGoldens(t *testing.T) {
+	builder := tooltest.SharedTypesBuilder(t)
+
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+
+	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
+	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
+
+	// --- Declaration (.d.ts) golden ---
+	declSource := DeclarationSource(resolved)
+	declFile := filepath.Join(testdataDir, "shared-types-passthrough.d.ts")
+
+	if generateGoldens {
+		if err := os.MkdirAll(testdataDir, 0o755); err != nil {
+			t.Fatalf("create testdata dir: %v", err)
+		}
+		if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
+			t.Fatalf("write declaration golden: %v", err)
+		}
+		t.Logf("wrote %s", declFile)
+	} else {
+		want, err := os.ReadFile(declFile)
+		if err != nil {
+			t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
+		}
+		if diff := cmp.Diff(string(want), declSource); diff != "" {
+			t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
+		}
+	}
+
+	// --- MCP schema golden ---
+	view := resolved.AgentView()
+	schemaMap := buildSchemaMap(view)
+	schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	schemaJSON = append(schemaJSON, '\n')
+
+	schemaFile := filepath.Join(testdataDir, "shared-types-passthrough.schema.json")
+
+	if generateGoldens {
+		if err := os.WriteFile(schemaFile, schemaJSON, 0o644); err != nil {
+			t.Fatalf("write schema golden: %v", err)
+		}
+		t.Logf("wrote %s", schemaFile)
+	} else {
+		want, err := os.ReadFile(schemaFile)
+		if err != nil {
+			t.Fatalf("read schema golden (run with GENERATE_GOLDENS=1 to create): %v", err)
+		}
+		if diff := cmp.Diff(string(want), string(schemaJSON)); diff != "" {
+			t.Errorf("schema golden mismatch (-want +got):\n%s", diff)
+		}
+	}
+}
+
 // buildSchemaMap builds a map of tool name to JSON Schema for all tools in the view.
 func buildSchemaMap(view toolset.AgentView) map[string]any {
 	tools := make([]toolset.AgentTool, len(view.Tools))

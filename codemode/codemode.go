@@ -2,11 +2,13 @@ package codemode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"sort"
 	"strings"
 	"testing/fstest"
+	"unicode"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
@@ -139,15 +141,14 @@ func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 		return tools[i].Name < tools[j].Name
 	})
 
-	// Emit type declarations for any $ref definitions
-	for _, tool := range tools {
-		if pt := tool.ParamsType(); pt != nil {
-			decls := pt.Declarations()
-			if decls != "" {
-				b.WriteString(decls)
-				b.WriteString("\n")
-			}
+	// Collect unique type declarations from all tools' param types.
+	declLines := collectUniqueDeclarations(tools)
+	if len(declLines) > 0 {
+		for _, line := range declLines {
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
 
 	namespaces := map[string][]string{}
@@ -200,22 +201,16 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		return tools[i].Name < tools[j].Name
 	})
 
-	// Emit type declarations for any $ref definitions (params and return types).
-	for _, tool := range tools {
-		if pt := tool.ParamsType(); pt != nil {
-			if decls := pt.Declarations(); decls != "" {
-				b.WriteString(decls)
-				b.WriteString("\n")
-			}
+	// Collect unique type declarations from all tools' param and return types.
+	// Each declaration line (e.g. "type Foo = ...;") is deduplicated so that
+	// shared types referenced by multiple tools are emitted exactly once.
+	declLines := collectUniqueDeclarations(tools)
+	if len(declLines) > 0 {
+		for _, line := range declLines {
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
-		if tool.Sig != nil {
-			if rt := tool.Sig.Return(); rt != nil {
-				if decls := rt.Declarations(); decls != "" {
-					b.WriteString(decls)
-					b.WriteString("\n")
-				}
-			}
-		}
+		b.WriteString("\n")
 	}
 
 	namespaces := map[string][]toolset.AgentTool{}
@@ -231,6 +226,172 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		nsNames = append(nsNames, ns)
 	}
 	sort.Strings(nsNames)
+
+	// Analyze return types: decide rendering mode for each tool and detect
+	// shared return types across tools.
+	type returnTypeInfo struct {
+		mode     string // "named", "inline-comments", "plain"
+		typeName string // for "named" mode
+	}
+	returnTypes := map[string]returnTypeInfo{} // keyed by tool.Name
+
+	// Map from canonical JSON representation of return schema -> first tool method name that uses it.
+	// Used to detect shared return types.
+	type sharedInfo struct {
+		typeName   string
+		properties []returnPropInfo
+	}
+	sharedReturnTypes := map[string]*sharedInfo{}
+
+	for _, tool := range tools {
+		if tool.Sig == nil {
+			continue
+		}
+		rt := tool.Sig.Return()
+		if rt == nil {
+			continue
+		}
+		unwrapped := rt.UnwrapPromise()
+		if !unwrapped.IsObject() {
+			continue
+		}
+		propNames := unwrapped.PropertyNames()
+		if len(propNames) == 0 {
+			continue
+		}
+
+		props := returnTypeProperties(unwrapped)
+		if len(props) == 0 {
+			continue
+		}
+
+		// Check if any property has a description.
+		hasDesc := false
+		hasMultiLineDesc := false
+		for _, p := range props {
+			if p.description != "" {
+				hasDesc = true
+				if strings.Contains(p.description, "\n") {
+					hasMultiLineDesc = true
+				}
+			}
+		}
+
+		if !hasDesc {
+			continue
+		}
+
+		// Compute canonical key for shared type detection.
+		canonicalKey := canonicalReturnTypeKey(props)
+
+		parts := strings.Split(tool.Name, ".")
+		method := parts[len(parts)-1]
+
+		if hasMultiLineDesc {
+			// Named type mode.
+			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
+				// Shared with a previously seen tool - reuse the name.
+				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
+			} else {
+				typeName := upperFirst(method) + "Result"
+				sharedReturnTypes[canonicalKey] = &sharedInfo{typeName: typeName, properties: props}
+				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: typeName}
+			}
+		} else {
+			// Inline with single-line comments.
+			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
+				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
+			} else {
+				// Check if another tool shares this exact structure.
+				// We'll store it for dedup but render inline unless shared.
+				sharedReturnTypes[canonicalKey] = &sharedInfo{
+					typeName:   upperFirst(method) + "Result",
+					properties: props,
+				}
+				returnTypes[tool.Name] = returnTypeInfo{mode: "inline-comments"}
+			}
+		}
+	}
+
+	// Count usage of each canonical key to detect shared types.
+	canonicalUsage := map[string]int{}
+	for _, tool := range tools {
+		if tool.Sig == nil {
+			continue
+		}
+		rt := tool.Sig.Return()
+		if rt == nil {
+			continue
+		}
+		unwrapped := rt.UnwrapPromise()
+		if !unwrapped.IsObject() {
+			continue
+		}
+		props := returnTypeProperties(unwrapped)
+		if len(props) == 0 {
+			continue
+		}
+		key := canonicalReturnTypeKey(props)
+		canonicalUsage[key]++
+	}
+
+	// Promote inline-comments to named if used by multiple tools.
+	for toolName, info := range returnTypes {
+		if info.mode != "inline-comments" {
+			continue
+		}
+		tool := findTool(tools, toolName)
+		if tool == nil {
+			continue
+		}
+		rt := tool.Sig.Return()
+		if rt == nil {
+			continue
+		}
+		unwrapped := rt.UnwrapPromise()
+		props := returnTypeProperties(unwrapped)
+		key := canonicalReturnTypeKey(props)
+		if canonicalUsage[key] > 1 {
+			shared := sharedReturnTypes[key]
+			returnTypes[toolName] = returnTypeInfo{mode: "named", typeName: shared.typeName}
+		}
+	}
+
+	// Emit named return type interfaces.
+	emittedInterfaces := map[string]bool{}
+	for _, tool := range tools {
+		info, ok := returnTypes[tool.Name]
+		if !ok || info.mode != "named" || emittedInterfaces[info.typeName] {
+			continue
+		}
+		emittedInterfaces[info.typeName] = true
+
+		unwrapped := tool.Sig.Return().UnwrapPromise()
+		props := returnTypeProperties(unwrapped)
+
+		fmt.Fprintf(&b, "interface %s {\n", info.typeName)
+		schema := unwrapped.ToJSONSchema()
+		reqSet := jsonSchemaRequiredSet(schema)
+		for _, p := range props {
+			if p.description != "" {
+				if strings.Contains(p.description, "\n") {
+					b.WriteString("  /**\n")
+					for _, line := range strings.Split(p.description, "\n") {
+						fmt.Fprintf(&b, "   * %s\n", line)
+					}
+					b.WriteString("   */\n")
+				} else {
+					fmt.Fprintf(&b, "  /** %s */\n", p.description)
+				}
+			}
+			optional := ""
+			if !reqSet[p.name] {
+				optional = "?"
+			}
+			fmt.Fprintf(&b, "  %s%s: %s;\n", p.name, optional, p.tsType)
+		}
+		b.WriteString("}\n\n")
+	}
 
 	b.WriteString("export declare const tools: {\n")
 	for _, ns := range nsNames {
@@ -332,7 +493,19 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			returnType := "string"
 			if tool.Sig != nil {
 				if rt := tool.Sig.Return(); rt != nil {
-					returnType = rt.UnwrapPromise().ToTS()
+					unwrapped := rt.UnwrapPromise()
+					if info, ok := returnTypes[tool.Name]; ok {
+						switch info.mode {
+						case "named":
+							returnType = info.typeName
+						case "inline-comments":
+							returnType = renderReturnTypeInlineComments(unwrapped)
+						default:
+							returnType = unwrapped.ToTS()
+						}
+					} else {
+						returnType = unwrapped.ToTS()
+					}
 				}
 			}
 
@@ -343,6 +516,161 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	b.WriteString("};\n")
 
 	return b.String()
+}
+
+// returnPropInfo holds property-level information extracted from a return type.
+type returnPropInfo struct {
+	name        string
+	tsType      string
+	description string
+	required    bool
+}
+
+// returnTypeProperties extracts property information from an object ParamsType
+// by combining PropertyNames() with ToJSONSchema() for descriptions.
+func returnTypeProperties(pt *toolbox.ParamsType) []returnPropInfo {
+	if pt == nil || !pt.IsObject() {
+		return nil
+	}
+	names := pt.PropertyNames()
+	if len(names) == 0 {
+		return nil
+	}
+
+	schema := pt.ToJSONSchema()
+	reqSet := jsonSchemaRequiredSet(schema)
+
+	// Get the properties map from the JSON schema.
+	propsMap, _ := schema["properties"].(map[string]any)
+
+	var result []returnPropInfo
+	for _, name := range names {
+		var desc string
+		if propsMap != nil {
+			if propSchema, ok := propsMap[name].(map[string]any); ok {
+				desc, _ = propSchema["description"].(string)
+			}
+		}
+
+		// Get the TS type for this property. We use the full type's ToTS() and
+		// extract per-property types by removing other properties.
+		propType := pt.RemoveProperties(removeAllExcept(names, name)...).ToTS()
+		// The result of ToTS() for a single-property object is like "{ name?: type }".
+		// We need to extract just the type part.
+		propType = extractSinglePropertyType(propType, name)
+
+		result = append(result, returnPropInfo{
+			name:        name,
+			tsType:      propType,
+			description: desc,
+			required:    reqSet[name],
+		})
+	}
+	return result
+}
+
+// removeAllExcept returns all names except the given one.
+func removeAllExcept(names []string, keep string) []string {
+	var result []string
+	for _, n := range names {
+		if n != keep {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
+// extractSinglePropertyType extracts the type from a single-property object
+// type string like "{ name?: type }" or "{ name: type }".
+func extractSinglePropertyType(objectTS string, propName string) string {
+	// Look for "name?: " or "name: " pattern.
+	for _, pattern := range []string{propName + "?: ", propName + ": "} {
+		idx := strings.Index(objectTS, pattern)
+		if idx >= 0 {
+			rest := objectTS[idx+len(pattern):]
+			// Remove trailing " }" or "}"
+			rest = strings.TrimSuffix(rest, " }")
+			rest = strings.TrimSuffix(rest, "}")
+			return rest
+		}
+	}
+	return objectTS
+}
+
+// jsonSchemaRequiredSet returns the set of required property names from a JSON schema.
+func jsonSchemaRequiredSet(schema map[string]any) map[string]bool {
+	reqSet := map[string]bool{}
+	if reqArr, ok := schema["required"].([]any); ok {
+		for _, r := range reqArr {
+			if s, ok := r.(string); ok {
+				reqSet[s] = true
+			}
+		}
+	}
+	return reqSet
+}
+
+// canonicalReturnTypeKey produces a deterministic string key for a return type
+// structure, used to detect shared types across tools.
+func canonicalReturnTypeKey(props []returnPropInfo) string {
+	type propKey struct {
+		Name        string `json:"n"`
+		Type        string `json:"t"`
+		Description string `json:"d,omitempty"`
+		Required    bool   `json:"r,omitempty"`
+	}
+	keys := make([]propKey, len(props))
+	for i, p := range props {
+		keys[i] = propKey{Name: p.name, Type: p.tsType, Description: p.description, Required: p.required}
+	}
+	data, _ := json.Marshal(keys)
+	return string(data)
+}
+
+// renderReturnTypeInlineComments renders an object return type with inline
+// /** desc */ comments for single-line property descriptions.
+func renderReturnTypeInlineComments(pt *toolbox.ParamsType) string {
+	props := returnTypeProperties(pt)
+	if len(props) == 0 {
+		return pt.ToTS()
+	}
+
+	schema := pt.ToJSONSchema()
+	reqSet := jsonSchemaRequiredSet(schema)
+
+	var parts []string
+	for _, p := range props {
+		optional := ""
+		if !reqSet[p.name] {
+			optional = "?"
+		}
+		if p.description != "" {
+			parts = append(parts, fmt.Sprintf("/** %s */ %s%s: %s", p.description, p.name, optional, p.tsType))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s%s: %s", p.name, optional, p.tsType))
+		}
+	}
+	return "{ " + strings.Join(parts, "; ") + " }"
+}
+
+// upperFirst returns s with the first letter uppercased.
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+// findTool returns the tool with the given name, or nil.
+func findTool(tools []toolset.AgentTool, name string) *toolset.AgentTool {
+	for i := range tools {
+		if tools[i].Name == name {
+			return &tools[i]
+		}
+	}
+	return nil
 }
 
 // accessModeLabel returns the parenthesized label for the access mode and
@@ -389,6 +717,39 @@ func literalToTS(v any) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// collectUniqueDeclarations gathers type alias declarations from all tools'
+// param and return types, deduplicating by exact line content. This ensures
+// that when multiple tools reference the same named type (e.g. TicketFields),
+// it is emitted exactly once. Lines are returned in sorted order for
+// deterministic output.
+func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
+	seen := map[string]bool{}
+	var lines []string
+	for _, tool := range tools {
+		sources := []*toolbox.ParamsType{}
+		if pt := tool.ParamsType(); pt != nil {
+			sources = append(sources, pt)
+		}
+		if tool.Sig != nil {
+			if rt := tool.Sig.Return(); rt != nil {
+				sources = append(sources, rt)
+			}
+		}
+		for _, src := range sources {
+			if decls := src.Declarations(); decls != "" {
+				for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
+					if line != "" && !seen[line] {
+						seen[line] = true
+						lines = append(lines, line)
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(lines)
+	return lines
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {

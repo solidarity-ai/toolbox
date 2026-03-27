@@ -1,0 +1,29 @@
+{
+  "name": "shared-types",
+  "runtime": "typescript-sandbox",
+  "sha256": "6e6e28474daeb4e1cefb666628dea1dfdd22b9a20159b90abe423709d0f54fdd",
+  "tools": [
+    {
+      "entry_ts": "tools/tickets.get.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "Retrieve a ticket by ID."
+    },
+    {
+      "entry_ts": "tools/tickets.create.ts",
+      "accessMode": "irreversible",
+      "description": "Create a new support ticket."
+    },
+    {
+      "entry_ts": "tools/tickets.update.ts",
+      "accessMode": "reversible",
+      "description": "Update an existing ticket."
+    },
+    {
+      "entry_ts": "tools/tickets.list.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "List all tickets, optionally filtered by status."
+    }
+  ]
+}

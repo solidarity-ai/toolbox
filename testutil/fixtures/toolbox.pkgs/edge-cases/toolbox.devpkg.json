@@ -31,6 +31,9 @@
     },
     {
       "entry_ts": "tools/edge-cases.no-params.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-return.ts"
     }
   ]
 }

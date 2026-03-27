@@ -1,7 +1,7 @@
 {
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "990fd88a493d8a0ba4b43cd2fdd3ab242faeff119e15d736b260df4dd30e395a",
+  "sha256": "2b01caf45000c6cdee05750abfbeb59f748d9b544e1bc817ecdbba744c0651b7",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",
@@ -58,6 +58,11 @@
       "idempotent": true,
       "accessMode": "readOnly",
       "description": "Return the current server status."
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-return.ts",
+      "accessMode": "readOnly",
+      "description": "Run a detailed analysis on the input data."
     }
   ]
 }

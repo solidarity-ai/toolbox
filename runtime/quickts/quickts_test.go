@@ -22,7 +22,6 @@ func TestRunCalcAddStub(t *testing.T) {
 }
 
 func TestRunnerSourceLegacy(t *testing.T) {
-	// Legacy mode (no sig)
 	got := quickts.RunnerSourceForTest(
 		"tools/calc.add.ts",
 		map[string]any{"a": 7, "b": 4},
@@ -30,7 +29,7 @@ func TestRunnerSourceLegacy(t *testing.T) {
 	)
 
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"export default await tool({\"a\":7,\"b\":4}, {});\n"
+		"const __r = await tool({\"a\":7,\"b\":4}, {}); export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}
@@ -46,8 +45,8 @@ func TestAsyncReturnTypeUnwrapsPromise(t *testing.T) {
 		t.Fatal("expected Return() to be non-nil for async function")
 	}
 	got := ret.UnwrapPromise().ToTS()
-	if got != "string" {
-		t.Fatalf("expected Return().UnwrapPromise().ToTS() to be %q for async Promise<string>, got %q", "string", got)
+	if got != "number" {
+		t.Fatalf("expected Return().UnwrapPromise().ToTS() to be %q, got %q", "number", got)
 	}
 }
 
@@ -74,7 +73,8 @@ func TestRunnerSourceSpreadsParams(t *testing.T) {
 	)
 
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"export default await tool((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]));\n"
+		"const __r = await tool((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]));\n" +
+		"export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}

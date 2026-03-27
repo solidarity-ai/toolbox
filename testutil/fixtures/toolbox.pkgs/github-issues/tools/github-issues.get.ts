@@ -32,7 +32,7 @@ export default async function tool(
   repo: string,
   number: number,
   token?: string,
-): Promise<string> {
+): Promise<Issue> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "toolbox",
@@ -55,14 +55,14 @@ export default async function tool(
   const data = await resp.json();
   const issue = IssueSchema.parse(data);
 
-  return JSON.stringify({
+  return {
     number: issue.number,
     title: issue.title,
     state: issue.state,
     body: issue.body,
-    labels: issue.labels.map((l) => l.name).filter(Boolean),
+    labels: issue.labels.map((l) => l.name).filter(Boolean) as string[],
     assignees: (issue.assignees ?? []).map((a) => a.login),
     created_at: issue.created_at,
     updated_at: issue.updated_at,
-  });
+  };
 }

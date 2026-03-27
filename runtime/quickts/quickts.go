@@ -289,20 +289,23 @@ func withRunner(base fs.FS, source string) (fs.FS, error) {
 }
 
 func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
+	// __serialize: if the result is not a string, JSON.stringify it.
+	const serialize = `const __r = %s; export default typeof __r === "string" ? __r : JSON.stringify(__r);`
+
 	if sig == nil {
-		// Legacy single-object style: tool(args, ctx)
 		argsJSON, _ := json.Marshal(args)
-		return fmt.Sprintf("import tool from \"./%s\";\nexport default await tool(%s, {});\n", entry, argsJSON)
+		call := fmt.Sprintf("await tool(%s, {})", argsJSON)
+		return fmt.Sprintf("import tool from \"./%s\";\n"+serialize+"\n", entry, call)
 	}
 	params := sig.Params()
 	if len(params) == 0 {
-		return fmt.Sprintf("import tool from \"./%s\";\nexport default await tool();\n", entry)
+		return fmt.Sprintf("import tool from \"./%s\";\n"+serialize+"\n", entry, "await tool()")
 	}
 	// Multi-param style: inline each arg with a type assertion against the
 	// function's parameter types so the TS checker validates arg types.
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "import tool from \"./%s\";\n", entry)
-	sb.WriteString("export default await tool(")
+	sb.WriteString("const __r = await tool(")
 	for i, p := range params {
 		if i > 0 {
 			sb.WriteString(", ")
@@ -316,6 +319,8 @@ func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature)
 		}
 	}
 	sb.WriteString(");\n")
+	sb.WriteString(`export default typeof __r === "string" ? __r : JSON.stringify(__r);`)
+	sb.WriteString("\n")
 	return sb.String()
 }
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-27T01:27:06.325Z",
+  "exported_at": "2026-03-27T10:07:33.434Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -304,7 +304,7 @@
       "narrative": "",
       "verification_result": "",
       "duration": "",
-      "completed_at": "2026-03-27T01:22:54.898Z",
+      "completed_at": "2026-03-27T10:04:58.447Z",
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
@@ -465,19 +465,26 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S02",
       "id": "T02",
-      "title": "Add git fixture failure builders and tests, verify full suite",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.",
+      "status": "complete",
+      "one_liner": "Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.",
+      "narrative": "Extended registry/testutil/gitfixture/gitfixture.go with CreateBrokenRepo, CreateRepoMissingTag, and CreateCorruptPackageRepo, all built on the existing temporary repo, shared git initialization, and commit-and-tag flow. Added tests in registry/testutil/gitfixture/gitfixture_test.go that clone each fixture and verify the intended failure preconditions: no toolbox.devpkg.json for broken repos, no matching git tag for the missing-tag scenario, and malformed toolbox.devpkg.json that fails json.Unmarshal for the corrupt-package scenario. Kept the missing-tag helper intentionally narrow so downstream resolver tests choose the absent tag they want to request while the fixture only guarantees a valid repo tagged at the existing version.",
+      "verification_result": "Ran gofmt on the edited files, then ran `go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 60s` and `go test ./registry/... -v -count=1 -timeout 60s`; both passed. Also attempted an LSP diagnostics check for registry/testutil/gitfixture/gitfixture.go, but no Go language server was available in this environment.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-27T10:07:33.399Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "registry/testutil/gitfixture/gitfixture.go",
+        "registry/testutil/gitfixture/gitfixture_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S02/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Kept the missing-tag helper focused on creating a valid repository with only the existing tag so downstream tests can supply whichever absent tag they need.",
+        "Reused CreateTaggedRepo for all failure fixtures so scenario differences stay limited to repository contents instead of duplicating git setup logic."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S02\nmilestone: M001-zku9aj\nkey_files:\n  - registry/testutil/gitfixture/gitfixture.go\n  - registry/testutil/gitfixture/gitfixture_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S02/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Kept the missing-tag helper focused on creating a valid repository with only the existing tag so downstream tests can supply whichever absent tag they need.\n  - Reused CreateTaggedRepo for all failure fixtures so scenario differences stay limited to repository contents instead of duplicating git setup logic.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-27T10:07:33.409Z\nblocker_discovered: false\n---\n\n# T02: Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.\n\n**Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.**\n\n## What Happened\n\nExtended registry/testutil/gitfixture/gitfixture.go with CreateBrokenRepo, CreateRepoMissingTag, and CreateCorruptPackageRepo, all built on the existing temporary repo, shared git initialization, and commit-and-tag flow. Added tests in registry/testutil/gitfixture/gitfixture_test.go that clone each fixture and verify the intended failure preconditions: no toolbox.devpkg.json for broken repos, no matching git tag for the missing-tag scenario, and malformed toolbox.devpkg.json that fails json.Unmarshal for the corrupt-package scenario. Kept the missing-tag helper intentionally narrow so downstream resolver tests choose the absent tag they want to request while the fixture only guarantees a valid repo tagged at the existing version.\n\n## Verification\n\nRan gofmt on the edited files, then ran `go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 60s` and `go test ./registry/... -v -count=1 -timeout 60s`; both passed. Also attempted an LSP diagnostics check for registry/testutil/gitfixture/gitfixture.go, but no Go language server was available in this environment.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 60s` | 0 | ✅ pass | 1233ms |\n| 2 | `go test ./registry/... -v -count=1 -timeout 60s` | 0 | ✅ pass | 4614ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `registry/testutil/gitfixture/gitfixture.go`\n- `registry/testutil/gitfixture/gitfixture_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S02/tasks/T02-SUMMARY.md`\n",
       "description": "Add three failure scenario helpers to gitfixture/gitfixture.go:\n\n1. `CreateBrokenRepo(t, tag)` — creates a tagged repo with no `toolbox.devpkg.json` (just a README). S06 resolver expects this file; its absence is the failure.\n2. `CreateRepoMissingTag(t, existingTag, missingTag)` — creates repo tagged at existingTag. Returns repo path. Caller can attempt checkout of missingTag which won't exist.\n3. `CreateCorruptPackageRepo(t, tag)` — creates tagged repo where `toolbox.devpkg.json` contains invalid JSON (`{broken`).\n\nAll helpers use existing runGit/commitAllAndTag internals. Follow the established pattern: t.Helper(), t.TempDir(), explicit git user config.\n\nAdd tests in gitfixture_test.go verifying:\n- Broken repo: clone + ls shows no toolbox.devpkg.json\n- Missing tag: clone succeeds, `git tag -l missingTag` returns empty\n- Corrupt package: toolbox.devpkg.json exists but json.Unmarshal fails\n\nFinally run `go test ./registry/... -v -count=1 -timeout 60s` to confirm no regressions across both packages.",
       "estimate": "30m",
       "files": [
@@ -500,7 +507,7 @@
   ],
   "decisions": [
     {
-      "seq": 58,
+      "seq": 65,
       "id": "D001",
       "when_context": "M001-zku9aj",
       "scope": "library",
@@ -512,7 +519,7 @@
       "superseded_by": null
     },
     {
-      "seq": 59,
+      "seq": 66,
       "id": "D002",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -524,7 +531,7 @@
       "superseded_by": null
     },
     {
-      "seq": 60,
+      "seq": 67,
       "id": "D003",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -536,7 +543,7 @@
       "superseded_by": null
     },
     {
-      "seq": 61,
+      "seq": 68,
       "id": "D004",
       "when_context": "M001-zku9aj",
       "scope": "scope",
@@ -548,7 +555,7 @@
       "superseded_by": null
     },
     {
-      "seq": 62,
+      "seq": 69,
       "id": "D005",
       "when_context": "M001-zku9aj",
       "scope": "convention",
@@ -560,7 +567,7 @@
       "superseded_by": null
     },
     {
-      "seq": 63,
+      "seq": 70,
       "id": "D006",
       "when_context": "M001-zku9aj/S01/T01",
       "scope": "test-infrastructure",
@@ -572,7 +579,7 @@
       "superseded_by": null
     },
     {
-      "seq": 64,
+      "seq": 71,
       "id": "D007",
       "when_context": "M001-zku9aj/S01/T03",
       "scope": "workflow/testing",
@@ -694,6 +701,28 @@
       "verdict": "✅ pass",
       "duration_ms": 3693,
       "created_at": "2026-03-27T01:27:06.153Z"
+    },
+    {
+      "id": 11,
+      "task_id": "T02",
+      "slice_id": "S02",
+      "milestone_id": "M001-zku9aj",
+      "command": "go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1233,
+      "created_at": "2026-03-27T10:07:33.399Z"
+    },
+    {
+      "id": 12,
+      "task_id": "T02",
+      "slice_id": "S02",
+      "milestone_id": "M001-zku9aj",
+      "command": "go test ./registry/... -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 4614,
+      "created_at": "2026-03-27T10:07:33.399Z"
     }
   ]
 }

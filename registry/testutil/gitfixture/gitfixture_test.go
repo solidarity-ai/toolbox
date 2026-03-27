@@ -1,6 +1,8 @@
 package gitfixture
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +94,56 @@ func TestMultipleTags(t *testing.T) {
 
 	t.Logf("verified tags in cloned repo: %s", strings.TrimSpace(tags))
 	t.Logf("version.txt differs between v1.0.0=%q and v2.0.0=%q", strings.TrimSpace(string(first)), strings.TrimSpace(string(second)))
+}
+
+func TestCreateBrokenRepo(t *testing.T) {
+	repoDir := CreateBrokenRepo(t, "v0.1.0")
+
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	runGit(t, ".", "clone", repoDir, cloneDir)
+	runGit(t, cloneDir, "checkout", "v0.1.0")
+
+	listing := runGit(t, cloneDir, "ls-files")
+	if strings.Contains(listing, "toolbox.devpkg.json") {
+		t.Fatalf("broken repo unexpectedly contains toolbox.devpkg.json: %q", listing)
+	}
+	if !strings.Contains(listing, "README.md") {
+		t.Fatalf("broken repo missing README.md: %q", listing)
+	}
+}
+
+func TestCreateRepoMissingTag(t *testing.T) {
+	repoDir := CreateRepoMissingTag(t, "v1.0.0", "v9.9.9")
+
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	runGit(t, ".", "clone", repoDir, cloneDir)
+	runGit(t, cloneDir, "checkout", "v1.0.0")
+
+	missing := strings.TrimSpace(runGit(t, cloneDir, "tag", "-l", "v9.9.9"))
+	if missing != "" {
+		t.Fatalf("expected missing tag lookup to be empty, got %q", missing)
+	}
+}
+
+func TestCreateCorruptPackageRepo(t *testing.T) {
+	repoDir := CreateCorruptPackageRepo(t, "v0.2.0")
+
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	runGit(t, ".", "clone", repoDir, cloneDir)
+	runGit(t, cloneDir, "checkout", "v0.2.0")
+
+	manifestPath := filepath.Join(cloneDir, "toolbox.devpkg.json")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", manifestPath, err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(manifest, &decoded); err == nil {
+		t.Fatalf("expected invalid JSON in %s, but unmarshal succeeded", manifestPath)
+	} else if !errors.As(err, new(*json.SyntaxError)) {
+		t.Fatalf("expected json.SyntaxError, got %T: %v", err, err)
+	}
 }
 
 func fixtureSourceDir(t *testing.T, name string) string {

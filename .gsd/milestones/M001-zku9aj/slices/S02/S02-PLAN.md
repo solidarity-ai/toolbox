@@ -21,7 +21,7 @@ Add tests in emulatetest_test.go verifying:
   - Estimate: 45m
   - Files: registry/testutil/emulatetest/seed.go, registry/testutil/emulatetest/emulatetest_test.go
   - Verify: go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s
-- [ ] **T02: Add git fixture failure builders and tests, verify full suite** — Add three failure scenario helpers to gitfixture/gitfixture.go:
+- [x] **T02: Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.** — Add three failure scenario helpers to gitfixture/gitfixture.go:
 
 1. `CreateBrokenRepo(t, tag)` — creates a tagged repo with no `toolbox.devpkg.json` (just a README). S06 resolver expects this file; its absence is the failure.
 2. `CreateRepoMissingTag(t, existingTag, missingTag)` — creates repo tagged at existingTag. Returns repo path. Caller can attempt checkout of missingTag which won't exist.

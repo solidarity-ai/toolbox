@@ -72,6 +72,40 @@ func CreateTaggedRepoFromDir(t *testing.T, tag string, srcDir string) string {
 	return repoDir
 }
 
+// CreateBrokenRepo creates a tagged repository without toolbox.devpkg.json so
+// resolver tests can verify missing-manifest failures.
+func CreateBrokenRepo(t *testing.T, tag string) string {
+	t.Helper()
+
+	return CreateTaggedRepo(t, tag, map[string][]byte{
+		"README.md": []byte("# broken fixture\n"),
+	})
+}
+
+// CreateRepoMissingTag creates a repository tagged only at existingTag. Tests
+// can attempt to resolve or checkout missingTag, which intentionally does not
+// exist in the repository.
+func CreateRepoMissingTag(t *testing.T, existingTag string, missingTag string) string {
+	t.Helper()
+
+	_ = missingTag
+	return CreateTaggedRepo(t, existingTag, map[string][]byte{
+		"toolbox.devpkg.json": []byte("{\n  \"name\": \"missing-tag\",\n  \"version\": \"1.0.0\"\n}\n"),
+		"README.md":           []byte("# missing tag fixture\n"),
+	})
+}
+
+// CreateCorruptPackageRepo creates a tagged repository whose
+// toolbox.devpkg.json contains malformed JSON.
+func CreateCorruptPackageRepo(t *testing.T, tag string) string {
+	t.Helper()
+
+	return CreateTaggedRepo(t, tag, map[string][]byte{
+		"toolbox.devpkg.json": []byte("{broken"),
+		"README.md":           []byte("# corrupt package fixture\n"),
+	})
+}
+
 func commitAllAndTag(t *testing.T, repoDir string, tag string) {
 	t.Helper()
 

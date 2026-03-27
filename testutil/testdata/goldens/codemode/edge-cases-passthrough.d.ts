@@ -8,10 +8,12 @@ export declare const tools: {
     irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute */ confirm: boolean): string;
     // A minimal no-op tool. (readonly)
     minimal(): string;
-    // Transform data with a configurable pipeline. (readonly)
-    // @param pipeline - A sequence of transformation steps to apply.
-    //   Each step is executed in order, and the output of one step
-    //   becomes the input of the next.
+    /**
+     * Transform data with a configurable pipeline. (readonly)
+     * @param pipeline - A sequence of transformation steps to apply.
+     *   Each step is executed in order, and the output of one step
+     *   becomes the input of the next.
+     */
     multilineParam(/** The raw input string to transform */ input: string, pipeline: string[], /** Optional configuration */ options?: { dryRun?: boolean; verbose?: boolean }): string;
     // Run a detailed analysis on the input data. (readonly)
     multilineReturn(/** The data to analyze */ input: string): MultilineReturnResult;

@@ -342,23 +342,25 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			if tool.Sig != nil {
 				desc := tool.Sig.Description()
 				if len(multiLineParams) > 0 {
-					// Use // comments for standalone description lines.
+					// Use /** */ block for @param tags (LLMs expect @param in JSDoc).
+					b.WriteString("    /**\n")
 					if desc != "" {
 						descLine := desc
 						if modeLabel != "" {
 							descLine += " " + modeLabel
 						}
-						fmt.Fprintf(&b, "    // %s\n", descLine)
+						fmt.Fprintf(&b, "     * %s\n", descLine)
 					} else if modeLabel != "" {
-						fmt.Fprintf(&b, "    // %s\n", modeLabel)
+						fmt.Fprintf(&b, "     * %s\n", modeLabel)
 					}
 					for _, mp := range multiLineParams {
 						lines := strings.Split(mp.desc, "\n")
-						fmt.Fprintf(&b, "    // @param %s - %s\n", mp.name, lines[0])
+						fmt.Fprintf(&b, "     * @param %s - %s\n", mp.name, lines[0])
 						for _, line := range lines[1:] {
-							fmt.Fprintf(&b, "    //   %s\n", line)
+							fmt.Fprintf(&b, "     *   %s\n", line)
 						}
 					}
+					b.WriteString("     */\n")
 				} else if desc != "" {
 					descLine := desc
 					if modeLabel != "" {

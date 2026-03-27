@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -89,6 +90,11 @@ func ParseDev(data []byte) (DevManifest, error) {
 	var manifest DevManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
+	}
+	for _, tool := range manifest.Tools {
+		if err := validateEntryName(tool.EntryTS); err != nil {
+			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
+		}
 	}
 	return manifest, nil
 }
@@ -205,6 +211,25 @@ func kebabToCamel(s string) string {
 		}
 	}
 	return strings.Join(segments, "")
+}
+
+// kebabSegmentRe matches a valid kebab-case segment: lowercase letters, digits, and hyphens.
+// Must start with a letter, must not start or end with a hyphen, no consecutive hyphens.
+var kebabSegmentRe = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+// validateEntryName checks that a tool entry path uses kebab-case naming.
+// Expected format: "tools/<package>.<method>.ts" where each dot-separated
+// segment of the name is kebab-case (e.g. "tools/edge-cases.async-complex.ts").
+func validateEntryName(entryTS string) error {
+	base := filepath.Base(entryTS)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	segments := strings.Split(name, ".")
+	for _, seg := range segments {
+		if !kebabSegmentRe.MatchString(seg) {
+			return fmt.Errorf("segment %q is not valid kebab-case (expected lowercase letters, digits, and hyphens)", seg)
+		}
+	}
+	return nil
 }
 
 // ResourceParam describes one inferred resource parameter.

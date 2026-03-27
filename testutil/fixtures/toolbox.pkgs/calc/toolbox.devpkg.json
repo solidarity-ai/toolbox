@@ -4,6 +4,6 @@
   "tools": [
     { "entry_ts": "tools/calc.add.ts" },
     { "entry_ts": "tools/calc.sub.ts" },
-    { "entry_ts": "tools/calc.asyncAdd.ts" }
+    { "entry_ts": "tools/calc.async-add.ts" }
   ]
 }

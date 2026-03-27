@@ -1,7 +1,7 @@
 {
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "bee534fecd393bfcde89e7826ba84abda28fbc22239157749a4cadbaa94e658c",
+  "sha256": "207e750b3374aa15c03976332ea5bd5eb4f9950fbc4852855bd09870b2848204",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",
@@ -16,7 +16,7 @@
       "description": "Subtract two numbers."
     },
     {
-      "entry_ts": "tools/calc.asyncAdd.ts",
+      "entry_ts": "tools/calc.async-add.ts",
       "idempotent": true,
       "accessMode": "readOnly",
       "description": "Add two numbers asynchronously."

@@ -227,6 +227,92 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	}
 	sort.Strings(nsNames)
 
+	// Build a map from canonical type structure to $ref definition name.
+	// This lets us reuse the original source type name (e.g. "Ticket")
+	// for shared return types instead of generating "CreateResult".
+	defNameByStructure := map[string]string{}
+	for _, tool := range tools {
+		if pt := tool.ParamsType(); pt != nil {
+			collectDefinitionStructures(pt, defNameByStructure)
+		}
+	}
+
+	// Detect shared parameter types across tools. When the same parameter
+	// type appears in multiple tools (by structural equality), it gets
+	// extracted as a named type at the top of the file.
+	type sharedParamInfo struct {
+		typeName string
+		tsType   string // ToTS() rendering
+	}
+	sharedParamTypes := map[string]*sharedParamInfo{} // canonical key -> info
+	// Map from (tool.Name, paramName) -> shared type name.
+	paramTypeOverrides := map[string]string{}
+
+	// First pass: count usages of each param type structure.
+	type paramOccurrence struct {
+		toolName  string
+		paramName string
+		tsType    string
+	}
+	paramCanonical := map[string][]paramOccurrence{}
+	for _, tool := range tools {
+		if tool.Sig == nil {
+			continue
+		}
+		for _, p := range tool.Sig.Params() {
+			pt := p.Type()
+			if pt == nil || !pt.IsObject() {
+				continue
+			}
+			props := returnTypeProperties(pt)
+			if len(props) == 0 {
+				continue
+			}
+			key := canonicalReturnTypeKey(props)
+			paramCanonical[key] = append(paramCanonical[key], paramOccurrence{
+				toolName:  tool.Name,
+				paramName: p.Name(),
+				tsType:    pt.ToTS(),
+			})
+		}
+	}
+
+	// Second pass: for param types used by 2+ tools, create named types.
+	for key, occs := range paramCanonical {
+		if len(occs) < 2 {
+			continue
+		}
+		// Check if a $ref definition name already exists for this structure.
+		typeName := defNameByStructure[key]
+		if typeName == "" {
+			// Derive a name from the param name of the first occurrence.
+			typeName = upperFirst(occs[0].paramName)
+		}
+		sharedParamTypes[key] = &sharedParamInfo{
+			typeName: typeName,
+			tsType:   occs[0].tsType,
+		}
+		for _, occ := range occs {
+			paramTypeOverrides[occ.toolName+"."+occ.paramName] = typeName
+		}
+	}
+
+	// Emit shared param types that don't already appear in declarations.
+	declLineSet := map[string]bool{}
+	for _, line := range declLines {
+		declLineSet[line] = true
+	}
+	for _, info := range sharedParamTypes {
+		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
+		if !declLineSet[declLine] {
+			b.WriteString(declLine)
+			b.WriteString("\n")
+		}
+	}
+	if len(sharedParamTypes) > 0 {
+		b.WriteString("\n")
+	}
+
 	// Analyze return types: decide rendering mode for each tool and detect
 	// shared return types across tools.
 	type returnTypeInfo struct {
@@ -287,13 +373,21 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		parts := strings.Split(tool.Name, ".")
 		method := parts[len(parts)-1]
 
+		// Prefer the $ref definition name if one exists with this structure.
+		deriveName := func(fallback string) string {
+			if defName, ok := defNameByStructure[canonicalKey]; ok {
+				return defName
+			}
+			return fallback
+		}
+
 		if hasMultiLineDesc {
 			// Named type mode.
 			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
 				// Shared with a previously seen tool - reuse the name.
 				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
 			} else {
-				typeName := upperFirst(method) + "Result"
+				typeName := deriveName(upperFirst(method) + "Result")
 				sharedReturnTypes[canonicalKey] = &sharedInfo{typeName: typeName, properties: props}
 				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: typeName}
 			}
@@ -305,7 +399,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				// Check if another tool shares this exact structure.
 				// We'll store it for dedup but render inline unless shared.
 				sharedReturnTypes[canonicalKey] = &sharedInfo{
-					typeName:   upperFirst(method) + "Result",
+					typeName:   deriveName(upperFirst(method) + "Result"),
 					properties: props,
 				}
 				returnTypes[tool.Name] = returnTypeInfo{mode: "inline-comments"}
@@ -357,7 +451,17 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 	}
 
-	// Emit named return type interfaces.
+	// Collect the set of named return type names that will be emitted as
+	// interface blocks, so we can suppress matching $ref type aliases.
+	namedReturnTypeNames := map[string]bool{}
+	for _, info := range returnTypes {
+		if info.mode == "named" {
+			namedReturnTypeNames[info.typeName] = true
+		}
+	}
+
+	// Emit named return type interfaces, skipping those that already exist
+	// as type aliases from $ref declarations.
 	emittedInterfaces := map[string]bool{}
 	for _, tool := range tools {
 		info, ok := returnTypes[tool.Name]
@@ -365,6 +469,20 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			continue
 		}
 		emittedInterfaces[info.typeName] = true
+
+		// If a $ref type alias with the same name was already emitted in
+		// declarations, skip the interface to avoid duplicate definitions.
+		typeAliasPrefix := "type " + info.typeName + " = "
+		alreadyDeclared := false
+		for _, line := range declLines {
+			if strings.HasPrefix(line, typeAliasPrefix) {
+				alreadyDeclared = true
+				break
+			}
+		}
+		if alreadyDeclared {
+			continue
+		}
 
 		unwrapped := tool.Sig.Return().UnwrapPromise()
 		props := returnTypeProperties(unwrapped)
@@ -468,10 +586,13 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 						continue
 					}
 					// Determine param type: use bound literal if available,
+					// then check for shared param type override,
 					// otherwise use the param's TypeScript type.
 					var tsType string
 					if litVal, ok := literals[p.Name()]; ok {
 						tsType = literalToTS(litVal)
+					} else if sharedName, ok := paramTypeOverrides[tool.Name+"."+p.Name()]; ok {
+						tsType = sharedName
 					} else {
 						tsType = p.Type().ToTS()
 					}
@@ -608,6 +729,129 @@ func jsonSchemaRequiredSet(schema map[string]any) map[string]bool {
 		}
 	}
 	return reqSet
+}
+
+// collectDefinitionStructures builds a map from canonical type structure key
+// to the $ref definition name. This allows matching a shared return type's
+// structure to the original source type name (e.g. "Ticket").
+func collectDefinitionStructures(pt *toolbox.ParamsType, out map[string]string) {
+	if pt == nil {
+		return
+	}
+	decls := pt.Declarations()
+	if decls == "" {
+		return
+	}
+	// Each declaration is "type Foo = <body>;\n".
+	// We need to parse out the name and match it to a structural key.
+	// The definitions are available via the ParamsType's ToJSONSchema under "definitions".
+	schema := pt.ToJSONSchema()
+	defsRaw, ok := schema["definitions"]
+	if !ok {
+		return
+	}
+	defs, ok := defsRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	for name, defRaw := range defs {
+		defMap, ok := defRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Build returnPropInfo from the definition's properties.
+		propsRaw, ok := defMap["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		reqSet := map[string]bool{}
+		if reqArr, ok := defMap["required"].([]any); ok {
+			for _, r := range reqArr {
+				if s, ok := r.(string); ok {
+					reqSet[s] = true
+				}
+			}
+		}
+		// Sort property names for deterministic ordering.
+		var propNames []string
+		for pn := range propsRaw {
+			propNames = append(propNames, pn)
+		}
+		sort.Strings(propNames)
+
+		var props []returnPropInfo
+		for _, pn := range propNames {
+			propSchema, ok := propsRaw[pn].(map[string]any)
+			if !ok {
+				continue
+			}
+			desc, _ := propSchema["description"].(string)
+			// Get TypeScript type from the JSON Schema property.
+			tsType := jsonSchemaPropertyToTS(propSchema)
+			props = append(props, returnPropInfo{
+				name:        pn,
+				tsType:      tsType,
+				description: desc,
+				required:    reqSet[pn],
+			})
+		}
+		if len(props) > 0 {
+			key := canonicalReturnTypeKey(props)
+			if _, exists := out[key]; !exists {
+				out[key] = name
+			}
+		}
+	}
+}
+
+// jsonSchemaPropertyToTS converts a JSON Schema property to a TypeScript type string.
+// This is a simplified version for matching purposes.
+func jsonSchemaPropertyToTS(schema map[string]any) string {
+	// Handle enum values.
+	if enumVals, ok := schema["enum"].([]any); ok {
+		parts := make([]string, len(enumVals))
+		for i, v := range enumVals {
+			switch val := v.(type) {
+			case string:
+				parts[i] = fmt.Sprintf("%q", val)
+			case float64:
+				if val == float64(int64(val)) {
+					parts[i] = fmt.Sprintf("%d", int64(val))
+				} else {
+					parts[i] = fmt.Sprintf("%g", val)
+				}
+			case bool:
+				if val {
+					parts[i] = "true"
+				} else {
+					parts[i] = "false"
+				}
+			default:
+				parts[i] = fmt.Sprintf("%v", val)
+			}
+		}
+		sort.Strings(parts)
+		return strings.Join(parts, " | ")
+	}
+	// Handle type field.
+	if t, ok := schema["type"].(string); ok {
+		switch t {
+		case "string":
+			return "string"
+		case "number", "integer":
+			return "number"
+		case "boolean":
+			return "boolean"
+		case "array":
+			if items, ok := schema["items"].(map[string]any); ok {
+				return jsonSchemaPropertyToTS(items) + "[]"
+			}
+			return "any[]"
+		case "object":
+			return "Record<string, any>"
+		}
+	}
+	return "any"
 }
 
 // canonicalReturnTypeKey produces a deterministic string key for a return type

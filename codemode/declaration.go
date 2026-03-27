@@ -285,17 +285,14 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		props := unwrapped.ObjectProperties()
 
 		var ib strings.Builder
+		if desc := unwrapped.Description(); desc != "" {
+			fmt.Fprintf(&ib, "// %s\n", desc)
+		}
 		fmt.Fprintf(&ib, "interface %s {\n", info.typeName)
 		for _, p := range props {
 			if p.Description != "" {
-				if strings.Contains(p.Description, "\n") {
-					ib.WriteString("  /**\n")
-					for _, line := range strings.Split(p.Description, "\n") {
-						fmt.Fprintf(&ib, "   * %s\n", line)
-					}
-					ib.WriteString("   */\n")
-				} else {
-					fmt.Fprintf(&ib, "  /** %s */\n", p.Description)
+				for _, line := range strings.Split(p.Description, "\n") {
+					fmt.Fprintf(&ib, "  // %s\n", line)
 				}
 			}
 			optional := ""
@@ -345,33 +342,31 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			if tool.Sig != nil {
 				desc := tool.Sig.Description()
 				if len(multiLineParams) > 0 {
-					// Multi-line JSDoc block.
-					b.WriteString("    /**\n")
+					// Use // comments for standalone description lines.
 					if desc != "" {
 						descLine := desc
 						if modeLabel != "" {
 							descLine += " " + modeLabel
 						}
-						fmt.Fprintf(&b, "     * %s\n", descLine)
+						fmt.Fprintf(&b, "    // %s\n", descLine)
 					} else if modeLabel != "" {
-						fmt.Fprintf(&b, "     * %s\n", modeLabel)
+						fmt.Fprintf(&b, "    // %s\n", modeLabel)
 					}
 					for _, mp := range multiLineParams {
 						lines := strings.Split(mp.desc, "\n")
-						fmt.Fprintf(&b, "     * @param %s - %s\n", mp.name, lines[0])
+						fmt.Fprintf(&b, "    // @param %s - %s\n", mp.name, lines[0])
 						for _, line := range lines[1:] {
-							fmt.Fprintf(&b, "     *   %s\n", line)
+							fmt.Fprintf(&b, "    //   %s\n", line)
 						}
 					}
-					b.WriteString("     */\n")
 				} else if desc != "" {
 					descLine := desc
 					if modeLabel != "" {
 						descLine += " " + modeLabel
 					}
-					fmt.Fprintf(&b, "    /** %s */\n", descLine)
+					fmt.Fprintf(&b, "    // %s\n", descLine)
 				} else if modeLabel != "" {
-					fmt.Fprintf(&b, "    /** %s */\n", modeLabel)
+					fmt.Fprintf(&b, "    // %s\n", modeLabel)
 				}
 			}
 
@@ -729,20 +724,19 @@ func enhanceDeclWithDescriptions(line string, defTypes map[string]*toolbox.TSTyp
 		return line
 	}
 
+	// Prepend type-level description if available.
+	typeDesc := defType.Description()
+
 	if hasMultiLineDesc {
-		// Render as an interface with JSDoc blocks.
 		var b strings.Builder
+		if typeDesc != "" {
+			fmt.Fprintf(&b, "// %s\n", typeDesc)
+		}
 		fmt.Fprintf(&b, "interface %s {\n", typeName)
 		for _, p := range props {
 			if p.Description != "" {
-				if strings.Contains(p.Description, "\n") {
-					b.WriteString("  /**\n")
-					for _, dl := range strings.Split(p.Description, "\n") {
-						fmt.Fprintf(&b, "   * %s\n", dl)
-					}
-					b.WriteString("   */\n")
-				} else {
-					fmt.Fprintf(&b, "  /** %s */\n", p.Description)
+				for _, dl := range strings.Split(p.Description, "\n") {
+					fmt.Fprintf(&b, "  // %s\n", dl)
 				}
 			}
 			nameWithOpt := p.Name
@@ -768,7 +762,11 @@ func enhanceDeclWithDescriptions(line string, defTypes map[string]*toolbox.TSTyp
 			parts = append(parts, fmt.Sprintf("%s: %s", nameWithOpt, p.Type.ToTS()))
 		}
 	}
-	return fmt.Sprintf("type %s = { %s };", typeName, strings.Join(parts, "; "))
+	typeAlias := fmt.Sprintf("type %s = { %s };", typeName, strings.Join(parts, "; "))
+	if typeDesc != "" {
+		return fmt.Sprintf("// %s\n%s", typeDesc, typeAlias)
+	}
+	return typeAlias
 }
 
 // collectDefinitionStructures builds a map from canonical type structure key

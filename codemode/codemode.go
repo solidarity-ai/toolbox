@@ -201,17 +201,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		return tools[i].Name < tools[j].Name
 	})
 
-	// Collect unique type declarations from all tools' param and return types.
-	// Each declaration line (e.g. "type Foo = ...;") is deduplicated so that
-	// shared types referenced by multiple tools are emitted exactly once.
+	// Collect type declarations (emitted after the tools block).
 	declLines := collectUniqueDeclarations(tools)
-	if len(declLines) > 0 {
-		for _, line := range declLines {
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
 
 	namespaces := map[string][]toolset.AgentTool{}
 	for _, tool := range tools {
@@ -297,7 +288,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 	}
 
-	// Emit shared param types that don't already appear in declarations.
+	// Collect shared param types for emission after the tools block.
 	declLineSet := map[string]bool{}
 	for _, line := range declLines {
 		declLineSet[line] = true
@@ -305,12 +296,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	for _, info := range sharedParamTypes {
 		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
 		if !declLineSet[declLine] {
-			b.WriteString(declLine)
-			b.WriteString("\n")
+			declLines = append(declLines, declLine)
 		}
-	}
-	if len(sharedParamTypes) > 0 {
-		b.WriteString("\n")
 	}
 
 	// Analyze return types: decide rendering mode for each tool and detect
@@ -635,6 +622,16 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		b.WriteString("  };\n")
 	}
 	b.WriteString("};\n")
+
+	// Emit type declarations after the tools block so the reader sees
+	// the tool surface first and supporting types below.
+	if len(declLines) > 0 {
+		b.WriteString("\n")
+		for _, line := range declLines {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
 
 	return b.String()
 }

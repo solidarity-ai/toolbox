@@ -1,7 +1,3 @@
-type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
-type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maximum items per page */ pageSize?: number };
-type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };
-
 interface MultilineReturnResult {
   /**
    * Detailed recommendations for improvement.
@@ -49,3 +45,7 @@ export declare const tools: {
     reversible(/** Document title */ title: string, /** Initial content */ content: string, /** Optional categorization tags */ tags?: string[]): string;
   };
 };
+
+type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
+type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maximum items per page */ pageSize?: number };
+type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };

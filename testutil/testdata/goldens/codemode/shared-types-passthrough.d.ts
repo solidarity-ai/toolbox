@@ -1,7 +1,3 @@
-type Ticket = { /** Name of the assigned agent */ assignee?: string; /** Unique ticket identifier */ id?: string; /** Current ticket status */ status?: "closed" | "in_progress" | "open" | "resolved"; /** Short summary of the issue */ title?: string };
-
-type Fields = { description?: string; priority?: "high" | "low" | "medium" | "urgent"; tags?: string[]; title?: string };
-
 export declare const tools: {
   tickets: {
     /** Create a new support ticket. (irreversible) */
@@ -14,3 +10,6 @@ export declare const tools: {
     update(/** The ticket ID to update */ id: string, /** The fields to update */ fields: Fields): Ticket;
   };
 };
+
+type Ticket = { /** Name of the assigned agent */ assignee?: string; /** Unique ticket identifier */ id?: string; /** Current ticket status */ status?: "closed" | "in_progress" | "open" | "resolved"; /** Short summary of the issue */ title?: string };
+type Fields = { description?: string; priority?: "high" | "low" | "medium" | "urgent"; tags?: string[]; title?: string };

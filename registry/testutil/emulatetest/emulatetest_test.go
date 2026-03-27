@@ -1,6 +1,8 @@
 package emulatetest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 )
 
@@ -130,6 +133,106 @@ func TestSeedPackageRelease(t *testing.T) {
 	t.Logf("release metadata verified for assets %v", assetNames)
 }
 
+func TestSeedCorruptArchiveRelease(t *testing.T) {
+	server := Start(t)
+	repoName := nextRepoName("corrupt")
+
+	result, err := server.Seed().SeedCorruptArchiveRelease(testOwner, repoName, "v1.0.0", fixtureSourceDir(t, "calc"))
+	if err != nil {
+		t.Fatalf("SeedCorruptArchiveRelease(): %v", err)
+	}
+	if len(result.ArchiveBytes) == 0 {
+		t.Fatal("SeedCorruptArchiveRelease(): ArchiveBytes was empty")
+	}
+	if len(result.ManifestBytes) == 0 {
+		t.Fatal("SeedCorruptArchiveRelease(): ManifestBytes was empty")
+	}
+
+	archivePath, manifestPath := writeSeedAssets(t, result)
+	_, err = packaging.LoadArchive(archivePath, manifestPath)
+	if err == nil {
+		t.Fatal("LoadArchive() succeeded for corrupt archive bytes")
+	}
+
+	t.Logf("corrupt archive failed to load as expected: %v", err)
+}
+
+func TestSeedMismatchedHashRelease(t *testing.T) {
+	server := Start(t)
+	repoName := nextRepoName("mismatch")
+
+	result, err := server.Seed().SeedMismatchedHashRelease(testOwner, repoName, "v1.0.0", fixtureSourceDir(t, "calc"))
+	if err != nil {
+		t.Fatalf("SeedMismatchedHashRelease(): %v", err)
+	}
+
+	manifestHash := manifestSHA256(t, result.ManifestBytes)
+	actualHash := sha256Hex(result.ArchiveBytes)
+	if manifestHash == "" {
+		t.Fatal("tampered manifest sha256 was empty")
+	}
+	if manifestHash == actualHash {
+		t.Fatalf("tampered manifest hash unexpectedly matched archive hash %q", actualHash)
+	}
+
+	t.Logf("tampered manifest hash %s does not match archive hash %s", manifestHash, actualHash)
+}
+
+func TestSeedMissingAssetRelease(t *testing.T) {
+	server := Start(t)
+	cases := []struct {
+		name          string
+		mode          string
+		wantAssetName string
+	}{
+		{name: "missing archive", mode: "archive", wantAssetName: "toolbox.pkg.json"},
+		{name: "missing manifest", mode: "manifest", wantAssetName: "calc.toolbox.pkg"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoName := nextRepoName("missing-asset")
+			result, err := server.Seed().SeedMissingAssetRelease(testOwner, repoName, "v1.0.0", fixtureSourceDir(t, "calc"), tc.mode)
+			if err != nil {
+				t.Fatalf("SeedMissingAssetRelease(%q): %v", tc.mode, err)
+			}
+
+			release := fetchReleaseByTag(t, server, result.Owner, result.Repo, result.Tag)
+			if len(release.Assets) != 1 {
+				t.Fatalf("GET release by tag: want 1 asset, got %d", len(release.Assets))
+			}
+			if diff := cmp.Diff(tc.wantAssetName, release.Assets[0].Name); diff != "" {
+				t.Fatalf("asset name mismatch (-want +got):\n%s", diff)
+			}
+
+			t.Logf("missing asset mode=%s produced release asset %s", tc.mode, release.Assets[0].Name)
+		})
+	}
+}
+
+func TestSeedEmptyRelease(t *testing.T) {
+	server := Start(t)
+	repoName := nextRepoName("empty")
+
+	result, err := server.Seed().SeedEmptyRelease(testOwner, repoName, "v1.0.0")
+	if err != nil {
+		t.Fatalf("SeedEmptyRelease(): %v", err)
+	}
+	if result.ReleaseID <= 0 {
+		t.Fatalf("SeedEmptyRelease(): expected release id > 0, got %+v", result)
+	}
+	if result.ArchiveAssetID != 0 || result.ManifestAssetID != 0 {
+		t.Fatalf("SeedEmptyRelease(): expected zero asset ids, got %+v", result)
+	}
+
+	release := fetchReleaseByTag(t, server, result.Owner, result.Repo, result.Tag)
+	if len(release.Assets) != 0 {
+		t.Fatalf("GET release by tag: want 0 assets, got %d", len(release.Assets))
+	}
+
+	t.Logf("empty release %s/%s@%s has zero assets", result.Owner, result.Repo, result.Tag)
+}
+
 func TestSeedPackageReleaseMissingSourceDir(t *testing.T) {
 	missingDir := filepath.Join(t.TempDir(), "does-not-exist")
 
@@ -184,6 +287,39 @@ func fetchReleaseByTag(t *testing.T, server *Server, owner, repo, tag string) Re
 		t.Fatalf("GET release by tag: decode JSON: %v\nbody=%s", err, raw)
 	}
 	return release
+}
+
+func writeSeedAssets(t *testing.T, result *SeedResult) (string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "package.toolbox.pkg")
+	manifestPath := filepath.Join(dir, "toolbox.pkg.json")
+
+	if err := os.WriteFile(archivePath, result.ArchiveBytes, 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, result.ManifestBytes, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return archivePath, manifestPath
+}
+
+func manifestSHA256(t *testing.T, raw []byte) string {
+	t.Helper()
+
+	var manifest struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	return manifest.SHA256
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 func fixtureSourceDir(t *testing.T, name string) string {

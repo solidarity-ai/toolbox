@@ -127,13 +127,13 @@ Guidelines:
 ### R011 — Emulate-based integration test infrastructure
 - Class: quality-attribute
 - Status: active
-- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI.
-- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients
+- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
+- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while keeping GitHub testing off the protected mainline
 - Source: user
 - Primary owning slice: M001-zku9aj/S01
 - Supporting slices: M001-zku9aj/S02
 - Validation: unmapped
-- Notes: Uses https://github.com/vercel-labs/emulate
+- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
 
 ## Validated
 

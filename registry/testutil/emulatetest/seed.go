@@ -2,6 +2,7 @@ package emulatetest
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -106,6 +107,134 @@ func (c *SeedClient) UploadReleaseAsset(owner, repo string, releaseID int, filen
 // SeedPackageRelease packs a real fixture package and uploads both the archive
 // and compiled manifest as release assets.
 func (c *SeedClient) SeedPackageRelease(owner, repo, tag, pkgDir string) (*SeedResult, error) {
+	packed, err := packReleaseAssets(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+	return c.seedReleaseAssets(owner, repo, tag, packed.archiveName, packed.archiveBytes, packed.manifestName, packed.manifestBytes)
+}
+
+// SeedCorruptArchiveRelease uploads a valid manifest with intentionally corrupt
+// archive bytes so callers can exercise archive extraction failures.
+func (c *SeedClient) SeedCorruptArchiveRelease(owner, repo, tag, pkgDir string) (*SeedResult, error) {
+	packed, err := packReleaseAssets(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+
+	corruptArchiveBytes := make([]byte, len(packed.archiveBytes))
+	if _, err := crand.Read(corruptArchiveBytes); err != nil {
+		return nil, fmt.Errorf("generate corrupt archive bytes: %w", err)
+	}
+
+	return c.seedReleaseAssets(owner, repo, tag, packed.archiveName, corruptArchiveBytes, packed.manifestName, packed.manifestBytes)
+}
+
+// SeedMismatchedHashRelease uploads the real archive with a tampered manifest
+// sha256 so callers can exercise checksum mismatch paths.
+func (c *SeedClient) SeedMismatchedHashRelease(owner, repo, tag, pkgDir string) (*SeedResult, error) {
+	packed, err := packReleaseAssets(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+
+	tamperedManifestBytes, err := tamperManifestSHA(packed.manifestBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.seedReleaseAssets(owner, repo, tag, packed.archiveName, packed.archiveBytes, packed.manifestName, tamperedManifestBytes)
+}
+
+// SeedMissingAssetRelease uploads only one release asset. mode must be
+// "archive" to omit the archive and leave the manifest, or "manifest" to omit
+// the manifest and leave the archive.
+func (c *SeedClient) SeedMissingAssetRelease(owner, repo, tag, pkgDir, mode string) (*SeedResult, error) {
+	packed, err := packReleaseAssets(pkgDir)
+	if err != nil {
+		return nil, err
+	}
+
+	switch mode {
+	case "archive":
+		return c.seedReleaseAssets(owner, repo, tag, "", nil, packed.manifestName, packed.manifestBytes)
+	case "manifest":
+		return c.seedReleaseAssets(owner, repo, tag, packed.archiveName, packed.archiveBytes, "", nil)
+	default:
+		return nil, fmt.Errorf("unsupported missing asset mode %q", mode)
+	}
+}
+
+// SeedEmptyRelease creates a repo and release without uploading any assets.
+func (c *SeedClient) SeedEmptyRelease(owner, repo, tag string) (*SeedResult, error) {
+	return c.seedReleaseAssets(owner, repo, tag, "", nil, "", nil)
+}
+
+func (c *SeedClient) seedReleaseAssets(owner, repo, tag, archiveName string, archiveBytes []byte, manifestName string, manifestBytes []byte) (*SeedResult, error) {
+	resolvedOwner, err := c.ensureRepo(owner, repo)
+	if err != nil {
+		return nil, err
+	}
+
+	release, err := c.CreateRelease(resolvedOwner, repo, tag)
+	if err != nil {
+		return nil, fmt.Errorf("create release %s/%s@%s: %w", resolvedOwner, repo, tag, err)
+	}
+
+	result := &SeedResult{
+		Owner:         resolvedOwner,
+		Repo:          repo,
+		Tag:           tag,
+		ReleaseID:     release.ID,
+		ArchiveBytes:  cloneBytes(archiveBytes),
+		ManifestBytes: cloneBytes(manifestBytes),
+	}
+
+	if archiveName != "" {
+		archiveAsset, err := c.UploadReleaseAsset(resolvedOwner, repo, release.ID, archiveName, archiveBytes)
+		if err != nil {
+			return nil, fmt.Errorf("upload archive asset: %w", err)
+		}
+		result.ArchiveAssetID = archiveAsset.ID
+	}
+	if manifestName != "" {
+		manifestAsset, err := c.UploadReleaseAsset(resolvedOwner, repo, release.ID, manifestName, manifestBytes)
+		if err != nil {
+			return nil, fmt.Errorf("upload manifest asset: %w", err)
+		}
+		result.ManifestAssetID = manifestAsset.ID
+	}
+
+	return result, nil
+}
+
+func (c *SeedClient) ensureRepo(owner, repo string) (string, error) {
+	resolvedOwner := owner
+	if resolvedOwner == "" {
+		resolvedOwner = defaultRepoOwner
+	}
+
+	repoResult, err := c.CreateRepo(resolvedOwner, repo)
+	if err != nil {
+		if !isAlreadyExistsError(err) {
+			return "", fmt.Errorf("create repo %s/%s: %w", resolvedOwner, repo, err)
+		}
+		return defaultRepoOwner, nil
+	}
+	if parts := strings.SplitN(repoResult.FullName, "/", 2); len(parts) == 2 && parts[0] != "" {
+		resolvedOwner = parts[0]
+	}
+	return resolvedOwner, nil
+}
+
+type packedReleaseAssets struct {
+	archiveName   string
+	archiveBytes  []byte
+	manifestName  string
+	manifestBytes []byte
+}
+
+func packReleaseAssets(pkgDir string) (*packedReleaseAssets, error) {
 	outDir, err := os.MkdirTemp("", "emulatetest-pack-*")
 	if err != nil {
 		return nil, fmt.Errorf("create pack temp dir: %w", err)
@@ -126,45 +255,49 @@ func (c *SeedClient) SeedPackageRelease(owner, repo, tag, pkgDir string) (*SeedR
 		return nil, fmt.Errorf("read manifest %q: %w", packResult.ManifestPath, err)
 	}
 
-	resolvedOwner := owner
-	if resolvedOwner == "" {
-		resolvedOwner = defaultRepoOwner
-	}
-
-	repoResult, err := c.CreateRepo(resolvedOwner, repo)
-	if err != nil {
-		if !isAlreadyExistsError(err) {
-			return nil, fmt.Errorf("create repo %s/%s: %w", resolvedOwner, repo, err)
-		}
-		resolvedOwner = defaultRepoOwner
-	} else if parts := strings.SplitN(repoResult.FullName, "/", 2); len(parts) == 2 && parts[0] != "" {
-		resolvedOwner = parts[0]
-	}
-
-	release, err := c.CreateRelease(resolvedOwner, repo, tag)
-	if err != nil {
-		return nil, fmt.Errorf("create release %s/%s@%s: %w", resolvedOwner, repo, tag, err)
-	}
-
-	archiveAsset, err := c.UploadReleaseAsset(resolvedOwner, repo, release.ID, filepath.Base(packResult.ArchivePath), archiveBytes)
-	if err != nil {
-		return nil, fmt.Errorf("upload archive asset: %w", err)
-	}
-	manifestAsset, err := c.UploadReleaseAsset(resolvedOwner, repo, release.ID, filepath.Base(packResult.ManifestPath), manifestBytes)
-	if err != nil {
-		return nil, fmt.Errorf("upload manifest asset: %w", err)
-	}
-
-	return &SeedResult{
-		Owner:           resolvedOwner,
-		Repo:            repo,
-		Tag:             tag,
-		ReleaseID:       release.ID,
-		ArchiveAssetID:  archiveAsset.ID,
-		ManifestAssetID: manifestAsset.ID,
-		ArchiveBytes:    archiveBytes,
-		ManifestBytes:   manifestBytes,
+	return &packedReleaseAssets{
+		archiveName:   filepath.Base(packResult.ArchivePath),
+		archiveBytes:  archiveBytes,
+		manifestName:  filepath.Base(packResult.ManifestPath),
+		manifestBytes: manifestBytes,
 	}, nil
+}
+
+func tamperManifestSHA(manifestBytes []byte) ([]byte, error) {
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return nil, fmt.Errorf("decode manifest for tampering: %w", err)
+	}
+
+	shaValue, _ := manifest["sha256"].(string)
+	if shaValue == "" {
+		return nil, fmt.Errorf("manifest missing sha256 for tampering")
+	}
+	manifest["sha256"] = mutateHexString(shaValue)
+
+	tamperedManifestBytes, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode tampered manifest: %w", err)
+	}
+	return append(tamperedManifestBytes, '\n'), nil
+}
+
+func mutateHexString(value string) string {
+	if value == "" {
+		return value
+	}
+	var replacement byte = '0'
+	if value[0] == '0' {
+		replacement = '1'
+	}
+	return string(replacement) + value[1:]
+}
+
+func cloneBytes(data []byte) []byte {
+	if data == nil {
+		return nil
+	}
+	return append([]byte(nil), data...)
 }
 
 func (c *SeedClient) doJSON(method, path string, payload any, into any) error {

@@ -14,6 +14,8 @@ A harness author writes a toolset referencing `zendesk@v2.0.1` and it just works
 
 The core package model is built: `tool.Package` defines static tool/package types, `toolset.Builder` assembles request-scoped toolsets from `AddFromDir` (local source) and `AddFromArchive` (built .toolbox.pkg), `packaging.Pack` produces archives with sha256 integrity, `packaging.LoadArchive` verifies and loads them. The `registry/` package exists as a placeholder with a README. No remote package resolution exists yet.
 
+GitHub-related testing for this milestone is constrained to local validation, emulate-backed integration tests, CI/workflow configuration changes, and other read-only checks. Pushing to `main` is not part of the test strategy.
+
 ## Architecture / Key Patterns
 
 - **Go monorepo** with workspace (`go.work`) — main module `github.com/solidarity-ai/toolbox`

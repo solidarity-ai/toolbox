@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-26T22:41:58.777Z",
+  "exported_at": "2026-03-27T01:27:06.325Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -27,14 +27,14 @@
       "milestone_id": "M001-zku9aj",
       "id": "S01",
       "title": "Emulate lifecycle + happy-path fixtures",
-      "status": "pending",
+      "status": "complete",
       "risk": "high",
       "depends": [],
       "demo": "",
       "created_at": "2026-03-26T21:56:03.311Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-26T23:12:38.703Z",
+      "full_summary_md": "---\nid: S01\nparent: M001-zku9aj\nmilestone: M001-zku9aj\nprovides:\n  - emulatetest.Start(t) → *Server with BaseURL/Client for GitHub API testing\n  - SeedPackageRelease() → creates repos with real .toolbox.pkg release assets\n  - gitfixture.CreateTaggedRepo/CreateTaggedRepoFromDir → file:// cloneable repos at tags\n  - CI workflow with Node.js 22 and emulate pre-installed\nrequires:\n  []\naffects:\n  - S02\n  - S05\n  - S06\n  - S07\n  - S08\nkey_files:\n  - registry/testutil/emulatetest/emulatetest.go\n  - registry/testutil/emulatetest/seed.go\n  - registry/testutil/emulatetest/emulatetest_test.go\n  - registry/testutil/gitfixture/gitfixture.go\n  - registry/testutil/gitfixture/gitfixture_test.go\n  - .github/workflows/ci.yml\nkey_decisions:\n  - Use real git CLI via exec.Command rather than a Go git library — tests exercise actual CI behavior\n  - Singleton emulate subprocess per test binary via sync.Once — avoids port conflicts and startup overhead\n  - Store uploaded asset bytes in SeedResult to work around emulate binary download limitation\npatterns_established:\n  - emulatetest.Start(t) singleton pattern for subprocess-backed test fixtures\n  - gitfixture clone-based verification — create repo, clone to separate dir, verify from clone\n  - Explicit git user config (-c user.name=test) for CI-safe fixture creation\nobservability_surfaces:\n  - emulate stderr captured in buffer and logged on startup failure\n  - HTTP seed errors include status code + response body\n  - Test -v output shows emulate port, HTTP calls, and release metadata\ndrill_down_paths:\n  - .gsd/milestones/M001-zku9aj/slices/S01/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S01/tasks/T02-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S01/tasks/T03-SUMMARY.md\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-26T23:12:38.741Z\nblocker_discovered: false\n---\n\n# S01: Emulate lifecycle + happy-path fixtures\n\n**Built shared Go test infrastructure — emulate lifecycle manager, GitHub API seed builder, and local git fixture builder — that all downstream registry slices depend on.**\n\n## What Happened\n\nS01 delivered two independent test infrastructure packages and a CI update:\n\n**emulatetest** (`registry/testutil/emulatetest/`): Manages a singleton `emulate` subprocess per test binary. `Start(t)` finds a free port, launches `npx emulate start --service github`, polls `/rate_limit` for readiness (30s timeout), and returns a `*Server` with `BaseURL()`, `Client()` (pre-authed via RoundTripper), and `Port()`. The `SeedClient` creates repos, releases, and uploads assets via emulate's GitHub REST API. `SeedPackageRelease` is the high-level helper — it calls `packaging.Pack()` to produce real `.toolbox.pkg` archives, then uploads both the archive and manifest as release assets. `SeedResult` retains uploaded bytes so S05 can work around emulate's broken binary download (documented in code). Gracefully skips via `t.Skip` when npx is unavailable.\n\n**gitfixture** (`registry/testutil/gitfixture/`): Creates temporary git repos with tagged commits using real `git` CLI commands. `CreateTaggedRepo` writes arbitrary files; `CreateTaggedRepoFromDir` copies from an existing directory. `AddCommitAndTag` supports multi-tag histories. All repos use explicit git user config for CI compatibility. Tests verify by cloning to a separate temp dir and checking out tags.\n\n**CI** (`.github/workflows/ci.yml`): Added `actions/setup-node@v4` (Node 22) and `npm install -g emulate` so emulate tests run in GitHub Actions instead of being skipped.\n\n## Verification\n\nRan `go test ./registry/... -v -count=1 -timeout 60s` — all 6 tests across both packages passed. Verified CI config contains setup-node and emulate install steps. YAML validated via Ruby parser.\n\n## Requirements Advanced\n\n- R011 — Delivered emulate lifecycle manager, GitHub API seed builder with real .toolbox.pkg assets, git fixture builder, and CI integration. Happy-path coverage complete; failure scenarios deferred to S02.\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Deviations\n\nT02 added an `AddCommitAndTag` helper not in the original plan, enabling cleaner multi-tag tests. T03 used Ruby YAML validation instead of Python (PyYAML not installed locally).\n\n## Known Limitations\n\nemulate v0.3.0 asset binary download returns JSON instead of binary — documented in code, workaround via SeedResult.ArchiveBytes for S05.\n\n## Follow-ups\n\nS02 will add failure scenario builders (corrupt archives, missing assets, broken git repos) on top of these helpers.\n\n## Files Created/Modified\n\n- `registry/testutil/emulatetest/emulatetest.go` — Emulate subprocess lifecycle manager — singleton start, health polling, auth client\n- `registry/testutil/emulatetest/seed.go` — GitHub API seed builder — CreateRepo, CreateRelease, UploadReleaseAsset, SeedPackageRelease\n- `registry/testutil/emulatetest/emulatetest_test.go` — Integration tests for emulate lifecycle and seeding\n- `registry/testutil/gitfixture/gitfixture.go` — Git fixture builder — CreateTaggedRepo, CreateTaggedRepoFromDir, AddCommitAndTag\n- `registry/testutil/gitfixture/gitfixture_test.go` — Tests verifying git fixtures via clone + checkout\n- `.github/workflows/ci.yml` — Added setup-node@v4 (Node 22) and npm install -g emulate\n",
+      "full_uat_md": "# S01: Emulate lifecycle + happy-path fixtures — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-26T23:12:38.741Z\n\n# S01 UAT: Emulate lifecycle + happy-path fixtures\n\n## Preconditions\n- Node.js and npx available on PATH\n- Git available on PATH\n- Working directory: the M001-zku9aj worktree root\n\n## Test 1: Emulate lifecycle starts and responds\n1. Run `go test ./registry/testutil/emulatetest/ -run TestEmulateLifecycle -v -count=1 -timeout 60s`\n2. **Expected:** Test passes. Output shows emulate starting on a dynamic port. `GET /rate_limit` returns 200.\n\n## Test 2: Seed repo and release via emulate API\n1. Run `go test ./registry/testutil/emulatetest/ -run TestSeedRepoAndRelease -v -count=1 -timeout 60s`\n2. **Expected:** Test passes. Repo created (201), release created with tag \"v1.0.0\", release ID > 0.\n\n## Test 3: Seed full package release with real archives\n1. Run `go test ./registry/testutil/emulatetest/ -run TestSeedPackageRelease -v -count=1 -timeout 60s`\n2. **Expected:** Test passes. Release at tag \"v1.0.0\" has 2 assets: `calc.toolbox.pkg` and `toolbox.pkg.json`, both with size > 0.\n\n## Test 4: Git fixture — single tagged repo\n1. Run `go test ./registry/testutil/gitfixture/ -run TestCreateTaggedRepo -v -count=1 -timeout 30s`\n2. **Expected:** Test passes. Repo cloned to separate dir, tag v1.0.0 found, hello.txt contains \"hello\".\n\n## Test 5: Git fixture — repo from fixture directory\n1. Run `go test ./registry/testutil/gitfixture/ -run TestCreateTaggedRepoFromDir -v -count=1 -timeout 30s`\n2. **Expected:** Test passes. Tag v2.0.0 checked out, `toolbox.devpkg.json` exists and contains `\"name\": \"calc\"`.\n\n## Test 6: Git fixture — multiple tags\n1. Run `go test ./registry/testutil/gitfixture/ -run TestMultipleTags -v -count=1 -timeout 30s`\n2. **Expected:** Test passes. Both v1.0.0 and v2.0.0 tags exist. File contents differ between tags.\n\n## Test 7: Full registry test suite\n1. Run `go test ./registry/... -v -count=1 -timeout 60s`\n2. **Expected:** All tests pass across both packages with no port conflicts.\n\n## Test 8: CI workflow validity\n1. Run `grep -q 'setup-node' .github/workflows/ci.yml && grep -q 'npm install -g emulate' .github/workflows/ci.yml && echo PASS`\n2. **Expected:** Prints PASS. CI includes Node.js setup and emulate pre-install.\n\n## Edge case: npx not available\n1. If npx is removed from PATH, emulate tests should skip with message \"emulatetest: npx not available\" rather than fail.\n\n",
       "goal": "Build shared Go test infrastructure — emulate lifecycle manager, GitHub API seed builder, and local git fixture builder — that all downstream registry slices (S02, S05, S06, S07, S08) depend on.",
       "success_criteria": "## Must-Haves\n\n- Emulate lifecycle manager starts `emulate` once per test binary via `sync.Once`, polls for readiness, provides `BaseURL()` and `Client()` with auth pre-configured\n- Seed builder API creates repos, releases, and uploads real `.toolbox.pkg` assets (produced by `packaging.Pack()`) via emulate's GitHub REST API\n- Local git fixture builder creates temporary repos with tagged commits containing real package files\n- Integration tests prove all three subsystems work with real subprocess and git operations\n- CI workflow adds `setup-node` with Node.js and pre-installs the `emulate` npm package\n- All code lives in `registry/testutil/` (not top-level `testutil/`)\n\n## Requirement Impact\n\n- **Requirements touched**: R011 — this slice directly advances R011 (shared test fixtures, emulate lifecycle, CI support). Failure scenarios deferred to S02.\n- **Re-verify**: N/A — no prior functionality affected\n- **Decisions revisited**: none — D001 (emulate strategy) is confirmed and implemented here\n\n## Proof Level\n\n- This slice proves: integration (real subprocess lifecycle, real HTTP calls to emulate, real git operations)\n- Real runtime required: yes (emulate Node.js subprocess, git CLI commands)\n- Human/UAT required: no\n\n## Verification\n\n- `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` — emulate starts, repo + release + asset created, release-by-tag returns correct metadata\n- `go test ./registry/testutil/gitfixture/ -v -count=1 -timeout 30s` — tagged repo created, clone works, files present at tag\n- `go test ./registry/... -v -count=1 -timeout 60s` — all registry tests pass together\n\n## Observability / Diagnostics\n\n- Runtime signals: emulate subprocess stderr captured and logged on startup failure; HTTP response status codes from seed API calls logged in tests\n- Inspection surfaces: `t.Log()` output in test verbose mode; emulate process stderr for debugging startup issues\n- Failure visibility: emulate start timeout includes captured stderr; seed API errors include HTTP status + response body; git fixture errors include git command stderr\n- Redaction constraints: none (test-only tokens)\n\n## Integration Closure\n\n- Upstream surfaces consumed: `packaging.Pack()` from `packaging/packaging.go`; `testutil/fixtures/fixtures.go` SourceDirs(); fixture packages in `testutil/fixtures/toolbox.pkgs/calc/`\n- New wiring introduced: `registry/testutil/emulatetest/` and `registry/testutil/gitfixture/` packages — no runtime hookup, test infrastructure only\n- What remains: S02 extends seed builder for failure scenarios; S05/S06/S07/S08 import these fixtures for resolver integration tests",
       "proof_level": "integration",
@@ -57,11 +57,11 @@
       "completed_at": null,
       "full_summary_md": "",
       "full_uat_md": "",
-      "goal": "Extend test infrastructure with a builder pattern for constructing failure scenarios that S05/S06 resolver tests need.",
-      "success_criteria": "",
-      "proof_level": "",
-      "integration_closure": "",
-      "observability_impact": "",
+      "goal": "Add failure scenario seed helpers to emulatetest and gitfixture packages so downstream resolver slices (S05, S06) can test error paths: corrupt archives, mismatched hashes, missing assets, empty releases, broken git repos.",
+      "success_criteria": "- `SeedCorruptArchiveRelease`, `SeedMismatchedHashRelease`, `SeedMissingAssetRelease`, `SeedEmptyRelease` exist in `emulatetest/seed.go` and are tested\n- `CreateBrokenRepo`, `CreateRepoMissingTag`, `CreateCorruptPackageRepo` exist in `gitfixture/gitfixture.go` and are tested\n- `go test ./registry/... -v -count=1 -timeout 60s` passes with no regressions\n- Each failure builder test verifies the artifact is broken in the expected way",
+      "proof_level": "contract — each builder produces a specific broken artifact verified by test",
+      "integration_closure": "Upstream: `emulatetest/seed.go` SeedClient + SeedResult pattern, `gitfixture/gitfixture.go` CreateTaggedRepo pattern. New wiring: none — new exported functions only. Remains: S05/S06 consume these builders for resolver error-path tests.",
+      "observability_impact": "Failure builders return descriptive errors with context (asset name, repo, tag). Test output at -v shows which failure scenario was seeded.",
       "sequence": 0,
       "replan_triggered_at": null
     },
@@ -304,7 +304,7 @@
       "narrative": "",
       "verification_result": "",
       "duration": "",
-      "completed_at": "2026-03-26T22:39:39.339Z",
+      "completed_at": "2026-03-27T01:22:54.898Z",
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
@@ -415,11 +415,92 @@
       "observability_impact": "",
       "full_plan_md": "",
       "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S02",
+      "id": "T01",
+      "title": "Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.",
+      "status": "complete",
+      "one_liner": "Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.",
+      "narrative": "Extended registry/testutil/emulatetest/seed.go with four exported helpers: SeedCorruptArchiveRelease, SeedMismatchedHashRelease, SeedMissingAssetRelease, and SeedEmptyRelease. Kept them aligned with the existing SeedPackageRelease contract by factoring common package packing and release-asset upload logic into shared helpers, then varying only the uploaded bytes or asset selection per scenario. Added package tests in registry/testutil/emulatetest/emulatetest_test.go to verify corrupt archives fail package loading, mismatched manifests disagree with the actual archive checksum, missing-asset releases expose exactly one expected asset, and empty releases expose zero assets. During verification, corrected the tests to use the exported packaging.LoadArchive wrapper instead of an internal package import, and relaxed the corrupt-archive assertion to require LoadArchive failure without assuming it fails specifically during extraction because checksum validation trips first for random bytes.",
+      "verification_result": "Ran the task-plan verification command `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios. An LSP diagnostics check was attempted afterward, but no Go language server was available in this environment.",
+      "duration": "",
+      "completed_at": "2026-03-27T01:27:06.153Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "registry/testutil/emulatetest/seed.go",
+        "registry/testutil/emulatetest/emulatetest_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S02/tasks/T01-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Reused a shared internal pack-and-upload pipeline so all failure helpers preserve the SeedPackageRelease contract while varying only asset bytes or presence.",
+        "Validated corrupt archive behavior through the exported packaging.LoadArchive API instead of importing packaging/internal/archive from a sibling package test."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S02\nmilestone: M001-zku9aj\nkey_files:\n  - registry/testutil/emulatetest/seed.go\n  - registry/testutil/emulatetest/emulatetest_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S02/tasks/T01-SUMMARY.md\nkey_decisions:\n  - Reused a shared internal pack-and-upload pipeline so all failure helpers preserve the SeedPackageRelease contract while varying only asset bytes or presence.\n  - Validated corrupt archive behavior through the exported packaging.LoadArchive API instead of importing packaging/internal/archive from a sibling package test.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-27T01:27:06.179Z\nblocker_discovered: false\n---\n\n# T01: Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.\n\n**Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.**\n\n## What Happened\n\nExtended registry/testutil/emulatetest/seed.go with four exported helpers: SeedCorruptArchiveRelease, SeedMismatchedHashRelease, SeedMissingAssetRelease, and SeedEmptyRelease. Kept them aligned with the existing SeedPackageRelease contract by factoring common package packing and release-asset upload logic into shared helpers, then varying only the uploaded bytes or asset selection per scenario. Added package tests in registry/testutil/emulatetest/emulatetest_test.go to verify corrupt archives fail package loading, mismatched manifests disagree with the actual archive checksum, missing-asset releases expose exactly one expected asset, and empty releases expose zero assets. During verification, corrected the tests to use the exported packaging.LoadArchive wrapper instead of an internal package import, and relaxed the corrupt-archive assertion to require LoadArchive failure without assuming it fails specifically during extraction because checksum validation trips first for random bytes.\n\n## Verification\n\nRan the task-plan verification command `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios. An LSP diagnostics check was attempted afterward, but no Go language server was available in this environment.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` | 0 | ✅ pass | 3693ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `registry/testutil/emulatetest/seed.go`\n- `registry/testutil/emulatetest/emulatetest_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S02/tasks/T01-SUMMARY.md`\n",
+      "description": "Add four failure scenario helpers to emulatetest/seed.go:\n\n1. `SeedCorruptArchiveRelease(owner, repo, tag, pkgDir)` — packs a real package, uploads valid manifest but replaces archive bytes with random garbage. Returns SeedResult with corrupt ArchiveBytes.\n2. `SeedMismatchedHashRelease(owner, repo, tag, pkgDir)` — packs a real package, uploads valid archive but modifies the manifest sha256 to a wrong value before uploading. Returns SeedResult with real ArchiveBytes and tampered ManifestBytes.\n3. `SeedMissingAssetRelease(owner, repo, tag, pkgDir, mode)` — creates release with only one asset. `mode` selects which is missing: \"archive\" (manifest only) or \"manifest\" (archive only).\n4. `SeedEmptyRelease(owner, repo, tag)` — creates repo + release with zero assets.\n\nAll helpers follow the existing SeedPackageRelease pattern: create repo (ignore already-exists), create release, upload assets selectively. Return SeedResult so S05 can access bytes directly (emulate binary download workaround).\n\nAdd tests in emulatetest_test.go verifying:\n- Corrupt archive: SeedResult.ArchiveBytes is not valid (attempt LoadArchive fails)\n- Mismatched hash: manifest sha256 does not match actual archive sha256\n- Missing asset: release has exactly 1 asset with expected name\n- Empty release: release has 0 assets",
+      "estimate": "45m",
+      "files": [
+        "registry/testutil/emulatetest/seed.go",
+        "registry/testutil/emulatetest/emulatetest_test.go"
+      ],
+      "verify": "go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s",
+      "inputs": [
+        "`registry/testutil/emulatetest/seed.go` — existing SeedClient, SeedPackageRelease, SeedResult pattern",
+        "`registry/testutil/emulatetest/emulatetest.go` — Server.Seed(), Start(t) lifecycle",
+        "`registry/testutil/emulatetest/emulatetest_test.go` — existing test patterns",
+        "`packaging/internal/archive/archive.go` — LoadArchive validation chain (reference only)"
+      ],
+      "expected_output": [
+        "`registry/testutil/emulatetest/seed.go` — four new exported Seed* functions",
+        "`registry/testutil/emulatetest/emulatetest_test.go` — four new test functions"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S02",
+      "id": "T02",
+      "title": "Add git fixture failure builders and tests, verify full suite",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Add three failure scenario helpers to gitfixture/gitfixture.go:\n\n1. `CreateBrokenRepo(t, tag)` — creates a tagged repo with no `toolbox.devpkg.json` (just a README). S06 resolver expects this file; its absence is the failure.\n2. `CreateRepoMissingTag(t, existingTag, missingTag)` — creates repo tagged at existingTag. Returns repo path. Caller can attempt checkout of missingTag which won't exist.\n3. `CreateCorruptPackageRepo(t, tag)` — creates tagged repo where `toolbox.devpkg.json` contains invalid JSON (`{broken`).\n\nAll helpers use existing runGit/commitAllAndTag internals. Follow the established pattern: t.Helper(), t.TempDir(), explicit git user config.\n\nAdd tests in gitfixture_test.go verifying:\n- Broken repo: clone + ls shows no toolbox.devpkg.json\n- Missing tag: clone succeeds, `git tag -l missingTag` returns empty\n- Corrupt package: toolbox.devpkg.json exists but json.Unmarshal fails\n\nFinally run `go test ./registry/... -v -count=1 -timeout 60s` to confirm no regressions across both packages.",
+      "estimate": "30m",
+      "files": [
+        "registry/testutil/gitfixture/gitfixture.go",
+        "registry/testutil/gitfixture/gitfixture_test.go"
+      ],
+      "verify": "go test ./registry/... -v -count=1 -timeout 60s",
+      "inputs": [
+        "`registry/testutil/gitfixture/gitfixture.go` — existing CreateTaggedRepo, runGit, commitAllAndTag",
+        "`registry/testutil/gitfixture/gitfixture_test.go` — existing test patterns"
+      ],
+      "expected_output": [
+        "`registry/testutil/gitfixture/gitfixture.go` — three new exported Create* functions",
+        "`registry/testutil/gitfixture/gitfixture_test.go` — three new test functions"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
     }
   ],
   "decisions": [
     {
-      "seq": 18,
+      "seq": 58,
       "id": "D001",
       "when_context": "M001-zku9aj",
       "scope": "library",
@@ -431,7 +512,7 @@
       "superseded_by": null
     },
     {
-      "seq": 19,
+      "seq": 59,
       "id": "D002",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -443,7 +524,7 @@
       "superseded_by": null
     },
     {
-      "seq": 20,
+      "seq": 60,
       "id": "D003",
       "when_context": "M001-zku9aj",
       "scope": "arch",
@@ -455,7 +536,7 @@
       "superseded_by": null
     },
     {
-      "seq": 21,
+      "seq": 61,
       "id": "D004",
       "when_context": "M001-zku9aj",
       "scope": "scope",
@@ -467,7 +548,7 @@
       "superseded_by": null
     },
     {
-      "seq": 22,
+      "seq": 62,
       "id": "D005",
       "when_context": "M001-zku9aj",
       "scope": "convention",
@@ -479,7 +560,7 @@
       "superseded_by": null
     },
     {
-      "seq": 23,
+      "seq": 63,
       "id": "D006",
       "when_context": "M001-zku9aj/S01/T01",
       "scope": "test-infrastructure",
@@ -488,6 +569,18 @@
       "rationale": "A live probe against emulate v0.3.0 showed /admin/orgs and /orgs/:owner/repos returning 404, while /user/repos succeeds and returns full_name admin/<repo>. Aligning the seed helper with that real behavior keeps the lifecycle tests stable and gives downstream registry slices a consistent owner model.",
       "revisable": "Yes",
       "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 64,
+      "id": "D007",
+      "when_context": "M001-zku9aj/S01/T03",
+      "scope": "workflow/testing",
+      "decision": "GitHub testing branch policy",
+      "choice": "Do not push to `main` when testing GitHub-related workflow or integration changes. Use local verification, emulate-backed tests, CI/workflow linting, and read-only inspection by default; if remote execution is needed later, use a non-`main` branch only with explicit user confirmation.",
+      "rationale": "The user overrode the previous working assumption during S01/T03. The milestone already proves GitHub behavior through emulate and local/CI checks, so pushing to the protected mainline adds risk without adding required evidence. This supersedes any implicit plan assumption that GitHub testing could use `main` as a verification path.",
+      "revisable": "No",
+      "made_by": "human",
       "superseded_by": null
     }
   ],
@@ -590,6 +683,17 @@
       "verdict": "✅ pass",
       "duration_ms": 5900,
       "created_at": "2026-03-26T22:41:58.747Z"
+    },
+    {
+      "id": 10,
+      "task_id": "T01",
+      "slice_id": "S02",
+      "milestone_id": "M001-zku9aj",
+      "command": "go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 3693,
+      "created_at": "2026-03-27T01:27:06.153Z"
     }
   ]
 }

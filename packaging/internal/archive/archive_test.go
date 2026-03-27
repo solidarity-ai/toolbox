@@ -220,7 +220,7 @@ func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 	}
 }
 
-func TestLoadArchiveValidatesDistManifest(t *testing.T) {
+func TestLoadArchiveAcceptsMissingIdempotent(t *testing.T) {
 	t.Parallel()
 
 	dir := setupTestPackageWithoutIdempotent(t)
@@ -236,11 +236,8 @@ func TestLoadArchiveValidatesDistManifest(t *testing.T) {
 	}
 
 	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
-	if err == nil {
-		t.Fatalf("expected dist validation error")
-	}
-	if !strings.Contains(err.Error(), "idempotent") {
-		t.Fatalf("expected dist validation error mentioning idempotent, got: %v", err)
+	if err != nil {
+		t.Fatalf("expected no dist validation error for missing idempotent, got: %v", err)
 	}
 }
 

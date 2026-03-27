@@ -1,7 +1,7 @@
 {
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "ea5afc0c9b4ca9a458fb46c568d7f042294fadeb5509b3944721e51c16513db0",
+  "sha256": "990fd88a493d8a0ba4b43cd2fdd3ab242faeff119e15d736b260df4dd30e395a",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",
@@ -20,6 +20,44 @@
       "idempotent": true,
       "accessMode": "readOnly",
       "description": "A minimal no-op tool."
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-description.ts",
+      "accessMode": "irreversible"
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-param.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "Transform data with a configurable pipeline."
+    },
+    {
+      "entry_ts": "tools/edge-cases.irreversible.ts",
+      "accessMode": "irreversible",
+      "description": "Permanently delete all records matching the filter."
+    },
+    {
+      "entry_ts": "tools/edge-cases.reversible.ts",
+      "idempotent": true,
+      "accessMode": "reversible",
+      "description": "Create a draft document."
+    },
+    {
+      "entry_ts": "tools/edge-cases.named-export.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "Compute the hash of input data."
+    },
+    {
+      "entry_ts": "tools/edge-cases.async-complex.ts",
+      "accessMode": "irreversible",
+      "description": "Process items in batch asynchronously."
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-params.ts",
+      "idempotent": true,
+      "accessMode": "readOnly",
+      "description": "Return the current server status."
     }
   ]
 }

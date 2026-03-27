@@ -187,7 +187,24 @@ func InferAccessMode(entryTS string) tooldef.AccessMode {
 // InferToolName derives the tool name from the entry filename.
 func InferToolName(entryTS string) string {
 	base := filepath.Base(entryTS)
-	return strings.TrimSuffix(base, filepath.Ext(base))
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	// Convert kebab-case segments to camelCase: "async-complex" → "asyncComplex"
+	parts := strings.Split(name, ".")
+	for i, part := range parts {
+		parts[i] = kebabToCamel(part)
+	}
+	return strings.Join(parts, ".")
+}
+
+// kebabToCamel converts a kebab-case string to camelCase.
+func kebabToCamel(s string) string {
+	segments := strings.Split(s, "-")
+	for i := 1; i < len(segments); i++ {
+		if len(segments[i]) > 0 {
+			segments[i] = strings.ToUpper(segments[i][:1]) + segments[i][1:]
+		}
+	}
+	return strings.Join(segments, "")
 }
 
 // ResourceParam describes one inferred resource parameter.

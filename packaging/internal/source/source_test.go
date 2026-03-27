@@ -103,7 +103,7 @@ func TestLoadDir(t *testing.T) {
 func TestLoadDirWithMode(t *testing.T) {
 	t.Parallel()
 
-	t.Run("dev mode warns on missing idempotent", func(t *testing.T) {
+	t.Run("dev mode no warning on missing idempotent", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
@@ -117,12 +117,12 @@ func TestLoadDirWithMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadDirWithMode() error: %v", err)
 		}
-		if len(result.Warnings) != 1 {
-			t.Fatalf("expected 1 warning, got %d", len(result.Warnings))
+		if len(result.Warnings) != 0 {
+			t.Fatalf("expected 0 warnings, got %d: %v", len(result.Warnings), result.Warnings)
 		}
 	})
 
-	t.Run("dist mode errors on missing idempotent", func(t *testing.T) {
+	t.Run("dist mode accepts missing idempotent", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
@@ -133,11 +133,8 @@ func TestLoadDirWithMode(t *testing.T) {
   ]
 }`)
 		_, err := LoadDirWithMode(dir, manifest.ValidationModeDist)
-		if err == nil {
-			t.Fatalf("expected dist validation error")
-		}
-		if !strings.Contains(err.Error(), "idempotent") {
-			t.Fatalf("expected error about idempotent, got: %v", err)
+		if err != nil {
+			t.Fatalf("expected no error for missing idempotent, got: %v", err)
 		}
 	})
 }

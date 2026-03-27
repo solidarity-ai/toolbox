@@ -390,12 +390,14 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 	}
 
 	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
-	result := h.CallTool("http-client.fetch", map[string]any{})
+	result := h.CallTool("httpClient.fetch", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-	if len(result.Content) == 0 {
-		t.Fatalf("expected text content")
+
+	structured := mcptest.StructuredMap(t, result)
+	if got := structured["tool"]; got != "httpClient.fetch" {
+		t.Fatalf("expected tool httpClient.fetch, got %#v", got)
 	}
 	text, ok := mcp.AsTextContent(result.Content[0])
 	if !ok {
@@ -446,7 +448,7 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(tooltest.FetchTestToolset(t)))
 
 	// Invoke the fetch-test.get tool with the test server URL.
-	result := h.CallTool("fetch-test.get", map[string]any{
+	result := h.CallTool("fetchTest.get", map[string]any{
 		"url": srv.URL,
 	})
 	if result.IsError {

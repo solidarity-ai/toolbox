@@ -1,0 +1,300 @@
+{
+  "edgeCases.asyncComplex": {
+    "description": "Process items in batch asynchronously.",
+    "properties": {
+      "concurrency": {
+        "description": "Max parallel operations",
+        "type": "number"
+      },
+      "ids": {
+        "description": "Array of item IDs to process",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "ids"
+    ],
+    "type": "object"
+  },
+  "edgeCases.complex": {
+    "definitions": {
+      "OutputConfig": {
+        "description": "Nested config with deeply nested objects",
+        "properties": {
+          "columns": {
+            "description": "Column configuration",
+            "properties": {
+              "exclude": {
+                "description": "Which fields to exclude",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "include": {
+                "description": "Which fields to include",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "format": {
+            "description": "Output format",
+            "enum": [
+              "csv",
+              "json",
+              "table"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PageInfo": {
+        "description": "A paginated item in results",
+        "properties": {
+          "page": {
+            "description": "Current page number (1-indexed)",
+            "type": "number"
+          },
+          "pageSize": {
+            "description": "Maximum items per page",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "SearchFilter": {
+        "description": "Filter criteria for searching",
+        "properties": {
+          "field": {
+            "description": "Field name to filter on",
+            "type": "string"
+          },
+          "op": {
+            "default": "eq",
+            "description": "Comparison operator",
+            "enum": [
+              "contains",
+              "eq",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "neq"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "The value to compare against",
+            "type": [
+              "boolean",
+              "number",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "description": "Search for records with complex filtering, pagination, and output options.",
+    "properties": {
+      "dryRun": {
+        "description": "If true, validate the query without executing",
+        "type": "boolean"
+      },
+      "filters": {
+        "description": "Array of filter criteria to apply",
+        "items": {
+          "$ref": "#/definitions/SearchFilter"
+        },
+        "type": "array"
+      },
+      "output": {
+        "$ref": "#/definitions/OutputConfig",
+        "description": "Output formatting configuration"
+      },
+      "pagination": {
+        "$ref": "#/definitions/PageInfo",
+        "description": "Pagination settings"
+      },
+      "query": {
+        "description": "The search query string",
+        "type": "string"
+      },
+      "tags": {
+        "description": "Optional tags to narrow results",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "query",
+      "filters"
+    ],
+    "type": "object"
+  },
+  "edgeCases.irreversible": {
+    "description": "Permanently delete all records matching the filter.",
+    "properties": {
+      "confirm": {
+        "description": "Must be true to execute",
+        "type": "boolean"
+      },
+      "filter": {
+        "description": "SQL-like filter expression",
+        "type": "string"
+      }
+    },
+    "required": [
+      "filter",
+      "confirm"
+    ],
+    "type": "object"
+  },
+  "edgeCases.minimal": {},
+  "edgeCases.multilineParam": {
+    "description": "Transform data with a configurable pipeline.",
+    "properties": {
+      "input": {
+        "description": "The raw input string to transform",
+        "type": "string"
+      },
+      "options": {
+        "description": "Optional configuration",
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "verbose": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "pipeline": {
+        "description": "A sequence of transformation steps to apply.\nEach step is executed in order, and the output of one step\nbecomes the input of the next.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "input",
+      "pipeline"
+    ],
+    "type": "object"
+  },
+  "edgeCases.namedExport": {
+    "description": "Compute the hash of input data.",
+    "properties": {
+      "algorithm": {
+        "description": "Hash algorithm to use",
+        "enum": [
+          "md5",
+          "sha256",
+          "sha512"
+        ],
+        "type": "string"
+      },
+      "data": {
+        "description": "The data to hash",
+        "type": "string"
+      }
+    },
+    "required": [
+      "data",
+      "algorithm"
+    ],
+    "type": "object"
+  },
+  "edgeCases.noDescription": {
+    "properties": {
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "x",
+      "y"
+    ],
+    "type": "object"
+  },
+  "edgeCases.noParams": {},
+  "edgeCases.paramsObject": {
+    "description": "Process a batch of items with a specified action.",
+    "properties": {
+      "params": {
+        "description": "The batch operation parameters",
+        "properties": {
+          "action": {
+            "description": "Action to take on each item",
+            "enum": [
+              "archive",
+              "delete",
+              "restore"
+            ],
+            "type": "string"
+          },
+          "callbackUrl": {
+            "description": "Optional callback URL for completion notification",
+            "type": "string"
+          },
+          "continueOnError": {
+            "description": "Whether to continue on individual item failures",
+            "type": "boolean"
+          },
+          "ids": {
+            "description": "List of item IDs to process",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "params"
+    ],
+    "type": "object"
+  },
+  "edgeCases.reversible": {
+    "description": "Create a draft document.",
+    "properties": {
+      "content": {
+        "description": "Initial content",
+        "type": "string"
+      },
+      "tags": {
+        "description": "Optional categorization tags",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": {
+        "description": "Document title",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "content"
+    ],
+    "type": "object"
+  }
+}

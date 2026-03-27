@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -66,7 +65,7 @@ func TestPackAndLoadArchive(t *testing.T) {
 	}
 }
 
-func TestPackDistValidation(t *testing.T) {
+func TestPackAcceptsMissingIdempotent(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -77,14 +76,12 @@ func TestPackDistValidation(t *testing.T) {
     { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
   ]
 }`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
 
 	outDir := t.TempDir()
 	_, err := packaging.Pack(dir, outDir)
-	if err == nil {
-		t.Fatalf("expected dist validation error for missing idempotent")
-	}
-	if !strings.Contains(err.Error(), "idempotent") {
-		t.Fatalf("expected error about idempotent, got: %v", err)
+	if err != nil {
+		t.Fatalf("expected no error for missing idempotent, got: %v", err)
 	}
 }
 

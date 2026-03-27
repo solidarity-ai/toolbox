@@ -39,7 +39,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["entry_ts", "idempotent", "accessMode"],
+        "required": ["entry_ts", "accessMode"],
         "properties": {
           "entry_ts": {
             "type": "string",

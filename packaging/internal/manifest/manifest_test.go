@@ -242,7 +242,7 @@ func TestValidateCompiled(t *testing.T) {
 			mode: ValidationModeDist,
 		},
 		{
-			name: "missing idempotent warns in dev",
+			name: "missing idempotent valid in dev",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -250,11 +250,10 @@ func TestValidateCompiled(t *testing.T) {
 					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReadOnly},
 				},
 			},
-			mode:         ValidationModeDev,
-			wantWarnings: 1,
+			mode: ValidationModeDev,
 		},
 		{
-			name: "missing idempotent errors in dist",
+			name: "missing idempotent valid in dist",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -262,8 +261,7 @@ func TestValidateCompiled(t *testing.T) {
 					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReversible},
 				},
 			},
-			mode:    ValidationModeDist,
-			wantErr: `"idempotent"`,
+			mode: ValidationModeDist,
 		},
 		{
 			name: "missing accessMode warns in dev",

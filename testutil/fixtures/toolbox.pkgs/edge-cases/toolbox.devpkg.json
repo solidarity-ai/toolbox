@@ -10,6 +10,27 @@
     },
     {
       "entry_ts": "tools/edge-cases.minimal.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-description.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-param.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.irreversible.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.reversible.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.named-export.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.async-complex.ts"
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-params.ts"
     }
   ]
 }

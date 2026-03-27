@@ -18,6 +18,18 @@ import (
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
+// propInfoSlice returns Properties() for the given type, or nil.
+func propInfoSlice(pt *toolbox.ParamsType) []toolbox.PropertyInfo {
+	if pt == nil || !pt.IsObject() {
+		return nil
+	}
+	props := pt.Properties()
+	if len(props) == 0 {
+		return nil
+	}
+	return props
+}
+
 // Run is the smallest useful codemode seam for outside-in tests.
 //
 // It intentionally stays narrow:
@@ -255,7 +267,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			if pt == nil || !pt.IsObject() {
 				continue
 			}
-			props := returnTypeProperties(pt)
+			props := propInfoSlice(pt)
 			if len(props) == 0 {
 				continue
 			}
@@ -312,7 +324,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	// Used to detect shared return types.
 	type sharedInfo struct {
 		typeName   string
-		properties []returnPropInfo
+		properties []toolbox.PropertyInfo
 	}
 	sharedReturnTypes := map[string]*sharedInfo{}
 
@@ -328,12 +340,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		if !unwrapped.IsObject() {
 			continue
 		}
-		propNames := unwrapped.PropertyNames()
-		if len(propNames) == 0 {
-			continue
-		}
-
-		props := returnTypeProperties(unwrapped)
+		props := propInfoSlice(unwrapped)
 		if len(props) == 0 {
 			continue
 		}
@@ -342,9 +349,9 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		hasDesc := false
 		hasMultiLineDesc := false
 		for _, p := range props {
-			if p.description != "" {
+			if p.Description != "" {
 				hasDesc = true
-				if strings.Contains(p.description, "\n") {
+				if strings.Contains(p.Description, "\n") {
 					hasMultiLineDesc = true
 				}
 			}
@@ -408,11 +415,11 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		if !unwrapped.IsObject() {
 			continue
 		}
-		props := returnTypeProperties(unwrapped)
-		if len(props) == 0 {
+		cProps := propInfoSlice(unwrapped)
+		if len(cProps) == 0 {
 			continue
 		}
-		key := canonicalReturnTypeKey(props)
+		key := canonicalReturnTypeKey(cProps)
 		canonicalUsage[key]++
 	}
 
@@ -430,8 +437,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			continue
 		}
 		unwrapped := rt.UnwrapPromise()
-		props := returnTypeProperties(unwrapped)
-		key := canonicalReturnTypeKey(props)
+		pProps := propInfoSlice(unwrapped)
+		key := canonicalReturnTypeKey(pProps)
 		if canonicalUsage[key] > 1 {
 			shared := sharedReturnTypes[key]
 			returnTypes[toolName] = returnTypeInfo{mode: "named", typeName: shared.typeName}
@@ -472,28 +479,26 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 
 		unwrapped := tool.Sig.Return().UnwrapPromise()
-		props := returnTypeProperties(unwrapped)
+		props := propInfoSlice(unwrapped)
 
 		fmt.Fprintf(&b, "interface %s {\n", info.typeName)
-		schema := unwrapped.ToJSONSchema()
-		reqSet := jsonSchemaRequiredSet(schema)
 		for _, p := range props {
-			if p.description != "" {
-				if strings.Contains(p.description, "\n") {
+			if p.Description != "" {
+				if strings.Contains(p.Description, "\n") {
 					b.WriteString("  /**\n")
-					for _, line := range strings.Split(p.description, "\n") {
+					for _, line := range strings.Split(p.Description, "\n") {
 						fmt.Fprintf(&b, "   * %s\n", line)
 					}
 					b.WriteString("   */\n")
 				} else {
-					fmt.Fprintf(&b, "  /** %s */\n", p.description)
+					fmt.Fprintf(&b, "  /** %s */\n", p.Description)
 				}
 			}
 			optional := ""
-			if !reqSet[p.name] {
+			if p.Optional {
 				optional = "?"
 			}
-			fmt.Fprintf(&b, "  %s%s: %s;\n", p.name, optional, p.tsType)
+			fmt.Fprintf(&b, "  %s%s: %s;\n", p.Name, optional, p.Type.ToTS())
 		}
 		b.WriteString("}\n\n")
 	}
@@ -636,98 +641,6 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	return b.String()
 }
 
-// returnPropInfo holds property-level information extracted from a return type.
-type returnPropInfo struct {
-	name        string
-	tsType      string
-	description string
-	required    bool
-}
-
-// returnTypeProperties extracts property information from an object ParamsType
-// by combining PropertyNames() with ToJSONSchema() for descriptions.
-func returnTypeProperties(pt *toolbox.ParamsType) []returnPropInfo {
-	if pt == nil || !pt.IsObject() {
-		return nil
-	}
-	names := pt.PropertyNames()
-	if len(names) == 0 {
-		return nil
-	}
-
-	schema := pt.ToJSONSchema()
-	reqSet := jsonSchemaRequiredSet(schema)
-
-	// Get the properties map from the JSON schema.
-	propsMap, _ := schema["properties"].(map[string]any)
-
-	var result []returnPropInfo
-	for _, name := range names {
-		var desc string
-		if propsMap != nil {
-			if propSchema, ok := propsMap[name].(map[string]any); ok {
-				desc, _ = propSchema["description"].(string)
-			}
-		}
-
-		// Get the TS type for this property. We use the full type's ToTS() and
-		// extract per-property types by removing other properties.
-		propType := pt.RemoveProperties(removeAllExcept(names, name)...).ToTS()
-		// The result of ToTS() for a single-property object is like "{ name?: type }".
-		// We need to extract just the type part.
-		propType = extractSinglePropertyType(propType, name)
-
-		result = append(result, returnPropInfo{
-			name:        name,
-			tsType:      propType,
-			description: desc,
-			required:    reqSet[name],
-		})
-	}
-	return result
-}
-
-// removeAllExcept returns all names except the given one.
-func removeAllExcept(names []string, keep string) []string {
-	var result []string
-	for _, n := range names {
-		if n != keep {
-			result = append(result, n)
-		}
-	}
-	return result
-}
-
-// extractSinglePropertyType extracts the type from a single-property object
-// type string like "{ name?: type }" or "{ name: type }".
-func extractSinglePropertyType(objectTS string, propName string) string {
-	// Look for "name?: " or "name: " pattern.
-	for _, pattern := range []string{propName + "?: ", propName + ": "} {
-		idx := strings.Index(objectTS, pattern)
-		if idx >= 0 {
-			rest := objectTS[idx+len(pattern):]
-			// Remove trailing " }" or "}"
-			rest = strings.TrimSuffix(rest, " }")
-			rest = strings.TrimSuffix(rest, "}")
-			return rest
-		}
-	}
-	return objectTS
-}
-
-// jsonSchemaRequiredSet returns the set of required property names from a JSON schema.
-func jsonSchemaRequiredSet(schema map[string]any) map[string]bool {
-	reqSet := map[string]bool{}
-	if reqArr, ok := schema["required"].([]any); ok {
-		for _, r := range reqArr {
-			if s, ok := r.(string); ok {
-				reqSet[s] = true
-			}
-		}
-	}
-	return reqSet
-}
-
 // collectDefinitionStructures builds a map from canonical type structure key
 // to the $ref definition name. This allows matching a shared return type's
 // structure to the original source type name (e.g. "Ticket").
@@ -735,125 +648,22 @@ func collectDefinitionStructures(pt *toolbox.ParamsType, out map[string]string) 
 	if pt == nil {
 		return
 	}
-	decls := pt.Declarations()
-	if decls == "" {
-		return
-	}
-	// Each declaration is "type Foo = <body>;\n".
-	// We need to parse out the name and match it to a structural key.
-	// The definitions are available via the ParamsType's ToJSONSchema under "definitions".
-	schema := pt.ToJSONSchema()
-	defsRaw, ok := schema["definitions"]
-	if !ok {
-		return
-	}
-	defs, ok := defsRaw.(map[string]any)
-	if !ok {
-		return
-	}
-	for name, defRaw := range defs {
-		defMap, ok := defRaw.(map[string]any)
-		if !ok {
+	defTypes := pt.DefinitionTypes()
+	for name, defType := range defTypes {
+		props := propInfoSlice(defType)
+		if len(props) == 0 {
 			continue
 		}
-		// Build returnPropInfo from the definition's properties.
-		propsRaw, ok := defMap["properties"].(map[string]any)
-		if !ok {
-			continue
-		}
-		reqSet := map[string]bool{}
-		if reqArr, ok := defMap["required"].([]any); ok {
-			for _, r := range reqArr {
-				if s, ok := r.(string); ok {
-					reqSet[s] = true
-				}
-			}
-		}
-		// Sort property names for deterministic ordering.
-		var propNames []string
-		for pn := range propsRaw {
-			propNames = append(propNames, pn)
-		}
-		sort.Strings(propNames)
-
-		var props []returnPropInfo
-		for _, pn := range propNames {
-			propSchema, ok := propsRaw[pn].(map[string]any)
-			if !ok {
-				continue
-			}
-			desc, _ := propSchema["description"].(string)
-			// Get TypeScript type from the JSON Schema property.
-			tsType := jsonSchemaPropertyToTS(propSchema)
-			props = append(props, returnPropInfo{
-				name:        pn,
-				tsType:      tsType,
-				description: desc,
-				required:    reqSet[pn],
-			})
-		}
-		if len(props) > 0 {
-			key := canonicalReturnTypeKey(props)
-			if _, exists := out[key]; !exists {
-				out[key] = name
-			}
+		key := canonicalReturnTypeKey(props)
+		if _, exists := out[key]; !exists {
+			out[key] = name
 		}
 	}
-}
-
-// jsonSchemaPropertyToTS converts a JSON Schema property to a TypeScript type string.
-// This is a simplified version for matching purposes.
-func jsonSchemaPropertyToTS(schema map[string]any) string {
-	// Handle enum values.
-	if enumVals, ok := schema["enum"].([]any); ok {
-		parts := make([]string, len(enumVals))
-		for i, v := range enumVals {
-			switch val := v.(type) {
-			case string:
-				parts[i] = fmt.Sprintf("%q", val)
-			case float64:
-				if val == float64(int64(val)) {
-					parts[i] = fmt.Sprintf("%d", int64(val))
-				} else {
-					parts[i] = fmt.Sprintf("%g", val)
-				}
-			case bool:
-				if val {
-					parts[i] = "true"
-				} else {
-					parts[i] = "false"
-				}
-			default:
-				parts[i] = fmt.Sprintf("%v", val)
-			}
-		}
-		sort.Strings(parts)
-		return strings.Join(parts, " | ")
-	}
-	// Handle type field.
-	if t, ok := schema["type"].(string); ok {
-		switch t {
-		case "string":
-			return "string"
-		case "number", "integer":
-			return "number"
-		case "boolean":
-			return "boolean"
-		case "array":
-			if items, ok := schema["items"].(map[string]any); ok {
-				return jsonSchemaPropertyToTS(items) + "[]"
-			}
-			return "any[]"
-		case "object":
-			return "Record<string, any>"
-		}
-	}
-	return "any"
 }
 
 // canonicalReturnTypeKey produces a deterministic string key for a return type
 // structure, used to detect shared types across tools.
-func canonicalReturnTypeKey(props []returnPropInfo) string {
+func canonicalReturnTypeKey(props []toolbox.PropertyInfo) string {
 	type propKey struct {
 		Name        string `json:"n"`
 		Type        string `json:"t"`
@@ -862,7 +672,7 @@ func canonicalReturnTypeKey(props []returnPropInfo) string {
 	}
 	keys := make([]propKey, len(props))
 	for i, p := range props {
-		keys[i] = propKey{Name: p.name, Type: p.tsType, Description: p.description, Required: p.required}
+		keys[i] = propKey{Name: p.Name, Type: p.Type.ToTS(), Description: p.Description, Required: !p.Optional}
 	}
 	data, _ := json.Marshal(keys)
 	return string(data)
@@ -871,24 +681,21 @@ func canonicalReturnTypeKey(props []returnPropInfo) string {
 // renderReturnTypeInlineComments renders an object return type with inline
 // /** desc */ comments for single-line property descriptions.
 func renderReturnTypeInlineComments(pt *toolbox.ParamsType) string {
-	props := returnTypeProperties(pt)
+	props := propInfoSlice(pt)
 	if len(props) == 0 {
 		return pt.ToTS()
 	}
 
-	schema := pt.ToJSONSchema()
-	reqSet := jsonSchemaRequiredSet(schema)
-
 	var parts []string
 	for _, p := range props {
 		optional := ""
-		if !reqSet[p.name] {
+		if p.Optional {
 			optional = "?"
 		}
-		if p.description != "" {
-			parts = append(parts, fmt.Sprintf("/** %s */ %s%s: %s", p.description, p.name, optional, p.tsType))
+		if p.Description != "" {
+			parts = append(parts, fmt.Sprintf("/** %s */ %s%s: %s", p.Description, p.Name, optional, p.Type.ToTS()))
 		} else {
-			parts = append(parts, fmt.Sprintf("%s%s: %s", p.name, optional, p.tsType))
+			parts = append(parts, fmt.Sprintf("%s%s: %s", p.Name, optional, p.Type.ToTS()))
 		}
 	}
 	return "{ " + strings.Join(parts, "; ") + " }"
@@ -966,14 +773,14 @@ func literalToTS(v any) string {
 // it is emitted exactly once. Lines are returned in sorted order for
 // deterministic output.
 //
-// When a definition has properties with descriptions (from the JSON Schema),
+// When a definition has properties with descriptions (from Properties()),
 // the declaration is re-rendered with inline /** desc */ comments on each
 // described property. Multi-line descriptions cause the declaration to be
 // rendered as a named interface with JSDoc blocks.
 func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
-	// First pass: collect all definition schemas keyed by name from all tools'
-	// JSON schemas. These contain the property-level descriptions.
-	defSchemas := map[string]map[string]any{}
+	// First pass: collect all definition types keyed by name from all tools'
+	// param and return types. These contain the property-level descriptions.
+	defTypes := map[string]*toolbox.ParamsType{}
 	for _, tool := range tools {
 		sources := []*toolbox.ParamsType{}
 		if pt := tool.ParamsType(); pt != nil {
@@ -985,22 +792,9 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 			}
 		}
 		for _, src := range sources {
-			schema := src.ToJSONSchema()
-			defsRaw, ok := schema["definitions"]
-			if !ok {
-				continue
-			}
-			defs, ok := defsRaw.(map[string]any)
-			if !ok {
-				continue
-			}
-			for name, defRaw := range defs {
-				defMap, ok := defRaw.(map[string]any)
-				if !ok {
-					continue
-				}
-				if _, exists := defSchemas[name]; !exists {
-					defSchemas[name] = defMap
+			for name, dt := range src.DefinitionTypes() {
+				if _, exists := defTypes[name]; !exists {
+					defTypes[name] = dt
 				}
 			}
 		}
@@ -1026,7 +820,7 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 						continue
 					}
 					// Try to enhance the declaration with property descriptions.
-					enhanced := enhanceDeclWithDescriptions(line, defSchemas)
+					enhanced := enhanceDeclWithDescriptions(line, defTypes)
 					if !seen[enhanced] {
 						seen[line] = true
 						seen[enhanced] = true
@@ -1042,14 +836,13 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 
 // enhanceDeclWithDescriptions takes a declaration line like
 // "type Foo = { bar?: string; baz?: number };" and, if a matching definition
-// schema with property descriptions exists, re-renders it with inline
+// type with property descriptions exists, re-renders it with inline
 // /** desc */ comments. If any description is multi-line, the result is
 // rendered as an interface with JSDoc blocks instead.
 //
-// Property TS types are extracted from the original declaration to preserve
-// full fidelity (e.g. nested object types) rather than being regenerated
-// from the simplified JSON schema.
-func enhanceDeclWithDescriptions(line string, defSchemas map[string]map[string]any) string {
+// Property TS types come from Properties() on the definition type, preserving
+// full fidelity (e.g. nested object types).
+func enhanceDeclWithDescriptions(line string, defTypes map[string]*toolbox.ParamsType) string {
 	// Parse "type <Name> = <body>;" to extract the name.
 	if !strings.HasPrefix(line, "type ") {
 		return line
@@ -1061,29 +854,22 @@ func enhanceDeclWithDescriptions(line string, defSchemas map[string]map[string]a
 	}
 	typeName := rest[:eqIdx]
 
-	defSchema, ok := defSchemas[typeName]
+	defType, ok := defTypes[typeName]
 	if !ok {
 		return line
 	}
-	propsRaw, ok := defSchema["properties"].(map[string]any)
-	if !ok {
+	props := propInfoSlice(defType)
+	if len(props) == 0 {
 		return line
 	}
 
-	// Build a description map from the JSON schema.
-	descMap := map[string]string{}
+	// Check if any property has a description.
 	hasDesc := false
 	hasMultiLineDesc := false
-	for pn, propRaw := range propsRaw {
-		propMap, ok := propRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-		desc, _ := propMap["description"].(string)
-		if desc != "" {
-			descMap[pn] = desc
+	for _, p := range props {
+		if p.Description != "" {
 			hasDesc = true
-			if strings.Contains(desc, "\n") {
+			if strings.Contains(p.Description, "\n") {
 				hasMultiLineDesc = true
 			}
 		}
@@ -1092,34 +878,27 @@ func enhanceDeclWithDescriptions(line string, defSchemas map[string]map[string]a
 		return line
 	}
 
-	// Extract the body between "type Foo = " and the trailing ";".
-	body := rest[eqIdx+3:]           // after " = "
-	body = strings.TrimSuffix(body, ";") // remove trailing ";"
-	body = strings.TrimSpace(body)
-
-	// Parse the body to extract property entries with their original TS types.
-	parsedProps := parseDeclBody(body)
-	if len(parsedProps) == 0 {
-		return line
-	}
-
 	if hasMultiLineDesc {
 		// Render as an interface with JSDoc blocks.
 		var b strings.Builder
 		fmt.Fprintf(&b, "interface %s {\n", typeName)
-		for _, p := range parsedProps {
-			if desc := descMap[p.name]; desc != "" {
-				if strings.Contains(desc, "\n") {
+		for _, p := range props {
+			if p.Description != "" {
+				if strings.Contains(p.Description, "\n") {
 					b.WriteString("  /**\n")
-					for _, dl := range strings.Split(desc, "\n") {
+					for _, dl := range strings.Split(p.Description, "\n") {
 						fmt.Fprintf(&b, "   * %s\n", dl)
 					}
 					b.WriteString("   */\n")
 				} else {
-					fmt.Fprintf(&b, "  /** %s */\n", desc)
+					fmt.Fprintf(&b, "  /** %s */\n", p.Description)
 				}
 			}
-			fmt.Fprintf(&b, "  %s: %s;\n", p.nameWithOpt, p.tsType)
+			nameWithOpt := p.Name
+			if p.Optional {
+				nameWithOpt += "?"
+			}
+			fmt.Fprintf(&b, "  %s: %s;\n", nameWithOpt, p.Type.ToTS())
 		}
 		b.WriteString("}")
 		return b.String()
@@ -1127,78 +906,18 @@ func enhanceDeclWithDescriptions(line string, defSchemas map[string]map[string]a
 
 	// Render as inline type alias with /** desc */ comments.
 	var parts []string
-	for _, p := range parsedProps {
-		if desc := descMap[p.name]; desc != "" {
-			parts = append(parts, fmt.Sprintf("/** %s */ %s: %s", desc, p.nameWithOpt, p.tsType))
+	for _, p := range props {
+		nameWithOpt := p.Name
+		if p.Optional {
+			nameWithOpt += "?"
+		}
+		if p.Description != "" {
+			parts = append(parts, fmt.Sprintf("/** %s */ %s: %s", p.Description, nameWithOpt, p.Type.ToTS()))
 		} else {
-			parts = append(parts, fmt.Sprintf("%s: %s", p.nameWithOpt, p.tsType))
+			parts = append(parts, fmt.Sprintf("%s: %s", nameWithOpt, p.Type.ToTS()))
 		}
 	}
 	return fmt.Sprintf("type %s = { %s };", typeName, strings.Join(parts, "; "))
-}
-
-// declProp represents a parsed property from a type alias body.
-type declProp struct {
-	name        string // bare property name (e.g. "foo")
-	nameWithOpt string // name with optional marker (e.g. "foo?")
-	tsType      string // original TS type string
-}
-
-// parseDeclBody parses a type alias body like "{ foo?: string; bar?: number }"
-// into individual property entries, correctly handling nested braces.
-func parseDeclBody(body string) []declProp {
-	// Strip outer braces.
-	body = strings.TrimSpace(body)
-	if !strings.HasPrefix(body, "{") || !strings.HasSuffix(body, "}") {
-		return nil
-	}
-	inner := strings.TrimSpace(body[1 : len(body)-1])
-	if inner == "" {
-		return nil
-	}
-
-	// Split on "; " at brace depth 0.
-	var entries []string
-	depth := 0
-	start := 0
-	for i := 0; i < len(inner); i++ {
-		switch inner[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-		case ';':
-			if depth == 0 {
-				entry := strings.TrimSpace(inner[start:i])
-				if entry != "" {
-					entries = append(entries, entry)
-				}
-				start = i + 1
-			}
-		}
-	}
-	// Remaining after last semicolon.
-	if tail := strings.TrimSpace(inner[start:]); tail != "" {
-		entries = append(entries, tail)
-	}
-
-	var props []declProp
-	for _, entry := range entries {
-		// Each entry is like "foo?: type" or "foo: type".
-		colonIdx := strings.Index(entry, ": ")
-		if colonIdx < 0 {
-			continue
-		}
-		nameWithOpt := entry[:colonIdx]
-		tsType := entry[colonIdx+2:]
-		name := strings.TrimSuffix(nameWithOpt, "?")
-		props = append(props, declProp{
-			name:        name,
-			nameWithOpt: nameWithOpt,
-			tsType:      tsType,
-		})
-	}
-	return props
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {

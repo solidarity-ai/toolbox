@@ -1,14 +1,10 @@
 export declare const tools: {
   edgeCases: {
-    // (irreversible)
-    asyncComplex(ids: string[], concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number };
-    // (readonly)
-    complex(query: string, filters: SearchFilter[], tags?: string[], pagination?: PageInfo, output?: OutputConfig, dryRun?: boolean): string;
-    // Permanently delete all records matching the filter. (irreversible)
-    irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute deletion */ confirm: boolean): string;
-    // (readonly)
-    minimal(): string;
-    // (readonly)
+    asyncComplex(ids: string[], concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number }; // irreversible
+    complex(query: string, filters: SearchFilter[], tags?: string[], pagination?: PageInfo, output?: OutputConfig, dryRun?: boolean): string; // readonly
+    // Permanently delete all records matching the filter.
+    irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute deletion */ confirm: boolean): string; // irreversible
+    minimal(): string; // readonly
     multilineParam(
       // The raw input string to transform
       input: string,
@@ -17,19 +13,13 @@ export declare const tools: {
       // becomes the input of the next.
       pipeline: string[],
       options?: { dryRun?: boolean; verbose?: boolean }
-    ): string;
-    // (readonly)
-    multilineReturn(input: string): MultilineReturnResult;
-    // (readonly)
-    namedExport(data: string, algorithm: "md5" | "sha256" | "sha512"): string;
-    // (readonly)
-    noDescription(x: number, y: number): number;
-    // (readonly)
-    noParams(): string;
-    // (irreversible, idempotent)
-    paramsObject(params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string;
-    // (reversible, idempotent)
-    reversible(title: string, content: string, tags?: string[]): string;
+    ): string; // readonly
+    multilineReturn(input: string): MultilineReturnResult; // readonly
+    namedExport(data: string, algorithm: "md5" | "sha256" | "sha512"): string; // readonly
+    noDescription(x: number, y: number): number; // readonly
+    noParams(): string; // readonly
+    paramsObject(params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string; // irreversible, idempotent
+    reversible(title: string, content: string, tags?: string[]): string; // reversible, idempotent
   };
 };
 

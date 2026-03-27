@@ -1,13 +1,9 @@
 export declare const tools: {
   tickets: {
-    // (irreversible)
-    create(fields: Fields): Ticket;
-    // (readonly)
-    get(id: string): Ticket;
-    // (readonly)
-    list(status?: "closed" | "in_progress" | "open" | "resolved"): Ticket[];
-    // (reversible)
-    update(id: string, fields: Fields): Ticket;
+    create(fields: Fields): Ticket; // irreversible
+    get(id: string): Ticket; // readonly
+    list(status?: "closed" | "in_progress" | "open" | "resolved"): Ticket[]; // readonly
+    update(id: string, fields: Fields): Ticket; // reversible
   };
 };
 

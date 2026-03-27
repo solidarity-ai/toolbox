@@ -338,17 +338,11 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
-			// Emit tool description.
+			// Emit tool description (if any) as // comment above.
+			// Access mode goes as trailing comment on the signature line.
 			if tool.Sig != nil {
-				desc := tool.Sig.Description()
-				if desc != "" {
-					descLine := desc
-					if modeLabel != "" {
-						descLine += " " + modeLabel
-					}
-					fmt.Fprintf(&b, "    // %s\n", descLine)
-				} else if modeLabel != "" {
-					fmt.Fprintf(&b, "    // %s\n", modeLabel)
+				if desc := tool.Sig.Description(); desc != "" {
+					fmt.Fprintf(&b, "    // %s\n", desc)
 				}
 			}
 
@@ -407,6 +401,13 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
+			// Trailing access mode comment.
+			modeTrail := ""
+			if modeLabel != "" {
+				// Strip parens from modeLabel: "(readonly)" -> "readonly"
+				modeTrail = " // " + strings.Trim(modeLabel, "()")
+			}
+
 			if useMultiLine && len(paramParts) > 0 {
 				// One param per line with // descriptions.
 				fmt.Fprintf(&b, "    %s(\n", method)
@@ -432,9 +433,9 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 					}
 					fmt.Fprintf(&b, "      %s%s\n", part, trailing)
 				}
-				fmt.Fprintf(&b, "    ): %s;\n", returnType)
+				fmt.Fprintf(&b, "    ): %s;%s\n", returnType, modeTrail)
 			} else {
-				fmt.Fprintf(&b, "    %s(%s): %s;\n", method, strings.Join(paramParts, ", "), returnType)
+				fmt.Fprintf(&b, "    %s(%s): %s;%s\n", method, strings.Join(paramParts, ", "), returnType, modeTrail)
 			}
 		}
 		b.WriteString("  };\n")

@@ -338,30 +338,10 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
-			// JSDoc block: description + access mode label + multi-line @param tags.
+			// Emit tool description.
 			if tool.Sig != nil {
 				desc := tool.Sig.Description()
-				if len(multiLineParams) > 0 {
-					// Use /** */ block for @param tags (LLMs expect @param in JSDoc).
-					b.WriteString("    /**\n")
-					if desc != "" {
-						descLine := desc
-						if modeLabel != "" {
-							descLine += " " + modeLabel
-						}
-						fmt.Fprintf(&b, "     * %s\n", descLine)
-					} else if modeLabel != "" {
-						fmt.Fprintf(&b, "     * %s\n", modeLabel)
-					}
-					for _, mp := range multiLineParams {
-						lines := strings.Split(mp.desc, "\n")
-						fmt.Fprintf(&b, "     * @param %s - %s\n", mp.name, lines[0])
-						for _, line := range lines[1:] {
-							fmt.Fprintf(&b, "     *   %s\n", line)
-						}
-					}
-					b.WriteString("     */\n")
-				} else if desc != "" {
+				if desc != "" {
 					descLine := desc
 					if modeLabel != "" {
 						descLine += " " + modeLabel
@@ -372,17 +352,15 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
-			// Build individual param list.
+			// Build param list. If any param has a multi-line description,
+			// ALL params go one-per-line with // descriptions above each.
+			useMultiLine := len(multiLineParams) > 0
 			var paramParts []string
 			if tool.Sig != nil {
 				for _, p := range tool.Sig.Params() {
 					if hidden[p.Name()] {
 						continue
 					}
-					// Determine param type: use bound literal if available,
-					// then check for shared param type override,
-					// then check if it's a complex object with descriptions to inline,
-					// otherwise use the param's TypeScript type.
 					var tsType string
 					if litVal, ok := literals[p.Name()]; ok {
 						tsType = literalToTS(litVal)
@@ -398,9 +376,11 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 						name += "?"
 					}
 
-					// Add inline comment for single-line param descriptions.
 					desc := p.Description()
-					if desc != "" && !strings.Contains(desc, "\n") {
+					if useMultiLine {
+						// One param per line with // description above.
+						paramParts = append(paramParts, name+": "+tsType)
+					} else if desc != "" && !strings.Contains(desc, "\n") {
 						paramParts = append(paramParts, fmt.Sprintf("/** %s */ %s: %s", desc, name, tsType))
 					} else {
 						paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
@@ -427,7 +407,35 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
-			fmt.Fprintf(&b, "    %s(%s): %s;\n", method, strings.Join(paramParts, ", "), returnType)
+			if useMultiLine && len(paramParts) > 0 {
+				// One param per line with // descriptions.
+				fmt.Fprintf(&b, "    %s(\n", method)
+				visibleParams := make([]toolbox.FuncParam, 0)
+				if tool.Sig != nil {
+					for _, p := range tool.Sig.Params() {
+						if !hidden[p.Name()] {
+							visibleParams = append(visibleParams, p)
+						}
+					}
+				}
+				for i, part := range paramParts {
+					if i < len(visibleParams) {
+						if desc := visibleParams[i].Description(); desc != "" {
+							for _, dl := range strings.Split(desc, "\n") {
+								fmt.Fprintf(&b, "      // %s\n", dl)
+							}
+						}
+					}
+					trailing := ","
+					if i == len(paramParts)-1 {
+						trailing = ""
+					}
+					fmt.Fprintf(&b, "      %s%s\n", part, trailing)
+				}
+				fmt.Fprintf(&b, "    ): %s;\n", returnType)
+			} else {
+				fmt.Fprintf(&b, "    %s(%s): %s;\n", method, strings.Join(paramParts, ", "), returnType)
+			}
 		}
 		b.WriteString("  };\n")
 	}

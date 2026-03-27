@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -250,11 +249,7 @@ func TestSharedTypesGoldens(t *testing.T) {
 
 // buildSchemaMap builds a map of tool name to JSON Schema for all tools in the view.
 func buildSchemaMap(view toolset.AgentView) map[string]any {
-	tools := make([]toolset.AgentTool, len(view.Tools))
-	copy(tools, view.Tools)
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name < tools[j].Name
-	})
+	tools := sortedTools(view)
 
 	out := make(map[string]any, len(tools))
 	for _, tool := range tools {

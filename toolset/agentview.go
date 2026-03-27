@@ -16,7 +16,7 @@ type AgentTool struct {
 	Name           string
 	Description    string
 	ParamsSchema   map[string]any
-	Sig            *toolbox.FuncSig
+	Sig            *toolbox.FuncSignature
 	hiddenParams   map[string]bool
 	boundLiterals  map[string]any // param name -> constant value for non-hidden bindings
 	AccessMode     tooldef.AccessMode
@@ -37,11 +37,11 @@ func (t AgentTool) BoundLiterals() map[string]any {
 // ParamsType returns the combined parameter type from the function signature,
 // with hidden bound params removed and non-hidden bound params narrowed to
 // literal types. Returns nil if no signature is available.
-func (t AgentTool) ParamsType() *toolbox.ParamsType {
+func (t AgentTool) ParamsType() *toolbox.TSType {
 	if t.Sig == nil {
 		return nil
 	}
-	pt := t.Sig.CombinedParamsType()
+	pt := t.Sig.ParamsAsObject()
 	if pt == nil {
 		return nil
 	}

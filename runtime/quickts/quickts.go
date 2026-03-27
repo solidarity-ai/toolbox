@@ -54,12 +54,12 @@ type Host struct {
 }
 
 // Run is the minimal TS-tool runtime seam.
-func Run(def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSig) (string, error) {
+func Run(def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSignature) (string, error) {
 	return RunWithHost(def, args, Host{}, nil, sig)
 }
 
 // RunWithSession is like Run but accepts a session pointer for caching.
-func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSig) (string, error) {
+func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
 	return RunWithHost(def, args, Host{}, session, sig)
 }
 
@@ -68,7 +68,7 @@ func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbo
 // checking. On first call the created session is written back through the pointer.
 // If sig is non-nil, args are spread as individual function params in order;
 // otherwise they are passed as a single object (legacy style).
-func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSig) (string, error) {
+func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
 	var checkSession *toolbox.CheckSession
 	if session != nil {
 		checkSession = *session
@@ -288,7 +288,7 @@ func withRunner(base fs.FS, source string) (fs.FS, error) {
 	), nil
 }
 
-func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSig) string {
+func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
 	if sig == nil {
 		// Legacy single-object style: tool(args, ctx)
 		argsJSON, _ := json.Marshal(args)
@@ -423,7 +423,7 @@ func loaderForPath(file string) api.Loader {
 }
 
 // RunnerSourceForTest exposes the generated runner source for narrow unit tests.
-func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSig) string {
+func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
 	return runnerSource(entry, args, sig)
 }
 

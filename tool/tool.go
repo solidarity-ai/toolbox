@@ -44,7 +44,7 @@ type PackageTool struct {
 	AccessMode     AccessMode       `json:"accessMode,omitempty"`
 	Description    string           `json:"description,omitempty"`
 	ParamsSchema   map[string]any   `json:"paramsSchema,omitempty"`
-	Sig            *toolbox.FuncSig `json:"-"`
+	Sig            *toolbox.FuncSignature `json:"-"`
 	ResourceParams []ResourceParam  `json:"resourceParams,omitempty"`
 }
 
@@ -54,7 +54,7 @@ type PackageTool struct {
 type ResolvedTool struct {
 	Name           string
 	Description    string
-	Sig            *toolbox.FuncSig
+	Sig            *toolbox.FuncSignature
 	AccessMode     AccessMode
 	Idempotent     *bool
 	ResourceParams []ResourceParam
@@ -74,12 +74,12 @@ func (rt *ResolvedTool) SetParamsSchema(schema map[string]any) {
 
 // ParamsSchema returns the JSON Schema for this tool's parameters.
 // When Sig is available, it derives the schema from the type signature
-// using CombinedParamsType (which handles both single-param-object and
+// using ParamsAsObject (which handles both single-param-object and
 // multi-param functions); otherwise it falls back to the stored schema
 // (e.g. from dist manifests).
 func (rt ResolvedTool) ParamsSchema() map[string]any {
 	if rt.Sig != nil {
-		if pt := rt.Sig.CombinedParamsType(); pt != nil {
+		if pt := rt.Sig.ParamsAsObject(); pt != nil {
 			return pt.ToJSONSchema()
 		}
 	}

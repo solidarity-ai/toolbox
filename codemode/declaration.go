@@ -249,8 +249,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 	}
 
-	// Emit named return type interfaces, skipping those that already exist
-	// as type aliases from $ref declarations.
+	// Collect named return type interfaces for emission after the tools block.
+	var interfaceBlocks []string
 	emittedInterfaces := map[string]bool{}
 	for _, tool := range tools {
 		info, ok := returnTypes[tool.Name]
@@ -259,8 +259,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		}
 		emittedInterfaces[info.typeName] = true
 
-		// If a $ref type alias with the same name was already emitted in
-		// declarations, skip the interface to avoid duplicate definitions.
+		// Skip if a $ref type alias with the same name already exists.
 		typeAliasPrefix := "type " + info.typeName + " = "
 		alreadyDeclared := false
 		for _, line := range declLines {
@@ -276,26 +275,28 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 		unwrapped := tool.Sig.Return().UnwrapPromise()
 		props := unwrapped.ObjectProperties()
 
-		fmt.Fprintf(&b, "interface %s {\n", info.typeName)
+		var ib strings.Builder
+		fmt.Fprintf(&ib, "interface %s {\n", info.typeName)
 		for _, p := range props {
 			if p.Description != "" {
 				if strings.Contains(p.Description, "\n") {
-					b.WriteString("  /**\n")
+					ib.WriteString("  /**\n")
 					for _, line := range strings.Split(p.Description, "\n") {
-						fmt.Fprintf(&b, "   * %s\n", line)
+						fmt.Fprintf(&ib, "   * %s\n", line)
 					}
-					b.WriteString("   */\n")
+					ib.WriteString("   */\n")
 				} else {
-					fmt.Fprintf(&b, "  /** %s */\n", p.Description)
+					fmt.Fprintf(&ib, "  /** %s */\n", p.Description)
 				}
 			}
 			optional := ""
 			if p.Optional {
 				optional = "?"
 			}
-			fmt.Fprintf(&b, "  %s%s: %s;\n", p.Name, optional, p.Type.ToTS())
+			fmt.Fprintf(&ib, "  %s%s: %s;\n", p.Name, optional, p.Type.ToTS())
 		}
-		b.WriteString("}\n\n")
+		ib.WriteString("}")
+		interfaceBlocks = append(interfaceBlocks, ib.String())
 	}
 
 	b.WriteString("export declare const tools: {\n")
@@ -423,12 +424,16 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 	}
 	b.WriteString("};\n")
 
-	// Emit type declarations after the tools block so the reader sees
+	// Emit all type definitions after the tools block so the reader sees
 	// the tool surface first and supporting types below.
-	if len(declLines) > 0 {
+	if len(declLines) > 0 || len(interfaceBlocks) > 0 {
 		b.WriteString("\n")
 		for _, line := range declLines {
 			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		for _, block := range interfaceBlocks {
+			b.WriteString(block)
 			b.WriteString("\n")
 		}
 	}

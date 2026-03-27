@@ -1,19 +1,3 @@
-interface MultilineReturnResult {
-  /**
-   * Detailed recommendations for improvement.
-   * Each entry is a separate actionable item
-   * that should be addressed independently.
-   */
-  recommendations?: string[];
-  /**
-   * Overall score from 0 to 100.
-   * Higher values indicate better quality.
-   */
-  score?: number;
-  /** Short summary of findings */
-  summary?: string;
-}
-
 export declare const tools: {
   edgeCases: {
     /** Process items in batch asynchronously. (irreversible) */
@@ -49,3 +33,18 @@ export declare const tools: {
 type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
 type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maximum items per page */ pageSize?: number };
 type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };
+interface MultilineReturnResult {
+  /**
+   * Detailed recommendations for improvement.
+   * Each entry is a separate actionable item
+   * that should be addressed independently.
+   */
+  recommendations?: string[];
+  /**
+   * Overall score from 0 to 100.
+   * Higher values indicate better quality.
+   */
+  score?: number;
+  /** Short summary of findings */
+  summary?: string;
+}

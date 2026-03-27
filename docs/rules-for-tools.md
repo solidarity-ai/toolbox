@@ -5,7 +5,8 @@
 1. if the package + function name is enough to understand what the tool does,
    don't add a description.
 2. if the parameter name + type is enough to understand the parameter, you
-   don't need to add a descripton.
+   don't need to add a descripton. Sometimes you can make the parameter name
+   more a little more descriptive so that the description is not needed.
 3. order parameters based on resource heirarchy.
 4. when considering a function description, understand that a param might be
    hidden, and thus the description might be wrong.

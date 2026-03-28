@@ -1,9 +1,18 @@
 package toolset
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	"github.com/solidarity-ai/toolbox/packaging"
+	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
+
+// ErrNoResolver is returned by AddFromRegistry when the Builder was created
+// without a registry resolver.
+var ErrNoResolver = errors.New("no registry resolver configured")
 
 // ResolvedToolset is a stubbed resolved toolset for the first outside-in tests.
 //
@@ -18,11 +27,17 @@ type ResolvedToolset struct {
 // toolbox.devpkg.json. Tool selection and binding come later.
 type Builder struct {
 	packages []packaging.LoadedPackage
+	resolver *registry.Resolver
 }
 
 // New creates an empty toolset builder.
 func New() *Builder {
 	return &Builder{}
+}
+
+// NewWithResolver creates a toolset builder that can resolve registry packages.
+func NewWithResolver(resolver *registry.Resolver) *Builder {
+	return &Builder{resolver: resolver}
 }
 
 // AddFromDir loads a package rooted at dir.
@@ -40,6 +55,30 @@ func (b *Builder) AddFromDir(dir string) error {
 // AddFromArchive loads a package from a .toolbox.pkg archive and its manifest.
 func (b *Builder) AddFromArchive(archivePath, manifestPath string) error {
 	pkg, err := packaging.LoadArchive(archivePath, manifestPath)
+	if err != nil {
+		return err
+	}
+	b.packages = append(b.packages, pkg)
+	return nil
+}
+
+// AddFromRegistry resolves a registry package by module path and version,
+// then appends it to the builder's package list.
+func (b *Builder) AddFromRegistry(ctx context.Context, modulePath, version string) error {
+	if b.resolver == nil {
+		return ErrNoResolver
+	}
+
+	module, err := tooldef.ParseModulePath(modulePath)
+	if err != nil {
+		return fmt.Errorf("parse module path: %w", err)
+	}
+	ver, err := tooldef.ParseVersion(version)
+	if err != nil {
+		return fmt.Errorf("parse version: %w", err)
+	}
+
+	pkg, err := b.resolver.Resolve(ctx, module, ver)
 	if err != nil {
 		return err
 	}

@@ -65,25 +65,34 @@ func (b *Builder) AddFromArchive(archivePath, manifestPath string) error {
 // AddFromRegistry resolves a registry package by module path and version,
 // then appends it to the builder's package list.
 func (b *Builder) AddFromRegistry(ctx context.Context, modulePath, version string) error {
+	_, err := b.AddFromRegistryWithExpected(ctx, modulePath, version, nil)
+	return err
+}
+
+// AddFromRegistryWithExpected resolves a registry package through the shared
+// resolver path, optionally verifying cached/fetched bytes against expected
+// lock metadata, then appends the loaded package and returns the metadata that
+// was trusted for this package.
+func (b *Builder) AddFromRegistryWithExpected(ctx context.Context, modulePath, version string, expected *registry.ResolveMetadata) (registry.ResolveMetadata, error) {
 	if b.resolver == nil {
-		return ErrNoResolver
+		return registry.ResolveMetadata{}, ErrNoResolver
 	}
 
 	module, err := tooldef.ParseModulePath(modulePath)
 	if err != nil {
-		return fmt.Errorf("parse module path: %w", err)
+		return registry.ResolveMetadata{}, fmt.Errorf("parse module path: %w", err)
 	}
 	ver, err := tooldef.ParseVersion(version)
 	if err != nil {
-		return fmt.Errorf("parse version: %w", err)
+		return registry.ResolveMetadata{}, fmt.Errorf("parse version: %w", err)
 	}
 
-	result, err := b.resolver.Resolve(ctx, module, ver)
+	result, err := b.resolver.ResolveWithExpected(ctx, module, ver, expected)
 	if err != nil {
-		return err
+		return registry.ResolveMetadata{}, err
 	}
 	b.packages = append(b.packages, result.Package)
-	return nil
+	return result.Metadata, nil
 }
 
 // Packages returns the currently loaded source packages.

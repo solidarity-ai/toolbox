@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T14:35:01.379Z",
+  "exported_at": "2026-03-28T21:08:21.332Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -979,19 +979,26 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S10",
       "id": "T03",
-      "title": "Wire ToolsetFile.Resolve to verify and rewrite sibling lockfiles through the shared resolver path",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Declarative toolset resolves now verify and rewrite sibling lockfiles through the shared builder/resolver path.",
+      "status": "complete",
+      "one_liner": "Declarative toolset resolves now verify and rewrite sibling lockfiles through the shared builder/resolver path.",
+      "narrative": "Extended the builder seam with AddFromRegistryWithExpected so ToolsetFile.Resolve could still use the shared builder/resolver path while receiving the trusted metadata needed for lock enforcement. ToolsetFile.Resolve now loads and validates its sibling lockfile before resolution, resolves packages in sorted order with existing lock expectations passed into the resolver, accumulates deterministic replacement entries, and writes the sibling *.toolset.lock only after every package succeeds. The toolset file tests now cover first-write lock generation, matching-lock cache hits, schema-vs-semantic lock validation failures, cache-mismatch refetch success, persistent mismatch failure, and no-partial-rewrite behavior on sorted-package failure.",
+      "verification_result": "Ran `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s` and then the slice verification command `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`. Both passed, covering lockfile generation, validation, mismatch/refetch handling, sorted stop-on-first-error behavior, and surrounding toolset/registry regressions.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T21:08:21.320Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Added a narrow Builder helper (`AddFromRegistryWithExpected`) so declarative lock verification could stay on the shared builder/resolver path instead of calling the resolver directly. This is a local implementation adaptation, not a slice replan.",
+      "known_issues": "A first resolve can only write a valid new lock entry when provenance metadata comes from a source fetch. A bare cache hit without an existing committed lock cannot synthesize missing git_sha/resolved_from/resolved_at values, so cache-only regression coverage now uses committed lock metadata.",
+      "key_files": [
+        "toolset/toolset.go",
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S10/tasks/T03-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Added Builder.AddFromRegistryWithExpected as the metadata-returning seam for declarative lock verification while preserving AddFromRegistry as the compatibility wrapper."
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S10\nmilestone: M001-zku9aj\nkey_files:\n  - toolset/toolset.go\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S10/tasks/T03-SUMMARY.md\nkey_decisions:\n  - Added Builder.AddFromRegistryWithExpected as the metadata-returning seam for declarative lock verification while preserving AddFromRegistry as the compatibility wrapper.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T21:08:21.320Z\nblocker_discovered: false\n---\n\n# T03: Declarative toolset resolves now verify and rewrite sibling lockfiles through the shared builder/resolver path.\n\n**Declarative toolset resolves now verify and rewrite sibling lockfiles through the shared builder/resolver path.**\n\n## What Happened\n\nExtended the builder seam with AddFromRegistryWithExpected so ToolsetFile.Resolve could still use the shared builder/resolver path while receiving the trusted metadata needed for lock enforcement. ToolsetFile.Resolve now loads and validates its sibling lockfile before resolution, resolves packages in sorted order with existing lock expectations passed into the resolver, accumulates deterministic replacement entries, and writes the sibling *.toolset.lock only after every package succeeds. The toolset file tests now cover first-write lock generation, matching-lock cache hits, schema-vs-semantic lock validation failures, cache-mismatch refetch success, persistent mismatch failure, and no-partial-rewrite behavior on sorted-package failure.\n\n## Verification\n\nRan `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s` and then the slice verification command `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`. Both passed, covering lockfile generation, validation, mismatch/refetch handling, sorted stop-on-first-error behavior, and surrounding toolset/registry regressions.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s` | 0 | ✅ pass | 9600ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` | 0 | ✅ pass | 6600ms |\n\n\n## Deviations\n\nAdded a narrow Builder helper (`AddFromRegistryWithExpected`) so declarative lock verification could stay on the shared builder/resolver path instead of calling the resolver directly. This is a local implementation adaptation, not a slice replan.\n\n## Known Issues\n\nA first resolve can only write a valid new lock entry when provenance metadata comes from a source fetch. A bare cache hit without an existing committed lock cannot synthesize missing git_sha/resolved_from/resolved_at values, so cache-only regression coverage now uses committed lock metadata.\n\n## Files Created/Modified\n\n- `toolset/toolset.go`\n- `toolset/toolset_file.go`\n- `toolset/toolset_file_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S10/tasks/T03-SUMMARY.md`\n",
       "description": "## Description\n\nIntegrate the new lockfile contract into declarative resolution without bypassing the builder/resolver chain. `ToolsetFile.Resolve` should load an existing sibling lockfile, rely on the schema-plus-semantic validation introduced in T01, resolve packages in sorted order using the metadata-aware resolver seam, verify lock expectations before trusting cache state, and write the updated lockfile only after all packages succeed.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| Existing sibling lockfile load/schema-validation | Abort before resolution starts and leave the current lockfile untouched. | N/A for local file reads. | Reject malformed shape errors separately from semantic entry errors so callers can localize the problem quickly. |\n| Metadata-aware resolver path from T02 | Stop on the first sorted package failure and propagate resolver or mismatch context unchanged. | Respect caller cancellation across multi-package resolve loops. | Never downgrade hash mismatches or missing provenance into a generic success. |\n| Final lockfile write | Return the write error and preserve the previous on-disk lockfile contents. | N/A | Never leave a partially rewritten lockfile behind after a mid-write failure. |\n\n## Load Profile\n\n- **Shared resources**: Repo-local lockfile plus resolver cache and source chain.\n- **Per-operation cost**: One lock lookup and one resolver call per declared package, followed by a single lockfile write after full success.\n- **10x breakpoint**: Resolve remains linear in package count; deterministic ordering and single-write semantics matter more than concurrency here.\n\n## Negative Tests\n\n- **Malformed inputs**: malformed existing lockfile, schema-valid but semantically invalid lock entries, missing or stale lock entries, and mismatched cached archive hashes.\n- **Error paths**: stale cache refetch succeeds when fresh bytes match the lock; refetched mismatch still fails; a package resolution failure leaves the prior lockfile untouched.\n- **Boundary conditions**: first resolve with no lockfile writes one, later resolves accept matching cache hits, and sorted package ordering still determines the first failing package.\n\n## Steps\n\n1. Extend `toolset.Load` / `ToolsetFile` to retain the source filename and derived lock path so resolve-time code always knows which sibling lockfile it owns.\n2. Update `ToolsetFile.Resolve` to use the metadata-aware resolver contract from T02, verify existing lock expectations before accepting cache results, and accumulate deterministic updated entries while keeping S09's sorted stop-on-first-error behavior.\n3. Expand `toolset/toolset_file_test.go` to cover first-write, subsequent verification, schema-vs-semantic validation failures, cache-mismatch refetch, persistent mismatch failure, and no-partial-rewrite behavior, then run the focused toolset and registry regressions together.\n\n## Must-Haves\n\n- [ ] Successful declarative resolves write or update the sibling `*.toolset.lock` deterministically.\n- [ ] Subsequent resolves validate existing lockfiles via schema plus semantic checks before trusting cache state.\n- [ ] Subsequent resolves verify lock expectations before trusting cache state and fail cleanly when fresh content still disagrees with the lock.\n- [ ] Declarative resolve still goes through `Builder.AddFromRegistry` / `registry.Resolver` and preserves sorted, stop-on-first-error behavior from S09.",
       "estimate": "50m",
       "files": [
@@ -1283,6 +1290,18 @@
       "decision": "How toolset lockfiles are validated and written",
       "choice": "Validate toolset lockfiles in two phases (embedded JSON Schema, then Go semantic checks) and write them with sorted package-key JSON via temp-file rename",
       "rationale": "Schema validation catches structural shape errors before any semantic trust is placed in entries, while semantic validation enforces package-key, hash, provenance, and timestamp rules with entry-local context. Stable sorted encoding makes lockfile diffs deterministic, and temp-file rename avoids partial rewrites when later resolve code updates sibling lockfiles.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 23,
+      "id": "D023",
+      "when_context": "M001-zku9aj/S10/T03",
+      "scope": "architecture",
+      "decision": "Expose lock-aware registry resolution to declarative toolsets without forking the builder path",
+      "choice": "Added Builder.AddFromRegistryWithExpected to return trusted resolver metadata while keeping AddFromRegistry as the compatibility wrapper.",
+      "rationale": "ToolsetFile.Resolve needs lock verification metadata for cache hits and refetches, but imperative callers should continue using the existing builder API. Returning metadata through a narrow builder extension preserves one shared resolution path and keeps stop-on-first-error behavior anchored in Builder/Resolver composition.",
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
@@ -1585,6 +1604,28 @@
       "verdict": "✅ pass",
       "duration_ms": 3000,
       "created_at": "2026-03-28T14:35:01.365Z"
+    },
+    {
+      "id": 28,
+      "task_id": "T03",
+      "slice_id": "S10",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 9600,
+      "created_at": "2026-03-28T21:08:21.320Z"
+    },
+    {
+      "id": 29,
+      "task_id": "T03",
+      "slice_id": "S10",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 6600,
+      "created_at": "2026-03-28T21:08:21.320Z"
     }
   ]
 }

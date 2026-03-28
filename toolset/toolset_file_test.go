@@ -2,6 +2,8 @@ package toolset
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -379,6 +381,23 @@ func TestToolsetFileResolve(t *testing.T) {
 				{"tool": fmt.Sprintf("%s@%s/calc.add", fixtures[1].module, fixtures[1].version)},
 			},
 		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			fmt.Sprintf("%s@%s", fixtures[1].module, fixtures[1].version): {
+				ArchiveSHA256: sha256HexForTest(mustArchiveBytesForFixture(t, fixtures[1].fixture)),
+				GitSHA:        strings.Repeat("a", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T12:00:00Z",
+			},
+			fmt.Sprintf("%s@%s", fixtures[0].module, fixtures[0].version): {
+				ArchiveSHA256: sha256HexForTest(mustArchiveBytesForFixture(t, fixtures[0].fixture)),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitSource,
+				ResolvedAt:    "2026-03-28T12:05:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
 		beforeTools := toolEntryStrings(file.Tools)
 
 		got, err := file.Resolve(ctx, resolver)
@@ -471,16 +490,304 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("source calls = %#v, want %#v", src.calls, wantCalls)
 		}
 	})
+	t.Run("FirstResolveWritesSiblingLockfileDeterministically", func(t *testing.T) {
+		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
+		metadata := registry.ResolveMetadata{
+			ArchiveSHA256: sha256HexForTest(archiveBytes),
+			GitSHA:        strings.Repeat("a", 40),
+			ResolvedFrom:  registry.ResolvedFromGitHubRelease,
+			ResolvedAt:    "2026-03-28T12:00:00Z",
+		}
+		src := &recordingSource{result: registry.FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: metadata}}
+		resolver := registry.NewResolver(newTempCache(t), src)
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+		})
+
+		got, err := file.Resolve(ctx, resolver)
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if len(got.Tools()) == 0 {
+			t.Fatal("Resolve() returned no tools")
+		}
+
+		raw, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		lock, err := LoadLock(file.LockFilename())
+		if err != nil {
+			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
+		}
+		entry, ok := lock.Packages["example.com/acme/calc@v1.2.3"]
+		if !ok {
+			t.Fatalf("lock packages = %#v, want calc entry", lock.Packages)
+		}
+		if entry.ArchiveSHA256 != metadata.ArchiveSHA256 || entry.GitSHA != metadata.GitSHA || entry.ResolvedAt != metadata.ResolvedAt {
+			t.Fatalf("lock entry = %#v, want metadata %#v", entry, metadata)
+		}
+		if !strings.Contains(string(raw), "example.com/acme/calc@v1.2.3") {
+			t.Fatalf("lockfile bytes = %q, want package key", string(raw))
+		}
+	})
+
+	t.Run("ExistingLockSchemaValidationFailureAbortsBeforeResolution", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		if err := os.WriteFile(file.LockFilename(), []byte(`{"packages":{"example.com/acme/calc@v1.2.3":{"archive_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","resolved_from":"github-release"}}}`), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{result: registry.FetchResult{Archive: []byte("unused"), Manifest: []byte("unused")}}
+
+		_, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want lock validation error")
+		}
+		assertErrorContains(t, err, "schema-validate toolset lock file")
+		assertErrorContains(t, err, file.LockFilename())
+		if len(src.calls) != 0 {
+			t.Fatalf("source calls = %#v, want none", src.calls)
+		}
+	})
+
+	t.Run("ExistingLockSemanticValidationFailureAbortsBeforeResolution", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		if err := os.WriteFile(file.LockFilename(), []byte(`{"packages":{"bad-key":{"archive_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","resolved_from":"github-release","resolved_at":"2026-03-28T12:00:00Z"}}}`), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{result: registry.FetchResult{Archive: []byte("unused"), Manifest: []byte("unused")}}
+
+		_, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want lock validation error")
+		}
+		assertErrorContains(t, err, "validate toolset lock file")
+		assertErrorContains(t, err, `packages["bad-key"]`)
+		if len(src.calls) != 0 {
+			t.Fatalf("source calls = %#v, want none", src.calls)
+		}
+	})
+
+	t.Run("MatchingExistingLockUsesExpectedMetadataAndAcceptsCacheHit", func(t *testing.T) {
+		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
+		cache := newTempCache(t)
+		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: sha256HexForTest(archiveBytes),
+				GitSHA:        strings.Repeat("c", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{err: fmt.Errorf("should not fetch on matching cache hit")}
+
+		_, err := file.Resolve(ctx, registry.NewResolver(cache, src))
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if len(src.calls) != 0 {
+			t.Fatalf("source calls = %#v, want none", src.calls)
+		}
+		reloaded, err := LoadLock(file.LockFilename())
+		if err != nil {
+			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
+		}
+		if !reflect.DeepEqual(reloaded.Packages, locked.Packages) {
+			t.Fatalf("rewritten lock packages = %#v, want %#v", reloaded.Packages, locked.Packages)
+		}
+	})
+
+	t.Run("CacheMismatchRefetchSuccessRewritesLockWithFreshMetadata", func(t *testing.T) {
+		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
+		cache := newTempCache(t)
+		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: strings.Repeat("d", 64),
+				GitSHA:        strings.Repeat("e", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		freshMetadata := registry.ResolveMetadata{
+			ArchiveSHA256: locked.Packages["example.com/acme/calc@v1.2.3"].ArchiveSHA256,
+			GitSHA:        strings.Repeat("f", 40),
+			ResolvedFrom:  registry.ResolvedFromGitSource,
+			ResolvedAt:    "2026-03-28T14:00:00Z",
+		}
+		freshMetadata.ArchiveSHA256 = sha256HexForTest(archiveBytes)
+		locked.Packages["example.com/acme/calc@v1.2.3"] = ToolsetLockEntry{
+			ArchiveSHA256: freshMetadata.ArchiveSHA256,
+			GitSHA:        strings.Repeat("e", 40),
+			ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+			ResolvedAt:    "2026-03-28T13:00:00Z",
+		}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{result: registry.FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: freshMetadata}}
+
+		_, err := file.Resolve(ctx, registry.NewResolver(cache, src))
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if len(src.calls) != 1 {
+			t.Fatalf("source calls = %#v, want one refetch", src.calls)
+		}
+		reloaded, err := LoadLock(file.LockFilename())
+		if err != nil {
+			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
+		}
+		entry := reloaded.Packages["example.com/acme/calc@v1.2.3"]
+		if entry.ArchiveSHA256 != freshMetadata.ArchiveSHA256 || entry.GitSHA != freshMetadata.GitSHA || entry.ResolvedFrom != ToolsetLockResolvedFrom(freshMetadata.ResolvedFrom) || entry.ResolvedAt != freshMetadata.ResolvedAt {
+			t.Fatalf("lock entry = %#v, want fresh metadata %#v", entry, freshMetadata)
+		}
+	})
+
+	t.Run("PersistentLockMismatchFailsAndLeavesLockfileUntouched", func(t *testing.T) {
+		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
+		cache := newTempCache(t)
+		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: sha256HexForTest(archiveBytes),
+				GitSHA:        strings.Repeat("a", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		badMetadata := registry.ResolveMetadata{
+			ArchiveSHA256: strings.Repeat("b", 64),
+			GitSHA:        strings.Repeat("c", 40),
+			ResolvedFrom:  registry.ResolvedFromGitSource,
+			ResolvedAt:    "2026-03-28T14:00:00Z",
+		}
+		src := &recordingSource{result: registry.FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: badMetadata}}
+
+		_, err = file.Resolve(ctx, registry.NewResolver(cache, src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want mismatch error")
+		}
+		assertErrorContains(t, err, "cache mismatch refetch failed integrity check")
+		assertErrorContains(t, err, "expected archive_sha256")
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed on mismatch failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
+
+	t.Run("FirstSortedPackageFailureLeavesPriorLockfileUntouched", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/zeta/after-failure": "v2.0.0",
+				"example.com/acme/first":         "v1.0.0",
+			},
+			"tools": []map[string]string{},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/first@v1.0.0": {
+				ArchiveSHA256: strings.Repeat("a", 64),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		sourceErr := errors.New("source boom")
+		src := &recordingSource{err: sourceErr}
+
+		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want non-nil")
+		}
+		if !errors.Is(err, sourceErr) {
+			t.Fatalf("error = %v, want source boom", err)
+		}
+		wantCalls := []string{"example.com/acme/first@v1.0.0"}
+		if !reflect.DeepEqual(src.calls, wantCalls) {
+			t.Fatalf("source calls = %#v, want %#v", src.calls, wantCalls)
+		}
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed on resolve failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
 }
 
 type recordingSource struct {
-	calls []string
-	err   error
+	calls  []string
+	result registry.FetchResult
+	err    error
 }
 
 func (s *recordingSource) Fetch(_ context.Context, module registry.ModulePath, version registry.Version) (registry.FetchResult, error) {
 	s.calls = append(s.calls, fmt.Sprintf("%s@%s", module, version))
-	return registry.FetchResult{}, s.err
+	return s.result, s.err
+}
+
+func mustLoadToolsetFileNamed(t *testing.T, basename string, value any) *ToolsetFile {
+	t.Helper()
+
+	file, err := Load(writeToolsetJSONNamed(t, basename, value))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	return file
+}
+
+func sha256HexForTest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func mustLoadToolsetFile(t *testing.T, value any) *ToolsetFile {
@@ -517,6 +824,12 @@ func resolvedPackageNames(resolved ResolvedToolset) []string {
 		out[i] = resolvedTool.Package.Name
 	}
 	return out
+}
+
+func mustArchiveBytesForFixture(t *testing.T, fixtureName string) []byte {
+	t.Helper()
+	archiveBytes, _ := loadFixtureArchiveAndManifestBytes(t, fixtureName)
+	return archiveBytes
 }
 
 func loadFixtureArchiveAndManifestBytes(t *testing.T, fixtureName string) ([]byte, []byte) {

@@ -81,7 +81,7 @@ Widen the registry source and resolver seam so declarative resolve can capture t
   - Estimate: 55m
   - Files: registry/source.go, registry/source_test.go, registry/git_source.go, registry/git_source_test.go, registry/resolver.go, registry/resolver_test.go, toolset/toolset.go, registry/testutil/emulatetest/seed.go
   - Verify: GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s
-- [ ] **T03: Wire ToolsetFile.Resolve to verify and rewrite sibling lockfiles through the shared resolver path** — ## Description
+- [x] **T03: Declarative toolset resolves now verify and rewrite sibling lockfiles through the shared builder/resolver path.** — ## Description
 
 Integrate the new lockfile contract into declarative resolution without bypassing the builder/resolver chain. `ToolsetFile.Resolve` should load an existing sibling lockfile, rely on the schema-plus-semantic validation introduced in T01, resolve packages in sorted order using the metadata-aware resolver seam, verify lock expectations before trusting cache state, and write the updated lockfile only after all packages succeed.
 

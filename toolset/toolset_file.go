@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -142,7 +143,9 @@ func (f *ToolsetFile) LockFilename() string {
 }
 
 // Resolve materializes the declared packages through the same builder and
-// registry path used by imperative toolset construction.
+// registry path used by imperative toolset construction while loading,
+// verifying, and rewriting the sibling lockfile only after all packages have
+// resolved successfully.
 func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) (ResolvedToolset, error) {
 	if f == nil {
 		return ResolvedToolset{}, fmt.Errorf("resolve toolset file: nil toolset file")
@@ -151,7 +154,23 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 		return ResolvedToolset{}, fmt.Errorf("resolve toolset file: toolset file must be loaded and validated before resolve")
 	}
 
+	var existingLock *ToolsetLockFile
+	if f.lockFilename != "" {
+		loadedLock, err := LoadLock(f.lockFilename)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+			}
+		} else {
+			existingLock = loadedLock
+		}
+	}
+	if existingLock == nil {
+		existingLock = &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{}}
+	}
+
 	builder := NewWithResolver(resolver)
+	updatedLock := &ToolsetLockFile{Packages: make(map[string]ToolsetLockEntry, len(f.parsedPackages))}
 	modules := make([]tooldef.ModulePath, 0, len(f.parsedPackages))
 	for module := range f.parsedPackages {
 		modules = append(modules, module)
@@ -161,7 +180,33 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 	})
 
 	for _, module := range modules {
-		if err := builder.AddFromRegistry(ctx, module.String(), f.parsedPackages[module].String()); err != nil {
+		version := f.parsedPackages[module]
+		packageKey := fmt.Sprintf("%s@%s", module, version)
+
+		var expected *registry.ResolveMetadata
+		if existing, ok := existingLock.Packages[packageKey]; ok {
+			expected = &registry.ResolveMetadata{
+				ArchiveSHA256: existing.ArchiveSHA256,
+				GitSHA:        existing.GitSHA,
+				ResolvedFrom:  registry.ResolvedFrom(existing.ResolvedFrom),
+				ResolvedAt:    existing.ResolvedAt,
+			}
+		}
+
+		metadata, err := builder.AddFromRegistryWithExpected(ctx, module.String(), version.String(), expected)
+		if err != nil {
+			return ResolvedToolset{}, err
+		}
+		updatedLock.Packages[packageKey] = ToolsetLockEntry{
+			ArchiveSHA256: metadata.ArchiveSHA256,
+			GitSHA:        metadata.GitSHA,
+			ResolvedFrom:  ToolsetLockResolvedFrom(metadata.ResolvedFrom),
+			ResolvedAt:    metadata.ResolvedAt,
+		}
+	}
+
+	if f.lockFilename != "" {
+		if err := updatedLock.Write(f.lockFilename); err != nil {
 			return ResolvedToolset{}, err
 		}
 	}

@@ -350,7 +350,7 @@ Run `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` �
 - Integration with resolver orchestration (S08)
 - Cache population after fetch (S08)
  |
-| S06 | Git-source fallback resolver | high | S01, S02, S03, S04 | ⬜ | TBD |
+| S06 | Git-source fallback resolver | high | S01, S02, S03, S04 | ✅ | TBD |
 | S07 | Pseudo-version resolution | medium | S03, S06 | ⬜ | TBD |
 | S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ⬜ | TBD |
 | S09 | Toolset file parsing | medium | S08 | ⬜ | TBD |

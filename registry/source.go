@@ -2,21 +2,68 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
+	"time"
 )
 
 const defaultGitHubAPIBaseURL = "https://api.github.com"
 
-var ErrReleaseNotFound = errors.New("github release not found")
+var (
+	ErrReleaseNotFound = errors.New("github release not found")
+	sha256HexPattern   = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+	gitCommitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+)
+
+type ResolvedFrom string
+
+const (
+	ResolvedFromGitHubRelease ResolvedFrom = "github-release"
+	ResolvedFromGitSource     ResolvedFrom = "git-source"
+)
+
+type ResolveMetadata struct {
+	ArchiveSHA256 string       `json:"archive_sha256"`
+	GitSHA        string       `json:"git_sha"`
+	ResolvedFrom  ResolvedFrom `json:"resolved_from"`
+	ResolvedAt    string       `json:"resolved_at"`
+}
+
+func (m ResolveMetadata) Validate() error {
+	if !sha256HexPattern.MatchString(m.ArchiveSHA256) {
+		return fmt.Errorf("archive_sha256 %q must be a 64-character hex sha256", m.ArchiveSHA256)
+	}
+	if !gitCommitSHAPattern.MatchString(m.GitSHA) {
+		return fmt.Errorf("git_sha %q must be a 40-character hex git commit", m.GitSHA)
+	}
+	switch m.ResolvedFrom {
+	case ResolvedFromGitHubRelease, ResolvedFromGitSource:
+		// okay
+	default:
+		return fmt.Errorf("resolved_from %q is invalid", m.ResolvedFrom)
+	}
+	if _, err := time.Parse(time.RFC3339, m.ResolvedAt); err != nil {
+		return fmt.Errorf("resolved_at %q must be RFC3339: %w", m.ResolvedAt, err)
+	}
+	return nil
+}
+
+type FetchResult struct {
+	Archive  []byte
+	Manifest []byte
+	Metadata ResolveMetadata
+}
 
 type PackageSource interface {
-	Fetch(ctx context.Context, module ModulePath, version Version) (archive []byte, manifest []byte, err error)
+	Fetch(ctx context.Context, module ModulePath, version Version) (FetchResult, error)
 }
 
 type GitHubReleaseSource struct {
@@ -35,6 +82,15 @@ type githubReleaseAsset struct {
 	Name string `json:"name"`
 }
 
+type githubRef struct {
+	Object githubRefObject `json:"object"`
+}
+
+type githubRefObject struct {
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
 func NewGitHubReleaseSource(baseURL string, client *http.Client) *GitHubReleaseSource {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultGitHubAPIBaseURL
@@ -48,10 +104,10 @@ func NewGitHubReleaseSource(baseURL string, client *http.Client) *GitHubReleaseS
 	}
 }
 
-func (s *GitHubReleaseSource) Fetch(ctx context.Context, module ModulePath, version Version) ([]byte, []byte, error) {
+func (s *GitHubReleaseSource) Fetch(ctx context.Context, module ModulePath, version Version) (FetchResult, error) {
 	owner, repo, err := githubRepoForModule(module)
 	if err != nil {
-		return nil, nil, err
+		return FetchResult{}, err
 	}
 
 	tag := version.String()
@@ -61,10 +117,10 @@ func (s *GitHubReleaseSource) Fetch(ctx context.Context, module ModulePath, vers
 
 	release, err := s.fetchReleaseByTag(ctx, owner, repo, tag)
 	if err != nil {
-		return nil, nil, err
+		return FetchResult{}, err
 	}
 	if len(release.Assets) == 0 {
-		return nil, nil, fmt.Errorf("github release %s/%s@%s has no assets", owner, repo, tag)
+		return FetchResult{}, fmt.Errorf("github release %s/%s@%s has no assets", owner, repo, tag)
 	}
 
 	var archiveAsset *githubReleaseAsset
@@ -84,22 +140,37 @@ func (s *GitHubReleaseSource) Fetch(ctx context.Context, module ModulePath, vers
 	}
 
 	if archiveAsset == nil {
-		return nil, nil, fmt.Errorf("github release %s/%s@%s is missing archive asset ending in .toolbox.pkg", owner, repo, tag)
+		return FetchResult{}, fmt.Errorf("github release %s/%s@%s is missing archive asset ending in .toolbox.pkg", owner, repo, tag)
 	}
 	if manifestAsset == nil {
-		return nil, nil, fmt.Errorf("github release %s/%s@%s is missing manifest asset toolbox.pkg.json", owner, repo, tag)
+		return FetchResult{}, fmt.Errorf("github release %s/%s@%s is missing manifest asset toolbox.pkg.json", owner, repo, tag)
+	}
+
+	gitSHA, err := s.fetchTagCommitSHA(ctx, owner, repo, tag)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("resolve git sha for github release %s/%s@%s: %w", owner, repo, tag, err)
 	}
 
 	archiveBytes, err := s.downloadAsset(ctx, owner, repo, archiveAsset.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("download archive asset %q: %w", archiveAsset.Name, err)
+		return FetchResult{}, fmt.Errorf("download archive asset %q: %w", archiveAsset.Name, err)
 	}
 	manifestBytes, err := s.downloadAsset(ctx, owner, repo, manifestAsset.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("download manifest asset %q: %w", manifestAsset.Name, err)
+		return FetchResult{}, fmt.Errorf("download manifest asset %q: %w", manifestAsset.Name, err)
 	}
 
-	return archiveBytes, manifestBytes, nil
+	metadata := ResolveMetadata{
+		ArchiveSHA256: sha256Hex(archiveBytes),
+		GitSHA:        gitSHA,
+		ResolvedFrom:  ResolvedFromGitHubRelease,
+		ResolvedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := metadata.Validate(); err != nil {
+		return FetchResult{}, fmt.Errorf("github release %s/%s@%s returned invalid metadata: %w", owner, repo, tag, err)
+	}
+
+	return FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: metadata}, nil
 }
 
 func (s *GitHubReleaseSource) fetchReleaseByTag(ctx context.Context, owner, repo, tag string) (*githubRelease, error) {
@@ -134,6 +205,42 @@ func (s *GitHubReleaseSource) fetchReleaseByTag(ctx context.Context, owner, repo
 		return nil, fmt.Errorf("GET %s: decode response: %w", requestURL, err)
 	}
 	return &release, nil
+}
+
+func (s *GitHubReleaseSource) fetchTagCommitSHA(ctx context.Context, owner, repo, tag string) (string, error) {
+	path := fmt.Sprintf("/repos/%s/%s/git/ref/tags/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(tag))
+	requestURL := s.requestURL(path)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("build tag ref request: %w", err)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GET %s: %w", requestURL, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("GET %s: read response body: %w", requestURL, err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("GET %s: unexpected status %d: %s", requestURL, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var ref githubRef
+	if err := json.Unmarshal(body, &ref); err != nil {
+		return "", fmt.Errorf("GET %s: decode response: %w", requestURL, err)
+	}
+	if ref.Object.Type != "commit" {
+		return "", fmt.Errorf("GET %s: expected tag ref object type %q, got %q", requestURL, "commit", ref.Object.Type)
+	}
+	if !gitCommitSHAPattern.MatchString(ref.Object.SHA) {
+		return "", fmt.Errorf("GET %s: invalid commit sha %q", requestURL, ref.Object.SHA)
+	}
+	return strings.ToLower(ref.Object.SHA), nil
 }
 
 func (s *GitHubReleaseSource) downloadAsset(ctx context.Context, owner, repo string, assetID int) ([]byte, error) {
@@ -175,6 +282,11 @@ func githubRepoForModule(module ModulePath) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("module path %q must contain non-empty owner and repo", module)
 	}
 	return parts[1], parts[2], nil
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 var _ PackageSource = (*GitHubReleaseSource)(nil)

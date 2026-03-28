@@ -2,14 +2,17 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -22,39 +25,59 @@ func TestGitHubReleaseSource(t *testing.T) {
 	fixtureDir := fixtureSourceDir(t, "calc")
 
 	t.Run("happy path", func(t *testing.T) {
-		repo := nextSourceRepoName("happy")
-		module := mustModulePath(t, "github.com/admin/"+repo)
+		module := mustModulePath(t, "github.com/admin/stub-happy")
 		version := mustVersion(t, "v1.0.0")
+		archiveBytes := []byte("archive-bytes")
+		manifestBytes := []byte(`{"name":"calc"}`)
+		commitSHA := strings.Repeat("a", 40)
 
-		seeded, err := seed.SeedPackageRelease("admin", repo, version.String(), fixtureDir)
-		if err != nil {
-			t.Fatalf("SeedPackageRelease(): %v", err)
-		}
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/admin/stub-happy/releases/tags/v1.0.0":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id":       10,
+					"tag_name": "v1.0.0",
+					"assets": []map[string]any{
+						{"id": 1, "name": "calc.toolbox.pkg"},
+						{"id": 2, "name": "toolbox.pkg.json"},
+					},
+				})
+			case "/repos/admin/stub-happy/git/ref/tags/v1.0.0":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"object": map[string]any{"type": "commit", "sha": commitSHA},
+				})
+			case "/repos/admin/stub-happy/releases/assets/1":
+				_, _ = w.Write(archiveBytes)
+			case "/repos/admin/stub-happy/releases/assets/2":
+				_, _ = w.Write(manifestBytes)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer ts.Close()
 
-		archiveBytes, manifestBytes, err := src.Fetch(context.Background(), module, version)
+		stub := NewGitHubReleaseSource(ts.URL, ts.Client())
+		result, err := stub.Fetch(context.Background(), module, version)
 		if err != nil {
 			t.Fatalf("Fetch(): %v", err)
 		}
-		if len(archiveBytes) == 0 {
+		if len(result.Archive) == 0 {
 			t.Fatal("Fetch(): archive bytes were empty")
 		}
-		if len(manifestBytes) == 0 {
+		if len(result.Manifest) == 0 {
 			t.Fatal("Fetch(): manifest bytes were empty")
 		}
-
-		if diff := cmp.Diff(seeded.ArchiveBytes, archiveBytes); diff != "" {
-			if looksLikeJSON(archiveBytes) {
-				t.Log("emulate returned JSON for the archive asset download; accepting non-empty bytes because the API sequence succeeded")
-			} else {
-				t.Fatalf("archive bytes mismatch (-want +got):\n%s", diff)
-			}
+		if result.Metadata.ResolvedFrom != ResolvedFromGitHubRelease {
+			t.Fatalf("resolved_from = %q, want %q", result.Metadata.ResolvedFrom, ResolvedFromGitHubRelease)
 		}
-		if diff := cmp.Diff(seeded.ManifestBytes, manifestBytes); diff != "" {
-			if looksLikeJSON(manifestBytes) {
-				t.Log("emulate returned JSON for the manifest asset download; accepting non-empty bytes because the API sequence succeeded")
-			} else {
-				t.Fatalf("manifest bytes mismatch (-want +got):\n%s", diff)
-			}
+		if result.Metadata.ArchiveSHA256 != sha256Hex(result.Archive) {
+			t.Fatalf("archive_sha256 = %q, want %q", result.Metadata.ArchiveSHA256, sha256Hex(result.Archive))
+		}
+		if result.Metadata.GitSHA != commitSHA {
+			t.Fatalf("git_sha = %q, want %q", result.Metadata.GitSHA, commitSHA)
+		}
+		if _, err := time.Parse(time.RFC3339, result.Metadata.ResolvedAt); err != nil {
+			t.Fatalf("resolved_at parse error: %v", err)
 		}
 	})
 
@@ -68,7 +91,7 @@ func TestGitHubReleaseSource(t *testing.T) {
 			t.Fatalf("CreateRepo(): %v", err)
 		}
 
-		_, _, err = src.Fetch(context.Background(), module, version)
+		_, err = src.Fetch(context.Background(), module, version)
 		if err == nil {
 			t.Fatal("Fetch() error = nil, want non-nil")
 		}
@@ -87,7 +110,7 @@ func TestGitHubReleaseSource(t *testing.T) {
 			t.Fatalf("SeedMissingAssetRelease(): %v", err)
 		}
 
-		_, _, err = src.Fetch(context.Background(), module, version)
+		_, err = src.Fetch(context.Background(), module, version)
 		if err == nil {
 			t.Fatal("Fetch() error = nil, want non-nil")
 		}
@@ -106,7 +129,7 @@ func TestGitHubReleaseSource(t *testing.T) {
 			t.Fatalf("SeedMissingAssetRelease(): %v", err)
 		}
 
-		_, _, err = src.Fetch(context.Background(), module, version)
+		_, err = src.Fetch(context.Background(), module, version)
 		if err == nil {
 			t.Fatal("Fetch() error = nil, want non-nil")
 		}
@@ -125,12 +148,54 @@ func TestGitHubReleaseSource(t *testing.T) {
 			t.Fatalf("SeedEmptyRelease(): %v", err)
 		}
 
-		_, _, err = src.Fetch(context.Background(), module, version)
+		_, err = src.Fetch(context.Background(), module, version)
 		if err == nil {
 			t.Fatal("Fetch() error = nil, want non-nil")
 		}
 		if !strings.Contains(err.Error(), "has no assets") {
 			t.Fatalf("Fetch() error = %v, want no assets message", err)
+		}
+	})
+
+	t.Run("malformed tag lookup payload is rejected before metadata persistence", func(t *testing.T) {
+		module := mustModulePath(t, "github.com/admin/stub")
+		version := mustVersion(t, "v1.2.3")
+		archiveBytes := []byte("archive-bytes")
+		manifestBytes := []byte(`{"name":"calc"}`)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/admin/stub/releases/tags/v1.2.3":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id":       10,
+					"tag_name": "v1.2.3",
+					"assets": []map[string]any{
+						{"id": 1, "name": "calc.toolbox.pkg"},
+						{"id": 2, "name": "toolbox.pkg.json"},
+					},
+				})
+			case "/repos/admin/stub/git/ref/tags/v1.2.3":
+				_, _ = w.Write([]byte(`{"object":`))
+			case "/repos/admin/stub/releases/assets/1":
+				_, _ = w.Write(archiveBytes)
+			case "/repos/admin/stub/releases/assets/2":
+				_, _ = w.Write(manifestBytes)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer ts.Close()
+
+		stub := NewGitHubReleaseSource(ts.URL, ts.Client())
+		_, err := stub.Fetch(context.Background(), module, version)
+		if err == nil {
+			t.Fatal("Fetch() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "resolve git sha") {
+			t.Fatalf("Fetch() error = %v, want git sha context", err)
+		}
+		if !strings.Contains(err.Error(), "decode response") {
+			t.Fatalf("Fetch() error = %v, want decode response", err)
 		}
 	})
 }

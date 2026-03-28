@@ -478,9 +478,9 @@ type recordingSource struct {
 	err   error
 }
 
-func (s *recordingSource) Fetch(_ context.Context, module registry.ModulePath, version registry.Version) ([]byte, []byte, error) {
+func (s *recordingSource) Fetch(_ context.Context, module registry.ModulePath, version registry.Version) (registry.FetchResult, error) {
 	s.calls = append(s.calls, fmt.Sprintf("%s@%s", module, version))
-	return nil, nil, s.err
+	return registry.FetchResult{}, s.err
 }
 
 func mustLoadToolsetFile(t *testing.T, value any) *ToolsetFile {

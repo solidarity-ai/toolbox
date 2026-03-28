@@ -82,6 +82,15 @@ func (c *Cache) LoadArchive(module ModulePath, version Version) (packaging.Loade
 	return packaging.LoadArchive(paths.archive, paths.manifest)
 }
 
+func (c *Cache) ArchiveSHA256(module ModulePath, version Version) (string, error) {
+	paths := c.paths(module, version)
+	archiveBytes, err := os.ReadFile(paths.archive)
+	if err != nil {
+		return "", fmt.Errorf("read cached archive %s: %w", paths.archive, err)
+	}
+	return sha256Hex(archiveBytes), nil
+}
+
 type cachePaths struct {
 	archive  string
 	manifest string

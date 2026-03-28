@@ -78,11 +78,11 @@ func (b *Builder) AddFromRegistry(ctx context.Context, modulePath, version strin
 		return fmt.Errorf("parse version: %w", err)
 	}
 
-	pkg, err := b.resolver.Resolve(ctx, module, ver)
+	result, err := b.resolver.Resolve(ctx, module, ver)
 	if err != nil {
 		return err
 	}
-	b.packages = append(b.packages, pkg)
+	b.packages = append(b.packages, result.Package)
 	return nil
 }
 

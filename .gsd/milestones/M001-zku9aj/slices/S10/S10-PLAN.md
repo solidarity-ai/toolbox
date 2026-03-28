@@ -43,7 +43,7 @@ Add toolset-level lockfile types and helpers beside `ToolsetFile`. This task est
   - Estimate: 40m
   - Files: toolset/toolset_lock.go, toolset/toolset_lock_test.go, toolset/toolbox.toolset.lock.schema.json, toolset/toolset_file.go, docs/rfc-tool-registry.md
   - Verify: GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s
-- [ ] **T02: Return provenance-aware resolver results and enforce integrity-aware cache refetch semantics** — ## Description
+- [x] **T02: Added provenance-aware resolver results, exact git-SHA capture, and one-refetch cache integrity enforcement without forking the builder path.** — ## Description
 
 Widen the registry source and resolver seam so declarative resolve can capture the metadata required by R008 without introducing a second resolution path. This task should preserve S08/S09 fallback behavior while returning `archive_sha256`, exact `git_sha`, `resolved_from`, and `resolved_at`, and it should make cache hits refetch rather than silently trust bytes that disagree with the lock.
 

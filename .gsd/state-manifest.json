@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T14:25:05.453Z",
+  "exported_at": "2026-03-28T14:35:01.379Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -913,19 +913,33 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S10",
       "id": "T02",
-      "title": "Return provenance-aware resolver results and enforce integrity-aware cache refetch semantics",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added provenance-aware resolver results, exact git-SHA capture, and one-refetch cache integrity enforcement without forking the builder path.",
+      "status": "complete",
+      "one_liner": "Added provenance-aware resolver results, exact git-SHA capture, and one-refetch cache integrity enforcement without forking the builder path.",
+      "narrative": "Widened the registry seam so package sources now return lockfile-ready provenance metadata alongside archive and manifest bytes. GitHub release resolution now performs tag-ref commit lookup before persisting metadata, git fallback records the exact checked-out commit SHA for tagged and pseudo-version fetches, and the resolver returns a richer result type while preserving the existing Builder.AddFromRegistry path by consuming the loaded package internally. Added expected-metadata validation and cache-integrity handling so mismatched cached bytes are treated as untrusted, refetched exactly once, and rejected with explicit expected-vs-actual hash context if the fresh bytes still disagree. Extended registry tests to cover cache-hit metadata, fallback provenance, exact git SHA reporting, malformed tag-ref responses, invalid expected metadata, and refetch/fail semantics, and recorded the emulate tag-ref limitation in project knowledge.",
+      "verification_result": "Ran `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s` and confirmed the focused resolver/source/git-source contract passed. Then ran `GOWORK=$(pwd)/go.work go test ./toolset ./registry -count=1` to verify the richer resolver result still composes through Builder.AddFromRegistry and the surrounding typed boundary.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T14:35:01.365Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "Used a focused `httptest` server for GitHub release happy-path provenance tests instead of relying entirely on emulate because the local emulate server does not implement the tag-ref endpoint required for exact commit-SHA lookup.",
+      "known_issues": "None.",
+      "key_files": [
+        "registry/source.go",
+        "registry/git_source.go",
+        "registry/resolver.go",
+        "registry/cache.go",
+        "toolset/toolset.go",
+        "registry/source_test.go",
+        "registry/git_source_test.go",
+        "registry/resolver_test.go",
+        ".gsd/KNOWLEDGE.md",
+        ".gsd/milestones/M001-zku9aj/slices/S10/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Expose provenance metadata through the primary resolver result type and keep Builder compatibility by consuming the richer result internally.",
+        "Treat cache/archive hash mismatches as untrusted state: verify once, refetch once, then fail with explicit expected-vs-actual hash context."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S10\nmilestone: M001-zku9aj\nkey_files:\n  - registry/source.go\n  - registry/git_source.go\n  - registry/resolver.go\n  - registry/cache.go\n  - toolset/toolset.go\n  - registry/source_test.go\n  - registry/git_source_test.go\n  - registry/resolver_test.go\n  - .gsd/KNOWLEDGE.md\n  - .gsd/milestones/M001-zku9aj/slices/S10/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Expose provenance metadata through the primary resolver result type and keep Builder compatibility by consuming the richer result internally.\n  - Treat cache/archive hash mismatches as untrusted state: verify once, refetch once, then fail with explicit expected-vs-actual hash context.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T14:35:01.366Z\nblocker_discovered: false\n---\n\n# T02: Added provenance-aware resolver results, exact git-SHA capture, and one-refetch cache integrity enforcement without forking the builder path.\n\n**Added provenance-aware resolver results, exact git-SHA capture, and one-refetch cache integrity enforcement without forking the builder path.**\n\n## What Happened\n\nWidened the registry seam so package sources now return lockfile-ready provenance metadata alongside archive and manifest bytes. GitHub release resolution now performs tag-ref commit lookup before persisting metadata, git fallback records the exact checked-out commit SHA for tagged and pseudo-version fetches, and the resolver returns a richer result type while preserving the existing Builder.AddFromRegistry path by consuming the loaded package internally. Added expected-metadata validation and cache-integrity handling so mismatched cached bytes are treated as untrusted, refetched exactly once, and rejected with explicit expected-vs-actual hash context if the fresh bytes still disagree. Extended registry tests to cover cache-hit metadata, fallback provenance, exact git SHA reporting, malformed tag-ref responses, invalid expected metadata, and refetch/fail semantics, and recorded the emulate tag-ref limitation in project knowledge.\n\n## Verification\n\nRan `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s` and confirmed the focused resolver/source/git-source contract passed. Then ran `GOWORK=$(pwd)/go.work go test ./toolset ./registry -count=1` to verify the richer resolver result still composes through Builder.AddFromRegistry and the surrounding typed boundary.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s` | 0 | ✅ pass | 1535ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./toolset ./registry -count=1` | 0 | ✅ pass | 3000ms |\n\n\n## Deviations\n\nUsed a focused `httptest` server for GitHub release happy-path provenance tests instead of relying entirely on emulate because the local emulate server does not implement the tag-ref endpoint required for exact commit-SHA lookup.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `registry/source.go`\n- `registry/git_source.go`\n- `registry/resolver.go`\n- `registry/cache.go`\n- `toolset/toolset.go`\n- `registry/source_test.go`\n- `registry/git_source_test.go`\n- `registry/resolver_test.go`\n- `.gsd/KNOWLEDGE.md`\n- `.gsd/milestones/M001-zku9aj/slices/S10/tasks/T02-SUMMARY.md`\n",
       "description": "## Description\n\nWiden the registry source and resolver seam so declarative resolve can capture the metadata required by R008 without introducing a second resolution path. This task should preserve S08/S09 fallback behavior while returning `archive_sha256`, exact `git_sha`, `resolved_from`, and `resolved_at`, and it should make cache hits refetch rather than silently trust bytes that disagree with the lock.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| GitHub release metadata and tag lookup HTTP calls | Return source-specific context; non-404 errors must still short-circuit before fallback. | Respect `context.Context` and return timeout/cancel errors without partially populating cache metadata. | Reject malformed release or tag/ref payloads before cache write or metadata persistence. |\n| `git` clone / checkout / `rev-parse` in `GitSourceFallback` | Return step-specific git errors with module/version context and do not produce partially trusted metadata. | Respect caller cancellation and fail the fetch cleanly. | Reject timestamp or commit mismatches before packaging succeeds. |\n| Cache load / mismatch handling in `registry.Resolver` | Treat mismatched cached bytes as untrusted, refetch once, and fail if the fetched bytes still disagree with the expected lock metadata. | Do not spin or retry indefinitely; one refetch attempt is the contract. | Surface expected-vs-actual hash context rather than collapsing everything into a generic load failure. |\n\n## Load Profile\n\n- **Shared resources**: Cache directory, ordered source chain, git subprocesses, and GitHub API/emulate responses.\n- **Per-operation cost**: One resolver call per package; on GitHub release success that may include release metadata, tag/commit lookup, and two asset downloads; on fallback it may include one clone plus packaging.\n- **10x breakpoint**: API round-trips and cache rewrites become the first pressure points; correctness of fallback and refetch behavior matters more than parallelism in this slice.\n\n## Negative Tests\n\n- **Malformed inputs**: malformed release/tag lookup payloads, bad cached archive bytes, and invalid expected lock metadata.\n- **Error paths**: primary non-404 errors must still block fallback; cache mismatch must trigger exactly one refetch; a second mismatch must fail.\n- **Boundary conditions**: cache hits return enough metadata for lock verification, fallback success records fallback provenance instead of primary provenance, and pseudo-version or tagged git fetches expose the exact commit SHA.\n\n## Steps\n\n1. Introduce resolver/source metadata types in `registry/source.go` and `registry/resolver.go`, and keep `Builder.AddFromRegistry` compatible by consuming the richer result internally rather than forking resolution behavior.\n2. Capture provenance and commit identity in both source paths: GitHub release should resolve the tag to a commit SHA, while git fallback should return the checked-out commit SHA for tagged and pseudo-version fetches.\n3. Extend `registry/resolver_test.go`, `registry/source_test.go`, and `registry/git_source_test.go` to prove cache-hit metadata, fallback provenance, exact `git_sha`, and refetch/fail semantics; use emulate or focused HTTP stubs where needed for tag lookup coverage.\n\n## Must-Haves\n\n- [ ] Resolver/source results expose the lock metadata required by R008 without bypassing the existing builder/resolver path.\n- [ ] Cache hash mismatches refetch instead of being silently trusted, and persistent mismatches fail with explicit context.\n- [ ] GitHub release and git-source fallback both record deterministic provenance and exact commit identity, with compatibility tests guarding `Builder.AddFromRegistry`.",
       "estimate": "55m",
       "files": [
@@ -1549,6 +1563,28 @@
       "verdict": "✅ pass",
       "duration_ms": 1187,
       "created_at": "2026-03-28T14:25:05.439Z"
+    },
+    {
+      "id": 26,
+      "task_id": "T02",
+      "slice_id": "S10",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1535,
+      "created_at": "2026-03-28T14:35:01.365Z"
+    },
+    {
+      "id": 27,
+      "task_id": "T02",
+      "slice_id": "S10",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset ./registry -count=1",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 3000,
+      "created_at": "2026-03-28T14:35:01.365Z"
     }
   ]
 }

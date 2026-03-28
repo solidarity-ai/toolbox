@@ -19,16 +19,16 @@ type GitSourceFallback struct {
 	URLPrefix string
 }
 
-func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, version Version) ([]byte, []byte, error) {
+func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, version Version) (FetchResult, error) {
 	cloneRoot, err := os.MkdirTemp("", "toolbox-git-clone-*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create clone temp dir: %w", err)
+		return FetchResult{}, fmt.Errorf("create clone temp dir: %w", err)
 	}
 	defer os.RemoveAll(cloneRoot)
 
 	outDir, err := os.MkdirTemp("", "toolbox-git-pack-*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create packaging temp dir: %w", err)
+		return FetchResult{}, fmt.Errorf("create packaging temp dir: %w", err)
 	}
 	defer os.RemoveAll(outDir)
 
@@ -41,24 +41,42 @@ func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, versio
 		err = s.cloneTaggedVersion(ctx, module, version, cloneURL, checkoutDir)
 	}
 	if err != nil {
-		return nil, nil, err
+		return FetchResult{}, err
+	}
+
+	gitSHA, err := runGitForVersion(ctx, checkoutDir, module, version, cloneURL, "rev-parse HEAD", "rev-parse", "HEAD")
+	if err != nil {
+		return FetchResult{}, err
+	}
+	if !gitCommitSHAPattern.MatchString(gitSHA) {
+		return FetchResult{}, fmt.Errorf("git rev-parse HEAD %s@%s from %s returned invalid commit sha %q", module, version, cloneURL, gitSHA)
 	}
 
 	packed, err := packaging.Pack(checkoutDir, outDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("pack cloned repo %s@%s: %w", module, version, err)
+		return FetchResult{}, fmt.Errorf("pack cloned repo %s@%s: %w", module, version, err)
 	}
 
 	archiveBytes, err := os.ReadFile(packed.ArchivePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read packaged archive %s: %w", packed.ArchivePath, err)
+		return FetchResult{}, fmt.Errorf("read packaged archive %s: %w", packed.ArchivePath, err)
 	}
 	manifestBytes, err := os.ReadFile(packed.ManifestPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read packaged manifest %s: %w", packed.ManifestPath, err)
+		return FetchResult{}, fmt.Errorf("read packaged manifest %s: %w", packed.ManifestPath, err)
 	}
 
-	return archiveBytes, manifestBytes, nil
+	metadata := ResolveMetadata{
+		ArchiveSHA256: sha256Hex(archiveBytes),
+		GitSHA:        strings.ToLower(gitSHA),
+		ResolvedFrom:  ResolvedFromGitSource,
+		ResolvedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := metadata.Validate(); err != nil {
+		return FetchResult{}, fmt.Errorf("git source %s@%s produced invalid metadata: %w", module, version, err)
+	}
+
+	return FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: metadata}, nil
 }
 
 func (s *GitSourceFallback) cloneTaggedVersion(ctx context.Context, module ModulePath, version Version, cloneURL string, checkoutDir string) error {

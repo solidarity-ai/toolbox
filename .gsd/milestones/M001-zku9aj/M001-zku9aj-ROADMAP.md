@@ -1,4 +1,4 @@
-# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download - Context
+# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
 
 ## Vision
 M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context

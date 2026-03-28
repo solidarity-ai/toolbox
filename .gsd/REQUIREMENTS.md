@@ -2,30 +2,6 @@
 
 This file is the explicit capability and coverage contract for the project.
 
-## Active
-
-### R003 — Given a module path + version, the resolver fetches `.toolbox.pkg` and `toolbox.pkg.json` from the corresponding GitHub Release's assets. Supports `GITHUB_BASE_URL` override for testing against emulate. Handles auth via token for private repos.
-- Class: core-capability
-- Status: active
-- Description: Given a module path + version, the resolver fetches `.toolbox.pkg` and `toolbox.pkg.json` from the corresponding GitHub Release's assets. Supports `GITHUB_BASE_URL` override for testing against emulate. Handles auth via token for private repos.
-- Why it matters: GitHub Releases is the primary distribution path — most packages will be fetched this way
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S05
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §2 for GitHub Releases source spec
-
-### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
-- Class: quality-attribute
-- Status: active
-- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
-- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while keeping GitHub testing off the protected mainline
-- Source: user
-- Primary owning slice: M001-zku9aj/S01
-- Supporting slices: M001-zku9aj/S02
-- Validation: unmapped
-- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
-
 ## Validated
 
 ### R001 — Every tool is uniquely identified by `{module_path}@{version}/{tool_path}`. Module paths, versions, tool paths, and full FQNs are parseable, formattable, and round-trip faithful. Pseudo-versions (v0.0.0-timestamp-commitsha) are valid version strings.
@@ -49,6 +25,17 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: none
 - Validation: TestCache suite proves: packages stored at ~/.cache/toolbox/pkg/<module>/@v/<version>.{pkg,manifest,info}, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected.
 - Notes: See `docs/rfc-tool-registry.md` §3 for cache layout spec
+
+### R003 — Given a module path + version, the resolver fetches `.toolbox.pkg` and `toolbox.pkg.json` from the corresponding GitHub Release's assets. Supports `GITHUB_BASE_URL` override for testing against emulate. Handles auth via token for private repos.
+- Class: core-capability
+- Status: validated
+- Description: Given a module path + version, the resolver fetches `.toolbox.pkg` and `toolbox.pkg.json` from the corresponding GitHub Release's assets. Supports `GITHUB_BASE_URL` override for testing against emulate. Handles auth via token for private repos.
+- Why it matters: GitHub Releases is the primary distribution path — most packages will be fetched this way
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S05
+- Supporting slices: none
+- Validation: Combined milestone evidence validates R003: S05 proved GitHub release fetch semantics and GITHUB_BASE_URL override through emulate-backed integration tests, S12 proved GITHUB_TOKEN Authorization header wiring at the CLI boundary without token leakage, and final closeout verification `GOWORK=$(pwd)/go.work go test ./... -count=1` passed with registry and CLI packages green.
+- Notes: See `docs/rfc-tool-registry.md` §2 for GitHub Releases source spec
 
 ### R004 — When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
 - Class: core-capability
@@ -126,6 +113,17 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: none
 - Validation: Validated by S12 focused CLI proof: `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` passed, covering `toolbox versions`, `toolbox resolve`, single-module `toolbox resolve --upgrade`, `--file` selection, committed-lock cache-hit re-resolve, sibling local-overlay behavior, token-auth header wiring without token leakage, and CLI validation failures.
 - Notes: S12 closes R010 on the real `cmd/toolbox` boundary rather than on library seams alone.
+
+### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
+- Class: quality-attribute
+- Status: validated
+- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
+- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while keeping GitHub testing off the protected mainline
+- Source: user
+- Primary owning slice: M001-zku9aj/S01
+- Supporting slices: M001-zku9aj/S02
+- Validation: Validated by the full milestone artifact chain: S01-S02 delivered singleton emulate lifecycle, real release-asset seed builders, git fixture builders, failure-scenario builders, and CI workflow support; the requirement explicitly accepts proof from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection without pushing to main; final closeout verification `GOWORK=$(pwd)/go.work go test ./... -count=1` passed including registry/testutil/emulatetest and registry/testutil/gitfixture.
+- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
 
 ## Deferred
 
@@ -236,7 +234,7 @@ This file is the explicit capability and coverage contract for the project.
 |---|---|---|---|---|---|
 | R001 | core-capability | validated | M001-zku9aj/S03 | none | Table-driven tests prove parse/format round-trips for ModulePath, Version, ToolPath, ToolFQN, PackageVer. Pseudo-version decomposition verified. All edge cases covered. |
 | R002 | core-capability | validated | M001-zku9aj/S04 | none | TestCache suite proves: packages stored at ~/.cache/toolbox/pkg/<module>/@v/<version>.{pkg,manifest,info}, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected. |
-| R003 | core-capability | active | M001-zku9aj/S05 | none | unmapped |
+| R003 | core-capability | validated | M001-zku9aj/S05 | none | Combined milestone evidence validates R003: S05 proved GitHub release fetch semantics and GITHUB_BASE_URL override through emulate-backed integration tests, S12 proved GITHUB_TOKEN Authorization header wiring at the CLI boundary without token leakage, and final closeout verification `GOWORK=$(pwd)/go.work go test ./... -count=1` passed with registry and CLI packages green. |
 | R004 | core-capability | validated | M001-zku9aj/S06 | none | Validated by S06 focused git-source proof: `go test ./registry -v -count=1 -run TestGitSource -timeout 30s` passed, proving tagged git fallback clone + local packaging, archive/manifest return values, and correct failure behavior for missing tags, broken repos, and corrupt package manifests. |
 | R005 | core-capability | validated | M001-zku9aj/S07 | none | Validated by focused pseudo-version proof at both source and resolver/cache layers: `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver/PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache|TestGitSource/pseudo_version_happy_path' -timeout 60s` passed, proving fetch of the targeted untagged commit, local packaging, cache population, and cache reuse on the second resolve. |
 | R006 | core-capability | validated | M001-zku9aj/S08 | none | TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive. |
@@ -244,7 +242,7 @@ This file is the explicit capability and coverage contract for the project.
 | R008 | core-capability | validated | M001-zku9aj/S10 | none | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, proving declarative resolves write sibling `*.toolset.lock` files with archive_sha256/git_sha/resolved_from/resolved_at metadata and subsequently verify cache state against committed lock expectations. |
 | R009 | core-capability | validated | M001-zku9aj/S11 | none | Validated by S11/S12 overlay proof: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`, and the S12 focused CLI suite passed, proving sibling overlay loading, local-dir replacement, preserved lock entries, no synthetic lock entries for replaced-only packages, and CLI-level overlay behavior. |
 | R010 | core-capability | validated | M001-zku9aj/S12 | none | Validated by S12 focused CLI proof: `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` passed, covering `toolbox versions`, `toolbox resolve`, single-module `toolbox resolve --upgrade`, `--file` selection, committed-lock cache-hit re-resolve, sibling local-overlay behavior, token-auth header wiring without token leakage, and CLI validation failures. |
-| R011 | quality-attribute | active | M001-zku9aj/S01 | M001-zku9aj/S02 | unmapped |
+| R011 | quality-attribute | validated | M001-zku9aj/S01 | M001-zku9aj/S02 | Validated by the full milestone artifact chain: S01-S02 delivered singleton emulate lifecycle, real release-asset seed builders, git fixture builders, failure-scenario builders, and CI workflow support; the requirement explicitly accepts proof from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection without pushing to main; final closeout verification `GOWORK=$(pwd)/go.work go test ./... -count=1` passed including registry/testutil/emulatetest and registry/testutil/gitfixture. |
 | R020 | core-capability | deferred | none | none | unmapped |
 | R021 | core-capability | deferred | none | none | unmapped |
 | R022 | core-capability | deferred | none | none | unmapped |
@@ -257,7 +255,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 2
-- Mapped to slices: 2
-- Validated: 9 (R001, R002, R004, R005, R006, R007, R008, R009, R010)
+- Active requirements: 0
+- Mapped to slices: 0
+- Validated: 11 (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011)
 - Unmapped active requirements: 0

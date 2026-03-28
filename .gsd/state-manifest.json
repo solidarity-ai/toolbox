@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T22:49:21.505Z",
+  "exported_at": "2026-03-28T23:05:52.830Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
       "title": "M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context",
-      "status": "active",
+      "status": "complete",
       "depends_on": [],
       "created_at": "2026-03-28T00:27:04.099Z",
-      "completed_at": null,
+      "completed_at": "2026-03-28T23:05:52.817Z",
       "vision": "",
       "success_criteria": [],
       "key_risks": [],
@@ -1601,6 +1601,30 @@
       "decision": "R010",
       "choice": "validated",
       "rationale": "S12 focused CLI verification passed for `toolbox resolve`, `toolbox versions`, single-module `toolbox resolve --upgrade`, and `--file` selection via `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s`, plus the final S12 UAT artifact documents the same shipped surface.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 35,
+      "id": "D032",
+      "when_context": "M001-zku9aj post-S12 validation prep",
+      "scope": "requirement",
+      "decision": "R005",
+      "choice": "validated",
+      "rationale": "Direct focused proof now exists that a pseudo-version request resolves through the real resolver path, packages the targeted untagged commit via GitSourceFallback, writes the result into cache, and serves the second resolve from cache: `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver/PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache|TestGitSource/pseudo_version_happy_path' -timeout 60s` passed.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 39,
+      "id": "D033",
+      "when_context": "M001-zku9aj validation refresh",
+      "scope": "requirement",
+      "decision": "R003",
+      "choice": "validated",
+      "rationale": "Combined S05 and S12 evidence validates R003: S05 proves GitHub release asset fetch semantics and `GITHUB_BASE_URL` override through emulate-backed integration tests, while S12 proves `GITHUB_TOKEN` Authorization header wiring at the CLI boundary without token leakage via `TestRunVersionsUsesGitHubTokenAuthorizationWithoutLeakingIt`.",
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null

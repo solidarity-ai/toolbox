@@ -76,6 +76,10 @@ func TestToolsetFileLoad(t *testing.T) {
 		if got.LockFilename() != wantLock {
 			t.Fatalf("LockFilename() = %q, want %q", got.LockFilename(), wantLock)
 		}
+		wantLocal := strings.TrimSuffix(filename, toolsetFilenameSuffix) + toolsetLocalFilenameSuffix
+		if got.LocalFilename() != wantLocal {
+			t.Fatalf("LocalFilename() = %q, want %q", got.LocalFilename(), wantLocal)
+		}
 	})
 
 	t.Run("MissingFileReturnsReadErrorWithFilename", func(t *testing.T) {

@@ -34,6 +34,7 @@ type ToolsetFile struct {
 	parsedPackages map[tooldef.ModulePath]tooldef.Version
 	filename       string
 	lockFilename   string
+	localFilename  string
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -52,6 +53,10 @@ func mustResolveSchema(raw []byte) *jsonschema.Resolved {
 // tool references before any registry resolution happens.
 func Load(filename string) (*ToolsetFile, error) {
 	lockFilename, err := deriveToolsetLockFilename(filename)
+	if err != nil {
+		return nil, err
+	}
+	localFilename, err := deriveToolsetLocalFilename(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +85,7 @@ func Load(filename string) (*ToolsetFile, error) {
 
 	file.filename = filename
 	file.lockFilename = lockFilename
+	file.localFilename = localFilename
 	return &file, nil
 }
 
@@ -140,6 +146,34 @@ func (f *ToolsetFile) LockFilename() string {
 		return ""
 	}
 	return f.lockFilename
+}
+
+// LocalFilename returns the derived sibling *.toolset.local.json path.
+func (f *ToolsetFile) LocalFilename() string {
+	if f == nil {
+		return ""
+	}
+	return f.localFilename
+}
+
+// LoadLocal loads the optional sibling *.toolset.local.json overlay. Missing
+// overlays are treated as absent rather than invalid.
+func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
+	if f == nil {
+		return nil, fmt.Errorf("load toolset local file: nil toolset file")
+	}
+	if f.localFilename == "" {
+		return nil, fmt.Errorf("load toolset local file: toolset file must be loaded before local overlay can be derived")
+	}
+
+	file, err := LoadLocal(f.localFilename)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return file, nil
 }
 
 // Resolve materializes the declared packages through the same builder and

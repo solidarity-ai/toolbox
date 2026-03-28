@@ -39,25 +39,14 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
 - Class: core-capability
-- Status: validated
-- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry. For milestone planning purposes, this capability is already considered done based on the prior S09 run and should not remain in a pending state.
+- Status: active
+- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
 - Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases
 - Source: user (RFC)
 - Primary owning slice: M001-zku9aj/S09
 - Supporting slices: none
-- Validation: Prior S09 run completed the planning/implementation path: parse-time validation covers missing file, invalid JSON, empty packages, invalid module path, invalid version, unknown package reference, and tool version mismatch; resolution covers cached happy-path and nil-resolver failure propagation.
-- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
-
-### R008 — `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
-- Class: core-capability
-- Status: active
-- Description: `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
-- Why it matters: Reproducibility and integrity — same lockfile = same packages on any machine
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S10
-- Supporting slices: none
 - Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §4 (lockfile)
+- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
 
 ### R009 — A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
 - Class: core-capability
@@ -94,17 +83,6 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Validated
 
-### R006 — `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
-- Class: core-capability
-- Status: validated
-- Description: `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
-- Why it matters: This is the integration point — downstream code (invoke, codemode) doesn't change; the Builder just has a new way to acquire packages
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S08
-- Supporting slices: none
-- Validation: TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive.
-- Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
-
 ### R001 — Every tool is uniquely identified by `{module_path}@{version}/{tool_path}`. Module paths, versions, tool paths, and full FQNs are parseable, formattable, and round-trip faithful. Pseudo-versions (v0.0.0-timestamp-commitsha) are valid version strings.
 - Class: core-capability
 - Status: validated
@@ -126,6 +104,28 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: none
 - Validation: TestCache suite proves: packages stored at ~/.cache/toolbox/pkg/<module>/@v/<version>.{pkg,manifest,info}, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected.
 - Notes: See `docs/rfc-tool-registry.md` §3 for cache layout spec
+
+### R006 — `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
+- Class: core-capability
+- Status: validated
+- Description: `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
+- Why it matters: This is the integration point — downstream code (invoke, codemode) doesn't change; the Builder just has a new way to acquire packages
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S08
+- Supporting slices: none
+- Validation: TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive.
+- Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
+
+### R008 — `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
+- Class: core-capability
+- Status: validated
+- Description: `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
+- Why it matters: Reproducibility and integrity — same lockfile = same packages on any machine
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S10
+- Supporting slices: none
+- Validation: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, proving declarative resolves write sibling `*.toolset.lock` files with archive_sha256/git_sha/resolved_from/resolved_at metadata and subsequently verify cache state against committed lock expectations.
+- Notes: See `docs/rfc-tool-registry.md` §4 (lockfile)
 
 ## Deferred
 
@@ -239,9 +239,9 @@ This file is the explicit capability and coverage contract for the project.
 | R003 | core-capability | active | M001-zku9aj/S05 | none | unmapped |
 | R004 | core-capability | active | M001-zku9aj/S06 | none | unmapped |
 | R005 | core-capability | active | M001-zku9aj/S07 | none | unmapped |
-| R006 | core-capability | validated | M001-zku9aj/S08 | none | TestBuilderAddFromRegistry proves resolver injection, input validation, cache resolution, and Resolve() output parity. |
-| R007 | core-capability | validated | M001-zku9aj/S09 | none | Prior S09 run completed parse-time validation coverage plus cached happy-path resolution and nil-resolver error propagation. |
-| R008 | core-capability | active | M001-zku9aj/S10 | none | unmapped |
+| R006 | core-capability | validated | M001-zku9aj/S08 | none | TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive. |
+| R007 | core-capability | active | M001-zku9aj/S09 | none | unmapped |
+| R008 | core-capability | validated | M001-zku9aj/S10 | none | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, proving declarative resolves write sibling `*.toolset.lock` files with archive_sha256/git_sha/resolved_from/resolved_at metadata and subsequently verify cache state against committed lock expectations. |
 | R009 | core-capability | active | M001-zku9aj/S11 | none | unmapped |
 | R010 | core-capability | active | M001-zku9aj/S12 | none | unmapped |
 | R011 | quality-attribute | active | M001-zku9aj/S01 | M001-zku9aj/S02 | unmapped |
@@ -257,7 +257,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 8
-- Mapped to slices: 8
-- Validated: 3 (R001, R002, R006)
+- Active requirements: 7
+- Mapped to slices: 7
+- Validated: 4 (R001, R002, R006, R008)
 - Unmapped active requirements: 0

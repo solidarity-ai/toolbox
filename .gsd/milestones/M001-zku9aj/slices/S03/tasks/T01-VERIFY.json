@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T01",
+  "unitId": "M001-zku9aj/S03/T01",
+  "timestamp": 1774626001498,
+  "passed": true,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "go test ./tool/... -v -count=1 -run TestFQN",
+      "exitCode": 0,
+      "durationMs": 159,
+      "verdict": "pass"
+    },
+    {
+      "command": "go vet ./tool/...",
+      "exitCode": 0,
+      "durationMs": 55,
+      "verdict": "pass"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T21:34:26.661Z",
+  "exported_at": "2026-03-28T22:43:45.471Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -237,16 +237,16 @@
       "milestone_id": "M001-zku9aj",
       "id": "S11",
       "title": "Replace directives",
-      "status": "pending",
+      "status": "complete",
       "risk": "low",
       "depends": [
         "S09"
       ],
       "demo": "After this: TBD",
       "created_at": "2026-03-28T00:39:27.198Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-28T21:38:39.528Z",
+      "full_summary_md": "---\nid: S11\nparent: M001-zku9aj\nmilestone: M001-zku9aj\nprovides:\n  - Optional sibling `*.toolset.local.json` overlays with validated `replace` maps for declarative toolsets.\n  - Replace-aware `ToolsetFile.Resolve()` behavior that mixes local-dir and registry-backed packages without changing deterministic ordering.\n  - Lock-preservation semantics for replaced modules: unchanged existing entries, no synthetic entries for replaced-only packages, and no partial rewrites on replace failures.\nrequires:\n  - slice: S09\n    provides: Validated declarative `toolbox.toolset.json` loading and `ToolsetFile.Resolve()` as the single declarative resolution seam.\n  - slice: S10\n    provides: Existing sibling lockfile validation and rewrite semantics that S11 preserved for unreplaced packages and copied for replaced-package lock preservation.\naffects:\n  - S12\nkey_files:\n  - toolset/toolset_local.go\n  - toolset/toolbox.toolset.local.schema.json\n  - toolset/toolset_local_test.go\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/PROJECT.md\n  - .gsd/KNOWLEDGE.md\nkey_decisions:\n  - Keep replace directives as an optional sibling `toolbox.toolset.local.json` overlay owned by `toolset` rather than moving local override behavior into `registry`.\n  - Resolve replace paths relative to the sibling overlay file, not the caller's working directory.\n  - Preserve replaced-package lock entries by starting rewrites from a copy of the validated existing lockfile and skipping new lock entry creation for replaced-only modules.\npatterns_established:\n  - Use the same schema-first then semantic-validation pattern for new declarative file types (`toolbox.toolset.local.json`) as existing toolset and lockfile loaders.\n  - When local overrides bypass registry resolution, preserve existing lock metadata rather than attempting to invent provenance for replaced packages.\n  - Keep mixed local + registry package resolution deterministic by iterating declared modules in sorted order before branching into local or registry paths.\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  - .gsd/milestones/M001-zku9aj/slices/S11/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S11/tasks/T02-SUMMARY.md\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T21:38:39.529Z\nblocker_discovered: false\n---\n\n# S11: Replace directives\n\n**Declarative toolsets now support optional sibling `*.toolset.local.json` replace overlays that resolve selected modules from local package directories while preserving existing lockfile entries for replaced packages and leaving unreplaced packages on the registry/lock path.**\n\n## What Happened\n\nS11 finished the declarative replace-directive path without introducing a second resolver pipeline. T01 added a separate `toolbox.toolset.local.json` contract in `toolset` with deterministic sibling filename derivation for both `toolbox.toolset.json` and named `*.toolset.json` files, embedded-schema validation, semantic module-path validation for `replace` keys, and a nil-on-missing load path so the overlay is optional rather than a hard dependency. T02 then consumed that trusted overlay inside `ToolsetFile.Resolve()`: module iteration stays in deterministic sorted order, replaced modules load through `Builder.AddFromDir`, unreplaced modules keep using the existing registry + expected-lock metadata path, malformed overlays abort before any package resolution, and bad replace directories fail early with file/path context. Lock behavior stays intentionally conservative: resolve starts from a copy of the validated existing lockfile, existing lock entries for replaced modules are preserved unchanged, replaced-only modules do not synthesize new lock entries, and any replace failure leaves prior lockfile bytes untouched. The resulting pattern is that local development overrides live entirely at the declarative `toolset` boundary, while registry, cache, and provenance verification continue unchanged for unreplaced packages.\n\n## Verification\n\nRan the slice-plan verification commands and both passed. Focused verification: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s` passed, including replace-overlay tests for sibling filename derivation, missing-overlay tolerance, malformed overlay rejection, invalid replace keys, local-dir resolution, deterministic mixed ordering, preserved lock entries, no new lock entry creation for replaced-only packages, and unchanged lockfile bytes on replace failures. Broader regression verification: `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, confirming S11 did not regress declarative toolset loading, lockfile handling, registry resolution, cache behavior, or earlier registry slices.\n\n## Requirements Advanced\n\n- R009 — Implemented the optional sibling local overlay contract and wired `ToolsetFile.Resolve()` to load replaced modules from local directories while keeping unreplaced modules on the registry/lock path.\n\n## Requirements Validated\n\n- R009 — `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s` proved validated overlay loading, replace-path resolution, preserved lock entries for replaced modules, no synthetic lock entries for replaced-only modules, and unchanged lockfile bytes on malformed overlays or bad replace paths; `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` proved the behavior without regressing the broader resolver and lockflow.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nReplace overlays are only available through declarative toolset resolution; CLI flows that expose and exercise this behavior end-to-end are still pending in S12. Replaced modules intentionally do not refresh or synthesize lock metadata, so lockfiles remain authoritative only for unreplaced registry-backed packages.\n\n## Follow-ups\n\nS12 should add CLI-level end-to-end coverage proving the local overlay workflow from user entrypoint to resolved toolset assembly, including mixed replace + registry packages.\n\n## Files Created/Modified\n\n- `toolset/toolset_local.go` — Added the `*.toolset.local.json` overlay model, sibling filename derivation, schema-backed load path, and semantic validation of replace-map module keys.\n- `toolset/toolbox.toolset.local.schema.json` — Defined the JSON Schema for local replace overlays, including top-level shape and replace-map value typing.\n- `toolset/toolset_local_test.go` — Added focused tests for filename derivation, missing-overlay tolerance, parse/schema failures, invalid replace keys, and successful replace-map round-trips.\n- `toolset/toolset_file.go` — Wired optional sibling overlay loading into `ToolsetFile.Resolve()`, branched replaced modules to `Builder.AddFromDir`, and preserved existing lock entries while keeping unreplaced modules on the registry/lock path.\n- `toolset/toolset_file_test.go` — Extended resolve tests to cover mixed replace + registry ordering, preserved existing lock entries, absence of new entries for replaced-only packages, and unchanged lockfile bytes on replace failures.\n- `.gsd/PROJECT.md` — Updated project current-state text to reflect that declarative replace overlays are now implemented while CLI flows remain pending.\n- `.gsd/KNOWLEDGE.md` — Recorded the non-obvious rule that replace overlay paths resolve relative to the overlay file itself, not the process working directory.\n",
+      "full_uat_md": "# S11: Replace directives — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28T21:38:39.529Z\n\n# S11: Replace directives — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28\n\n## UAT Type\n\n- UAT mode: artifact-driven\n- Why this mode is sufficient: S11 adds declarative file loading and resolver branching inside library code. The slice is fully exercised by focused Go tests that prove local overlay parsing, local-directory replacement behavior, lockfile preservation semantics, and non-regression of the surrounding registry/lock path.\n\n## Preconditions\n\n- Working directory: the M001-zku9aj worktree root\n- Go toolchain available\n- Use `GOWORK=$(pwd)/go.work` when running tests in this worktree\n\n## Smoke Test\n\nRun `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`.\n\n**Expected:** All focused local-overlay and resolve tests pass, including replace-overlay happy path and failure-path coverage.\n\n## Test Cases\n\n### 1. Overlay filename derivation works for default and named toolset files\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLocal/DeriveSiblingFilenameFromAnyToolsetFile' -timeout 30s`\n2. **Expected:** Passes. `toolbox.toolset.json` derives `toolbox.toolset.local.json`, and named files like `support-agent.toolset.json` derive sibling `support-agent.toolset.local.json` paths deterministically.\n\n### 2. Missing overlay is treated as absent, not invalid\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLocal/MissingOverlayForLoadedToolsetReturnsNil' -timeout 30s`\n2. **Expected:** Passes. A loaded toolset with no sibling local overlay returns a nil overlay / no-local-replacements case rather than a hard error.\n\n### 3. Malformed overlay content is rejected before resolution uses it\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLocal/(InvalidJSONReturnsParseError|SchemaValidationRejectsUnknownTopLevelField|SchemaValidationRejectsWrongReplaceShapeBeforeSemanticValidation|SchemaValidationRejectsWrongReplaceValueType|SemanticValidationRejectsInvalidModuleKeyWithEntryContext)' -timeout 30s`\n2. **Expected:** Passes. Invalid JSON, bad top-level shape, wrong replace value types, and invalid module-path keys all fail with overlay-path or entry-local context before any package resolution assumptions are made.\n\n### 4. Replaced package resolves from local dir and preserves existing lock entry\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/ReplaceOverlayResolvesFromLocalDirPreservesExistingLockEntryAndSkipsRegistryFetch' -timeout 30s`\n2. **Expected:** Passes. The replaced module is loaded through the local dev-package path, the registry path is skipped for that module, and any existing lock entry for the replaced module remains unchanged.\n\n### 5. Replaced-only package does not create a new lock entry\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/ReplaceOverlayDoesNotCreateNewLockEntryForReplacedOnlyPackage' -timeout 30s`\n2. **Expected:** Passes. A replaced package that has no prior lock entry still resolves locally, but resolve does not synthesize a new `*.toolset.lock` entry for it.\n\n### 6. Bad replace paths fail early and leave lockfile bytes untouched\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/(MalformedLocalOverlayAbortsBeforeAnyResolutionAndLeavesLockfileUntouched|BadReplacePathFailsBeforeLaterSortedPackagesAndLeavesLockfileUntouched|ReplacePathToNonPackageDirectoryFailsWithContextAndLeavesLockfileUntouched)' -timeout 30s`\n2. **Expected:** Passes. Malformed overlays, missing replace directories, and replace paths pointing at non-package directories abort before later sorted modules run and leave the previous lockfile bytes unchanged.\n\n### 7. Mixed replace + registry resolution stays deterministic and non-regressive\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`\n2. **Expected:** Passes. Toolset tests confirm deterministic sorted package order across mixed local and registry packages, and the broader registry suites remain green.\n\n## Edge Cases\n\n### Overlay path resolution is independent of caller working directory\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/ReplaceOverlayResolvesFromLocalDirPreservesExistingLockEntryAndSkipsRegistryFetch' -timeout 30s`\n2. **Expected:** Passes because replace directories are resolved relative to the sibling `*.toolset.local.json` file, not the shell working directory.\n\n### Existing lock validation still gates resolution before replace handling\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/(ExistingLockSchemaValidationFailureAbortsBeforeResolution|ExistingLockSemanticValidationFailureAbortsBeforeResolution)' -timeout 30s`\n2. **Expected:** Passes. Invalid existing lockfiles fail before package resolution proceeds, preserving S10 behavior.\n\n## Failure Signals\n\n- Any subtest in `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s` failing\n- Any replace-overlay test rewriting a lockfile after a malformed overlay or bad replace path\n- Any test showing a replaced module going through the registry path instead of the local dev-package path\n- Any regression in `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`\n\n## Requirements Proved By This UAT\n\n- R009 — proves that `toolbox.toolset.local.json` can redirect selected module paths to local package directories during declarative resolve, while existing lock entries for replaced packages stay unchanged and replaced-only packages do not create new lock entries.\n\n## Not Proven By This UAT\n\n- CLI/user-entrypoint behavior for replace overlays; that end-to-end flow is deferred to S12\n- Any runtime or operational concerns beyond library/test execution, since S11 has no long-running service surface\n\n## Notes for Tester\n\nUse `GOWORK=$(pwd)/go.work` in this worktree so Go resolves packages from the active checkout. Focused tests complete in milliseconds; the broader `./toolset/... ./registry/...` regression run takes a few seconds because it exercises emulate-backed registry tests too.\n",
       "goal": "Implement `toolbox.toolset.local.json` replace overlays so declarative toolsets can redirect selected module paths to local package directories during resolve, while unreplaced packages stay on the existing registry/lock path and replaced packages do not rewrite lock entries.",
       "success_criteria": "## Must-Haves\n\n- An optional sibling `*.toolset.local.json` overlay defines a `replace` map keyed by canonical module path and validated before any package resolution starts.\n- `ToolsetFile.Resolve()` checks the overlay per sorted module, loads replaced packages from disk through the existing dev-package path, and still uses the shared registry resolver for unreplaced modules.\n- Replace resolution ignores the declared package version for source selection but keeps the declared module identity and toolset declaration semantics intact.\n- Existing lock entries for replaced packages remain unchanged, no new lock entries are created for replaced-only packages, and any replace failure leaves the prior lockfile bytes untouched.\n\n## Threat Surface\n\n- **Abuse**: A mistaken or malicious local overlay can redirect a declared module to the wrong filesystem directory; the implementation must only honor explicit module-path matches and fail with file/path context when the replacement directory is missing or not a valid dev package.\n- **Data exposure**: No secrets or PII are introduced; the only sensitive surface is local filesystem layout referenced by the gitignored overlay.\n- **Input trust**: `toolbox.toolset.local.json` contents and replace directory strings are untrusted local input that flow into filesystem reads and `packaging.LoadDev`.\n\n## Requirement Impact\n\n- **Requirements touched**: R009, R007\n- **Re-verify**: Declarative resolve ordering from S09, lockfile preservation from S10, and the local-dev replace path that S12 will exercise end to end.\n- **Decisions revisited**: none\n\n## Verification\n\n- `toolset/toolset_local_test.go` proves overlay filename derivation, missing-overlay tolerance, and invalid replace-file failures.\n- `toolset/toolset_file_test.go` proves mixed replace + registry resolution, sorted ordering, untouched lock entries for replaced modules, and no partial lock rewrite on replace failure.\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`\n- `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`",
       "proof_level": "- This slice proves: integration\n- Real runtime required: no\n- Human/UAT required: no",
@@ -270,11 +270,11 @@
       "completed_at": null,
       "full_summary_md": "",
       "full_uat_md": "",
-      "goal": "Build the toolbox CLI with resolve, versions, and upgrade subcommands. Prove end-to-end against emulate.",
-      "success_criteria": "",
-      "proof_level": "",
-      "integration_closure": "",
-      "observability_impact": "",
+      "goal": "Finish end-to-end proof and operator-facing UAT for the already-landed `cmd/toolbox` + `toolsetfile` flow so S12 closes on the real CLI path rather than on library seams alone.",
+      "success_criteria": "- Keep S12 scoped to the shipped M001 surface: `toolbox resolve`, `toolbox versions`, single-module `toolbox resolve --upgrade`, and `--file` selection. Do not expand this slice to `--upgrade-all`, `--set`, `--patch`, or `--minor`.\n- Add real assertions in `cmd/toolbox/main_test.go` covering first resolve lockfile creation, second resolve lock-verified cache-hit behavior, deterministic version listing, single-module upgrade rewrite, sibling local-overlay behavior, and env-driven GitHub auth/header handling without exposing token values.\n- Preserve the shared resolution boundary required by R007/R008/R009: CLI orchestration stays in `cmd/toolbox`, declarative file/lock/overlay ownership stays in `toolsetfile`, and package resolution still flows through `toolset.Builder` + `registry.Resolver`.\n- Write `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` with a concrete local/emulate default path and an optional real GitHub-account path that stays off `main`, requires explicit user confirmation at execution time, and never prints secrets.\n- Slice verification passes via `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` and `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s`, and the UAT artifact exists with no `TBD`/`TODO`.",
+      "proof_level": "- This slice proves: final-assembly\n- Real runtime required: yes\n- Human/UAT required: yes",
+      "integration_closure": "- Upstream surfaces consumed: `cmd/toolbox/main.go`, `toolsetfile.Load`, `toolsetfile.ToolsetFile.Resolve`, `toolsetfile.ToolsetFile.Write`, `registry.Resolver`, `registry.GitHubReleaseSource`, and `registry.GitSourceFallback`.\n- New wiring introduced in this slice: CLI-level integration assertions for cache-hit versus refetch behavior, overlay preservation, env-driven auth handling, and the final operator UAT path.\n- What remains before the milestone is truly usable end-to-end: nothing.",
+      "observability_impact": "- Runtime signals: CLI failures must keep phase-specific context for load, list-versions, upgrade, resolve, lock-write, cache-verify, overlay-load, and GitHub/auth paths.\n- How a future agent inspects this: re-run focused CLI tests in `cmd/toolbox/main_test.go`, inspect CLI stdout/stderr assertions, inspect sibling `*.toolset.lock` bytes, and read `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md`.\n- Failure state exposed: whether the second resolve stayed on the committed-lock cache path, whether overlay resolution bypassed registry fetches without mutating lock state, and whether token-based auth is attached without leaking credentials.\n- Redaction constraints: never print `GITHUB_TOKEN` or any credential values.",
       "sequence": 0,
       "replan_triggered_at": null
     }
@@ -1132,6 +1132,99 @@
       "observability_impact": "",
       "full_plan_md": "",
       "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S12",
+      "id": "T04",
+      "title": "Expanded `cmd/toolbox` end-to-end tests to prove committed-lock cache hits, sibling overlay preservation, token-auth wiring, and CLI parse/validation failures without changing product code.",
+      "status": "complete",
+      "one_liner": "Expanded `cmd/toolbox` end-to-end tests to prove committed-lock cache hits, sibling overlay preservation, token-auth wiring, and CLI parse/validation failures without changing product code.",
+      "narrative": "Extended `cmd/toolbox/main_test.go` with CLI-boundary coverage for a second `resolve` that succeeds from the committed-lock cache path without any refetch, a sibling `.toolset.local.json` replacement path that resolves relative to the overlay file and preserves lock entries, and `GITHUB_TOKEN`-driven Authorization header wiring that never leaks the token into stdout or stderr. Added negative CLI coverage for malformed local overlays plus invalid module arguments for `versions` and `resolve --upgrade`. No product-code changes were needed because `cmd/toolbox/main.go` already delegated file/lock/overlay work to `toolsetfile` and package resolution to `registry`.",
+      "verification_result": "Passed the focused CLI suite (`GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s`) and the broader regression suite (`GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s`). The slice-level UAT artifact check still fails because `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` is intentionally pending T05.",
+      "duration": "",
+      "completed_at": "2026-03-28T22:43:45.457Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "`S12-UAT.md` is still missing, so the slice-level UAT verification command remains red until T05 writes the artifact.",
+      "key_files": [
+        "cmd/toolbox/main_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S12/tasks/T04-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Kept the product path unchanged and closed the remaining risk entirely with CLI-boundary tests because `cmd/toolbox/main.go` already delegated resolve, lock, overlay, and auth work through the intended seams."
+      ],
+      "full_summary_md": "---\nid: T04\nparent: S12\nmilestone: M001-zku9aj\nkey_files:\n  - cmd/toolbox/main_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S12/tasks/T04-SUMMARY.md\nkey_decisions:\n  - Kept the product path unchanged and closed the remaining risk entirely with CLI-boundary tests because `cmd/toolbox/main.go` already delegated resolve, lock, overlay, and auth work through the intended seams.\nduration: \"\"\nverification_result: mixed\ncompleted_at: 2026-03-28T22:43:45.457Z\nblocker_discovered: false\n---\n\n# T04: Expanded `cmd/toolbox` end-to-end tests to prove committed-lock cache hits, sibling overlay preservation, token-auth wiring, and CLI parse/validation failures without changing product code.\n\n**Expanded `cmd/toolbox` end-to-end tests to prove committed-lock cache hits, sibling overlay preservation, token-auth wiring, and CLI parse/validation failures without changing product code.**\n\n## What Happened\n\nExtended `cmd/toolbox/main_test.go` with CLI-boundary coverage for a second `resolve` that succeeds from the committed-lock cache path without any refetch, a sibling `.toolset.local.json` replacement path that resolves relative to the overlay file and preserves lock entries, and `GITHUB_TOKEN`-driven Authorization header wiring that never leaks the token into stdout or stderr. Added negative CLI coverage for malformed local overlays plus invalid module arguments for `versions` and `resolve --upgrade`. No product-code changes were needed because `cmd/toolbox/main.go` already delegated file/lock/overlay work to `toolsetfile` and package resolution to `registry`.\n\n## Verification\n\nPassed the focused CLI suite (`GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s`) and the broader regression suite (`GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s`). The slice-level UAT artifact check still fails because `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` is intentionally pending T05.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` | 0 | ✅ pass | 6100ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s` | 0 | ✅ pass | 13700ms |\n| 3 | `test -f .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && ! grep -q 'TBD\\|TODO' .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` | 1 | ❌ fail | 10ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\n`S12-UAT.md` is still missing, so the slice-level UAT verification command remains red until T05 writes the artifact.\n\n## Files Created/Modified\n\n- `cmd/toolbox/main_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S12/tasks/T04-SUMMARY.md`\n",
+      "description": "S12 already has the extracted declarative package and the basic CLI surface, so this task should finish the proof at the real command boundary instead of reopening command scope. Extend `cmd/toolbox/main_test.go` with real assertions for the missing end-to-end paths: a second `resolve` that succeeds as a committed-lock cache hit without another source fetch, sorted `versions`, single-module `resolve --upgrade`, sibling local-overlay behavior relative to the `.toolset.local.json` file, and `GITHUB_TOKEN`-driven auth/header wiring without ever logging the secret value. Keep the product code thin: if a fix is needed, it should stay in `cmd/toolbox/main.go` or its resolver-construction helpers and continue delegating file/lock/overlay behavior to `toolsetfile` and package resolution to `registry`.",
+      "estimate": "1h",
+      "files": [
+        "cmd/toolbox/main.go",
+        "cmd/toolbox/main_test.go",
+        "toolsetfile/toolset_file.go",
+        "toolsetfile/toolset_local.go",
+        "registry/resolver.go",
+        "registry/version_list.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s && GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s",
+      "inputs": [
+        "cmd/toolbox/main.go",
+        "cmd/toolbox/main_test.go",
+        "toolsetfile/toolset_file.go",
+        "toolsetfile/toolset_local.go",
+        "registry/resolver.go",
+        "registry/version_list.go",
+        "testutil/fixtures/toolbox.pkgs",
+        "docs/rfc-tool-registry.md"
+      ],
+      "expected_output": [
+        "cmd/toolbox/main_test.go",
+        "cmd/toolbox/main.go"
+      ],
+      "observability_impact": "Makes the CLI prove, at test level, whether a resolve used committed-lock cache verification versus refetch, whether overlay resolution preserved lock state, and whether auth wiring is applied without exposing secrets.",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S12",
+      "id": "T05",
+      "title": "Write the final S12 UAT artifact for local default and optional off-main GitHub verification",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "The slice is only done once the final assembly proof is written down for a future operator. Write `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` around the command surface that actually shipped: `toolbox resolve`, `toolbox versions`, and single-module `toolbox resolve --upgrade`. The default path should stay local/emulate-backed and exercise the real CLI entrypoint plus sibling lock and local-overlay behavior. The optional real GitHub path should be clearly separated, require explicit user confirmation at execution time, stay off `main`, use a disposable repo or non-`main` branch, and mention `GITHUB_TOKEN` only by key name with no secret echoing. Keep the UAT aligned with the current code and verification commands rather than the earlier over-scoped plan.",
+      "estimate": "45m",
+      "files": [
+        ".gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md",
+        "cmd/toolbox/main.go",
+        "cmd/toolbox/main_test.go",
+        ".gsd/REQUIREMENTS.md",
+        ".gsd/DECISIONS.md"
+      ],
+      "verify": "test -f .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && ! grep -q 'TBD\\|TODO' .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s",
+      "inputs": [
+        ".gsd/milestones/M001-zku9aj/slices/S12/S12-PLAN.md",
+        "cmd/toolbox/main.go",
+        "cmd/toolbox/main_test.go",
+        ".gsd/REQUIREMENTS.md",
+        ".gsd/DECISIONS.md",
+        "docs/rfc-tool-registry.md"
+      ],
+      "expected_output": [
+        ".gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
     }
   ],
   "decisions": [
@@ -1431,6 +1524,66 @@
       "decision": "Where replace-directive resolution lives for declarative toolsets",
       "choice": "Implement replace directives as an optional `toolbox.toolset.local.json` overlay loaded by `toolset`, and branch inside `ToolsetFile.Resolve()` to `Builder.AddFromDir` for replaced modules while leaving `registry` unchanged and preserving existing lock entries for replaced packages.",
       "rationale": "RFC section 7 defines replace as a local overlay concern, not a registry concern. Keeping the behavior in `toolset` reuses the existing builder seams, avoids a second resolution pipeline, preserves S09/S10 lock and ordering semantics for unreplaced packages, and makes lockfile non-updates for replaced modules explicit at the declarative boundary.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 29,
+      "id": "D026",
+      "when_context": "M001-zku9aj/S11",
+      "scope": "architecture",
+      "decision": "How declarative replace overlays resolve local paths and preserve lock state",
+      "choice": "Resolve replace targets relative to the sibling `*.toolset.local.json` file, and start lock rewrites from a copy of the validated existing lock so replaced packages keep prior entries unchanged while replaced-only packages create no new entries.",
+      "rationale": "Relative-to-overlay resolution makes replace behavior independent of the caller's working directory and matches the repo-local overlay contract. Copying the validated existing lock before iteration preserves byte-stable entries for replaced modules and prevents accidental lock drift when local replacements bypass registry resolution.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 30,
+      "id": "D027",
+      "when_context": "M001-zku9aj/S11",
+      "scope": "architecture",
+      "decision": "S11 replace overlay path and lock preservation semantics",
+      "choice": "Resolve replace targets relative to the sibling overlay file and preserve replaced-module lock entries by starting rewrites from a copy of the validated existing lock.",
+      "rationale": "This keeps local replacement behavior independent of the caller's working directory and prevents lock drift when replaced packages bypass registry resolution. It also preserves existing lock bytes for replaced modules and avoids synthesizing lock entries for replaced-only packages.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 31,
+      "id": "D028",
+      "when_context": "M001-zku9aj/S12",
+      "scope": "workflow/testing",
+      "decision": "S12 GitHub UAT execution scope",
+      "choice": "Keep emulate-backed tests and CI as the baseline proof path, but allow optional full UAT with a real GitHub account on a non-`main` branch or disposable repository when the user explicitly approves it. Never push to `main` for this milestone.",
+      "rationale": "The user is open to higher-fidelity final verification. Real-account UAT can retire auth and GitHub-hosted behavior risk that emulate cannot cover, while preserving the earlier safety constraint that protected mainline must stay out of the test path.",
+      "revisable": "Yes — if real-account UAT proves unnecessary or too costly once S12 lands",
+      "made_by": "human",
+      "superseded_by": null
+    },
+    {
+      "seq": 32,
+      "id": "D029",
+      "when_context": "M001-zku9aj/S12",
+      "scope": "architecture",
+      "decision": "Location of declarative toolset-file, lockfile, and local-overlay logic before S12 CLI work",
+      "choice": "Extract `toolset_file` and its related declarative file/lock/overlay code out of `toolset` into a new dedicated package before continuing S12 CLI implementation. `toolset.Builder` stays in `toolset`; the CLI will depend on the new declarative package plus the existing builder/registry seams.",
+      "rationale": "The declarative file-loading layer has grown into a separate concern from request-scoped assembly. Pulling it into its own package before the final CLI slice reduces package sprawl, clarifies ownership of file/lock/overlay concerns, and lets the CLI target a cleaner seam without mixing config-file I/O into the builder package.",
+      "revisable": "Yes — if the extraction creates more churn than boundary clarity after the first integration pass",
+      "made_by": "human",
+      "superseded_by": null
+    },
+    {
+      "seq": 33,
+      "id": "D030",
+      "when_context": "M001-zku9aj / S12 planning closure",
+      "scope": "scope",
+      "decision": "S12 CLI command scope for M001 final assembly",
+      "choice": "Keep S12 limited to `toolbox resolve`, `toolbox versions`, single-module `toolbox resolve --upgrade`, and `--file` selection. Do not add `--upgrade-all`, `--set`, `--patch`, or `--minor` in M001.",
+      "rationale": "The extracted `toolsetfile` package, version listing seam, and basic CLI surface are already landed. R010 and the S12 research narrow this slice to basic upgrade behavior, so the remaining risk is end-to-end CLI proof and UAT closure. Expanding to extra upgrade controls would add new semantics without increasing requirement coverage and would reopen a slice that is already close to done.",
       "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
@@ -1821,6 +1974,39 @@
       "verdict": "✅ pass",
       "duration_ms": 1269,
       "created_at": "2026-03-28T21:34:26.649Z"
+    },
+    {
+      "id": 36,
+      "task_id": "T04",
+      "slice_id": "S12",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 6100,
+      "created_at": "2026-03-28T22:43:45.457Z"
+    },
+    {
+      "id": 37,
+      "task_id": "T04",
+      "slice_id": "S12",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 13700,
+      "created_at": "2026-03-28T22:43:45.457Z"
+    },
+    {
+      "id": 38,
+      "task_id": "T04",
+      "slice_id": "S12",
+      "milestone_id": "M001-zku9aj",
+      "command": "test -f .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && ! grep -q 'TBD\\|TODO' .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md",
+      "exit_code": 1,
+      "verdict": "❌ fail",
+      "duration_ms": 10,
+      "created_at": "2026-03-28T22:43:45.457Z"
     }
   ]
 }

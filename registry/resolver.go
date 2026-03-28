@@ -106,3 +106,53 @@ func (r *Resolver) fetchFromSources(ctx context.Context, module ModulePath, vers
 
 	return FetchResult{}, fmt.Errorf("all %d sources exhausted: %w", len(r.sources), ErrReleaseNotFound)
 }
+
+// ListVersions returns the deduplicated available versions for a module across
+// any configured sources that support version discovery, sorted newest-first.
+func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Version, error) {
+	if len(r.sources) == 0 {
+		return nil, fmt.Errorf("list versions for %s: no sources configured", module)
+	}
+
+	versions := make([]Version, 0)
+	seen := make(map[Version]struct{})
+	versionSources := 0
+	anySuccess := false
+	var firstErr error
+	for i, src := range r.sources {
+		lister, ok := src.(VersionSource)
+		if !ok {
+			continue
+		}
+		versionSources++
+		listed, err := lister.ListVersions(ctx, module)
+		if err != nil {
+			if errors.Is(err, ErrReleaseNotFound) {
+				continue
+			}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("list versions for %s: source[%d]: %w", module, i, err)
+			}
+			continue
+		}
+		anySuccess = true
+		for _, version := range listed {
+			if _, ok := seen[version]; ok {
+				continue
+			}
+			seen[version] = struct{}{}
+			versions = append(versions, version)
+		}
+	}
+	if versionSources == 0 {
+		return nil, fmt.Errorf("list versions for %s: no version-capable sources configured", module)
+	}
+	if len(versions) == 0 {
+		if firstErr != nil && !anySuccess {
+			return nil, firstErr
+		}
+		return nil, fmt.Errorf("list versions for %s: %w", module, ErrReleaseNotFound)
+	}
+	sortVersionsDesc(versions)
+	return versions, nil
+}

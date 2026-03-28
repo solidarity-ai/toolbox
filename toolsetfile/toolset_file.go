@@ -1,17 +1,20 @@
-package toolset
+package toolsetfile
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 //go:embed toolbox.toolset.schema.json
@@ -40,11 +43,11 @@ type ToolsetFile struct {
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
 	var schema jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {
-		panic(fmt.Errorf("toolset: unmarshal embedded toolset schema: %w", err))
+		panic(fmt.Errorf("toolsetfile: unmarshal embedded toolset schema: %w", err))
 	}
 	resolved, err := schema.Resolve(nil)
 	if err != nil {
-		panic(fmt.Errorf("toolset: resolve embedded toolset schema: %w", err))
+		panic(fmt.Errorf("toolsetfile: resolve embedded toolset schema: %w", err))
 	}
 	return resolved
 }
@@ -156,6 +159,141 @@ func (f *ToolsetFile) LocalFilename() string {
 	return f.localFilename
 }
 
+// SetPackageVersion updates the declared package version and rewrites any tool
+// FQNs for that module to the same version, preserving tool order.
+func (f *ToolsetFile) SetPackageVersion(module tooldef.ModulePath, version tooldef.Version) error {
+	if f == nil {
+		return fmt.Errorf("set package version: nil toolset file")
+	}
+	if f.Packages == nil {
+		return fmt.Errorf("set package version %s: no packages declared", module)
+	}
+	key := module.String()
+	if _, ok := f.Packages[key]; !ok {
+		return fmt.Errorf("set package version %s: module is not declared in packages", module)
+	}
+
+	f.Packages[key] = version.String()
+	for i := range f.Tools {
+		if f.Tools[i].parsed.Module != module {
+			continue
+		}
+		f.Tools[i].parsed.Version = version
+		f.Tools[i].Tool = f.Tools[i].parsed.String()
+	}
+	return f.validate()
+}
+
+// Write validates the toolset contents and writes a stable JSON encoding while
+// preserving the declared tool order.
+func (f *ToolsetFile) Write(filename string) error {
+	if f == nil {
+		return fmt.Errorf("write toolset file %q: nil toolset file", filename)
+	}
+	data, err := f.encodeStable()
+	if err != nil {
+		return fmt.Errorf("validate toolset file %q: %w", filename, err)
+	}
+
+	tempFile, err := os.CreateTemp(filepath.Dir(filename), filepath.Base(filename)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("write toolset file %q: %w", filename, err)
+	}
+	tempName := tempFile.Name()
+	removeTemp := func() {
+		_ = os.Remove(tempName)
+	}
+	defer removeTemp()
+
+	if err := tempFile.Chmod(0o644); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("write toolset file %q: %w", filename, err)
+	}
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("write toolset file %q: %w", filename, err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("write toolset file %q: %w", filename, err)
+	}
+	if err := os.Rename(tempName, filename); err != nil {
+		return fmt.Errorf("write toolset file %q: %w", filename, err)
+	}
+
+	f.filename = filename
+	if lockFilename, err := deriveToolsetLockFilename(filename); err == nil {
+		f.lockFilename = lockFilename
+	}
+	if localFilename, err := deriveToolsetLocalFilename(filename); err == nil {
+		f.localFilename = localFilename
+	}
+	return nil
+}
+
+func (f *ToolsetFile) encodeStable() ([]byte, error) {
+	if err := f.validate(); err != nil {
+		return nil, err
+	}
+
+	packageKeys := make([]string, 0, len(f.Packages))
+	for rawModule := range f.Packages {
+		packageKeys = append(packageKeys, rawModule)
+	}
+	sort.Strings(packageKeys)
+
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	buf.WriteString("  \"packages\": {")
+	if len(packageKeys) > 0 {
+		buf.WriteString("\n")
+		for i, rawModule := range packageKeys {
+			keyJSON, err := json.Marshal(rawModule)
+			if err != nil {
+				return nil, fmt.Errorf("marshal package key %q: %w", rawModule, err)
+			}
+			valueJSON, err := json.Marshal(f.Packages[rawModule])
+			if err != nil {
+				return nil, fmt.Errorf("marshal package version %q: %w", rawModule, err)
+			}
+			buf.WriteString("    ")
+			buf.Write(keyJSON)
+			buf.WriteString(": ")
+			buf.Write(valueJSON)
+			if i < len(packageKeys)-1 {
+				buf.WriteString(",")
+			}
+			buf.WriteString("\n")
+		}
+		buf.WriteString("  },\n")
+	} else {
+		buf.WriteString("},\n")
+	}
+
+	buf.WriteString("  \"tools\": [")
+	if len(f.Tools) > 0 {
+		buf.WriteString("\n")
+		for i, tool := range f.Tools {
+			entryJSON, err := json.Marshal(struct {
+				Tool string `json:"tool"`
+			}{Tool: tool.Tool})
+			if err != nil {
+				return nil, fmt.Errorf("marshal tool entry %d: %w", i, err)
+			}
+			buf.WriteString("    ")
+			buf.Write(entryJSON)
+			if i < len(f.Tools)-1 {
+				buf.WriteString(",")
+			}
+			buf.WriteString("\n")
+		}
+		buf.WriteString("  ]\n")
+	} else {
+		buf.WriteString("]\n")
+	}
+	buf.WriteString("}\n")
+	return buf.Bytes(), nil
+}
+
 // LoadLocal loads the optional sibling *.toolset.local.json overlay. Missing
 // overlays are treated as absent rather than invalid.
 func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
@@ -180,12 +318,12 @@ func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
 // registry path used by imperative toolset construction while loading,
 // verifying, and rewriting the sibling lockfile only after all packages have
 // resolved successfully.
-func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) (ResolvedToolset, error) {
+func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) (toolset.ResolvedToolset, error) {
 	if f == nil {
-		return ResolvedToolset{}, fmt.Errorf("resolve toolset file: nil toolset file")
+		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file: nil toolset file")
 	}
 	if f.parsedPackages == nil {
-		return ResolvedToolset{}, fmt.Errorf("resolve toolset file: toolset file must be loaded and validated before resolve")
+		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file: toolset file must be loaded and validated before resolve")
 	}
 
 	var existingLock *ToolsetLockFile
@@ -193,7 +331,7 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 		loadedLock, err := LoadLock(f.lockFilename)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				return ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+				return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
 			}
 		} else {
 			existingLock = loadedLock
@@ -205,10 +343,10 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 
 	local, err := f.LoadLocal()
 	if err != nil {
-		return ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
 	}
 
-	builder := NewWithResolver(resolver)
+	builder := toolset.NewWithResolver(resolver)
 	updatedLock := &ToolsetLockFile{Packages: make(map[string]ToolsetLockEntry, len(existingLock.Packages))}
 	for packageKey, entry := range existingLock.Packages {
 		updatedLock.Packages[packageKey] = entry
@@ -227,7 +365,7 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 
 		if localDir, ok := local.ReplacementDirAbs(module); ok {
 			if err := builder.AddFromDir(localDir); err != nil {
-				return ResolvedToolset{}, fmt.Errorf("resolve %s from local replace %q: %w", packageKey, localDir, err)
+				return toolset.ResolvedToolset{}, fmt.Errorf("resolve %s from local replace %q: %w", packageKey, localDir, err)
 			}
 			continue
 		}
@@ -244,7 +382,7 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 
 		metadata, err := builder.AddFromRegistryWithExpected(ctx, module.String(), version.String(), expected)
 		if err != nil {
-			return ResolvedToolset{}, err
+			return toolset.ResolvedToolset{}, err
 		}
 		updatedLock.Packages[packageKey] = ToolsetLockEntry{
 			ArchiveSHA256: metadata.ArchiveSHA256,
@@ -256,7 +394,7 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 
 	if f.lockFilename != "" {
 		if err := updatedLock.Write(f.lockFilename); err != nil {
-			return ResolvedToolset{}, err
+			return toolset.ResolvedToolset{}, err
 		}
 	}
 

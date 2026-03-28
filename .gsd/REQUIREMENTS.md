@@ -37,49 +37,49 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: See `docs/rfc-tool-registry.md` §4 (pseudo-versions)
 
-### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
+### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. A dedicated declarative toolset-file package parses the file and resolves all packages via the shared registry/builder flow.
 - Class: core-capability
 - Status: active
-- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
-- Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases
+- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. The declarative file/lock/overlay layer may live outside `toolset`, but it must parse the file, validate it, and resolve all packages through the same shared registry and builder path.
+- Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases while keeping file concerns separate from request-scoped assembly.
 - Source: user (RFC)
 - Primary owning slice: M001-zku9aj/S09
 - Supporting slices: none
 - Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
+- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred. Package ownership was revisited by D029 and is now the extracted `toolsetfile` package before S12 closeout.
 
-### R009 — A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
+### R009 — A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The declarative toolset-file layer loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
 - Class: core-capability
 - Status: active
-- Description: A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
+- Description: A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The declarative toolset-file layer loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
 - Why it matters: Essential for the "developing a package and consuming it" workflow
 - Source: user (RFC)
 - Primary owning slice: M001-zku9aj/S11
 - Supporting slices: none
 - Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §7 (replace directives)
+- Notes: See `docs/rfc-tool-registry.md` §7 (replace directives). D029 extracted the declarative file/lock/overlay layer to `toolsetfile`; replace semantics stay unchanged.
 
 ### R010 — `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
 - Class: core-capability
 - Status: active
-- Description: `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
-- Why it matters: Makes the workflow tangible — humans and CI can invoke resolution directly
+- Description: `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection, and S12 closeout proof must cover the real CLI entrypoint plus the extracted declarative toolset-file package rather than library-only calls or another round of command-surface planning.
+- Why it matters: Makes the workflow tangible — humans and CI can invoke resolution directly, and final assembly is only proven once the actual CLI path works end-to-end across the extracted declarative layer.
 - Source: user
 - Primary owning slice: M001-zku9aj/S12
 - Supporting slices: none
 - Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §5 (upgrade workflow)
+- Notes: See `docs/rfc-tool-registry.md` §5 (upgrade workflow). M001 closeout is limited to the shipped command surface (`resolve`, `versions`, single-module `resolve --upgrade`, `--file`). Baseline proof remains emulate-backed; optional real GitHub-account UAT may be used for S12 if explicitly approved and kept off `main`. D029 requires the declarative file/lock/overlay code to move out of `toolset` before this slice closes.
 
-### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
+### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and—when explicitly approved for S12—real GitHub-account UAT on a non-`main` branch or disposable repository.
 - Class: quality-attribute
 - Status: active
-- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
-- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while keeping GitHub testing off the protected mainline
+- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and—when explicitly approved for S12—real GitHub-account UAT on a non-`main` branch or disposable repository.
+- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while still allowing the final slice to retire real-hosted GitHub risk without involving the protected mainline.
 - Source: user
 - Primary owning slice: M001-zku9aj/S01
 - Supporting slices: M001-zku9aj/S02
 - Validation: unmapped
-- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
+- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if used for S12 final UAT, must stay off `main` and requires explicit user confirmation plus a real account/token.
 
 ## Validated
 
@@ -261,3 +261,4 @@ This file is the explicit capability and coverage contract for the project.
 - Mapped to slices: 7
 - Validated: 4 (R001, R002, R006, R008)
 - Unmapped active requirements: 0
+: 0

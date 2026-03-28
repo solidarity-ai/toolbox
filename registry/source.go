@@ -18,8 +18,8 @@ import (
 const defaultGitHubAPIBaseURL = "https://api.github.com"
 
 var (
-	ErrReleaseNotFound = errors.New("github release not found")
-	sha256HexPattern   = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+	ErrReleaseNotFound  = errors.New("github release not found")
+	sha256HexPattern    = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 	gitCommitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 )
 

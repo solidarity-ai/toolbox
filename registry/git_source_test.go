@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,24 @@ import (
 )
 
 func TestGitSource(t *testing.T) {
+	t.Run("list_versions", func(t *testing.T) {
+		repoDir := gitfixture.CreateTaggedRepoFromDir(t, "v1.0.0", fixtureSourceDir(t, "calc"))
+		gitfixture.AddCommitAndTag(t, repoDir, "v1.2.0", map[string][]byte{"README.md": []byte("v1.2.0\n")}, "v1.2.0")
+		gitfixture.AddCommitAndTag(t, repoDir, "v1.1.0", map[string][]byte{"README.md": []byte("v1.1.0\n")}, "v1.1.0")
+		gitfixture.AddCommitAndTag(t, repoDir, "not-a-version", map[string][]byte{"README.md": []byte("invalid tag\n")}, "invalid tag")
+
+		src := &GitSourceFallback{URLPrefix: "file://"}
+		versions, err := src.ListVersions(context.Background(), ModulePath(repoDir))
+		if err != nil {
+			t.Fatalf("ListVersions(): %v", err)
+		}
+		got := []string{versions[0].String(), versions[1].String(), versions[2].String()}
+		want := []string{"v1.2.0", "v1.1.0", "v1.0.0"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("versions = %#v, want %#v", got, want)
+		}
+	})
+
 	t.Run("happy_path", func(t *testing.T) {
 		repoDir := gitfixture.CreateTaggedRepoFromDir(t, "v1.0.0", fixtureSourceDir(t, "calc"))
 

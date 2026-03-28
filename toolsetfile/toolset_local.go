@@ -1,4 +1,4 @@
-package toolset
+package toolsetfile
 
 import (
 	_ "embed"

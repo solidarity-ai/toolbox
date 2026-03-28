@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,6 +24,34 @@ func TestGitHubReleaseSource(t *testing.T) {
 	src := NewGitHubReleaseSource(srv.BaseURL(), srv.Client())
 	seed := srv.Seed()
 	fixtureDir := fixtureSourceDir(t, "calc")
+
+	t.Run("list versions", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/admin/stub-list/releases":
+				_ = json.NewEncoder(w).Encode([]map[string]any{
+					{"id": 3, "tag_name": "v1.2.0"},
+					{"id": 2, "tag_name": "v1.0.0"},
+					{"id": 1, "tag_name": "not-a-version"},
+					{"id": 4, "tag_name": "v1.1.0"},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer ts.Close()
+
+		stub := NewGitHubReleaseSource(ts.URL, ts.Client())
+		versions, err := stub.ListVersions(context.Background(), mustModulePath(t, "github.com/admin/stub-list"))
+		if err != nil {
+			t.Fatalf("ListVersions(): %v", err)
+		}
+		got := []string{versions[0].String(), versions[1].String(), versions[2].String()}
+		want := []string{"v1.2.0", "v1.1.0", "v1.0.0"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("versions = %#v, want %#v", got, want)
+		}
+	})
 
 	t.Run("happy path", func(t *testing.T) {
 		module := mustModulePath(t, "github.com/admin/stub-happy")

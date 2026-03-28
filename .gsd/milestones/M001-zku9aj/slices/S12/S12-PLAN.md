@@ -1,6 +1,14 @@
 # S12: CLI commands + end-to-end UAT
 
-**Goal:** Build the toolbox CLI with resolve, versions, and upgrade subcommands. Prove end-to-end against emulate.
+**Goal:** Finish end-to-end proof and operator-facing UAT for the already-landed `cmd/toolbox` + `toolsetfile` flow so S12 closes on the real CLI path rather than on library seams alone.
 **Demo:** After this: After this: TBD
 
 ## Tasks
+- [x] **T04: Expanded `cmd/toolbox` end-to-end tests to prove committed-lock cache hits, sibling overlay preservation, token-auth wiring, and CLI parse/validation failures without changing product code.** — S12 already has the extracted declarative package and the basic CLI surface, so this task should finish the proof at the real command boundary instead of reopening command scope. Extend `cmd/toolbox/main_test.go` with real assertions for the missing end-to-end paths: a second `resolve` that succeeds as a committed-lock cache hit without another source fetch, sorted `versions`, single-module `resolve --upgrade`, sibling local-overlay behavior relative to the `.toolset.local.json` file, and `GITHUB_TOKEN`-driven auth/header wiring without ever logging the secret value. Keep the product code thin: if a fix is needed, it should stay in `cmd/toolbox/main.go` or its resolver-construction helpers and continue delegating file/lock/overlay behavior to `toolsetfile` and package resolution to `registry`.
+  - Estimate: 1h
+  - Files: cmd/toolbox/main.go, cmd/toolbox/main_test.go, toolsetfile/toolset_file.go, toolsetfile/toolset_local.go, registry/resolver.go, registry/version_list.go
+  - Verify: GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s && GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... ./toolsetfile/... ./toolset/... ./registry/... -v -count=1 -timeout 120s
+- [ ] **T05: Write the final S12 UAT artifact for local default and optional off-main GitHub verification** — The slice is only done once the final assembly proof is written down for a future operator. Write `.gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md` around the command surface that actually shipped: `toolbox resolve`, `toolbox versions`, and single-module `toolbox resolve --upgrade`. The default path should stay local/emulate-backed and exercise the real CLI entrypoint plus sibling lock and local-overlay behavior. The optional real GitHub path should be clearly separated, require explicit user confirmation at execution time, stay off `main`, use a disposable repo or non-`main` branch, and mention `GITHUB_TOKEN` only by key name with no secret echoing. Keep the UAT aligned with the current code and verification commands rather than the earlier over-scoped plan.
+  - Estimate: 45m
+  - Files: .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md, cmd/toolbox/main.go, cmd/toolbox/main_test.go, .gsd/REQUIREMENTS.md, .gsd/DECISIONS.md
+  - Verify: test -f .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && ! grep -q 'TBD\|TODO' .gsd/milestones/M001-zku9aj/slices/S12/S12-UAT.md && GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s

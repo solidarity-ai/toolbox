@@ -500,8 +500,8 @@ Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.js
 **Declarative file** — for config-driven toolsets:
 
 ```go
-ts, err := toolset.Load("toolbox.toolset.json")  // reads toolset + lockfile (any filename works)
-resolved, err := ts.Resolve(ctx)                   // auto-downloads, caches, resolves
+ts, err := toolsetfile.Load("toolbox.toolset.json")  // reads toolset + lockfile (any filename works)
+resolved, err := ts.Resolve(ctx, resolver)            // auto-downloads, caches, resolves through toolset.Builder
 ```
 
 **Programmatic Builder** — for toolsets assembled in code (harnesses, tests, dynamic composition):

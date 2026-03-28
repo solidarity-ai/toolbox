@@ -387,5 +387,5 @@ Tests run in ~0.13s total. No network access required — all tests clone local 
 | S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ✅ | After this: TBD |
 | S09 | Toolset file parsing | medium | S08 | ✅ | After this: TBD |
 | S10 | Lockfile generation and verification | medium | S09 | ✅ | After this: TBD |
-| S11 | Replace directives | low | S09 | ⬜ | After this: TBD |
+| S11 | Replace directives | low | S09 | ✅ | After this: TBD |
 | S12 | CLI commands + end-to-end UAT | low | S10, S11 | ⬜ | After this: TBD |

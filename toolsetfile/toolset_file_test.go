@@ -1,4 +1,4 @@
-package toolset
+package toolsetfile
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestToolsetFileLoad(t *testing.T) {
@@ -345,7 +346,7 @@ func TestToolsetFileResolve(t *testing.T) {
 		if err == nil {
 			t.Fatal("Resolve() error = nil, want ErrNoResolver")
 		}
-		if !errors.Is(err, ErrNoResolver) {
+		if !errors.Is(err, toolset.ErrNoResolver) {
 			t.Fatalf("error = %v, want ErrNoResolver", err)
 		}
 		if len(got.Tools()) != 0 {
@@ -657,7 +658,7 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("Resolve() error: %v", err)
 		}
 
-		wantBuilder := NewWithResolver(resolver)
+		wantBuilder := toolset.NewWithResolver(resolver)
 		if err := wantBuilder.AddFromRegistry(ctx, fixtures[1].module, fixtures[1].version); err != nil {
 			t.Fatalf("imperative AddFromRegistry(%s): %v", fixtures[1].module, err)
 		}
@@ -1052,6 +1053,15 @@ func mustLoadToolsetFile(t *testing.T, value any) *ToolsetFile {
 	return file
 }
 
+func newTempCache(t *testing.T) *registry.Cache {
+	t.Helper()
+	cache, err := registry.NewCache(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCache() error: %v", err)
+	}
+	return cache
+}
+
 func toolEntryStrings(entries []ToolEntry) []string {
 	out := make([]string, len(entries))
 	for i, entry := range entries {
@@ -1060,7 +1070,7 @@ func toolEntryStrings(entries []ToolEntry) []string {
 	return out
 }
 
-func resolvedToolIDs(resolved ResolvedToolset) []string {
+func resolvedToolIDs(resolved toolset.ResolvedToolset) []string {
 	tools := resolved.Tools()
 	out := make([]string, len(tools))
 	for i, resolvedTool := range tools {
@@ -1069,7 +1079,7 @@ func resolvedToolIDs(resolved ResolvedToolset) []string {
 	return out
 }
 
-func resolvedPackageNames(resolved ResolvedToolset) []string {
+func resolvedPackageNames(resolved toolset.ResolvedToolset) []string {
 	tools := resolved.Tools()
 	out := make([]string, len(tools))
 	for i, resolvedTool := range tools {

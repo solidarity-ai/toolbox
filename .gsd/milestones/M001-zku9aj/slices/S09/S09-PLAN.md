@@ -40,7 +40,7 @@ Add `toolset/toolset_file.go` with exported `ToolsetFile` and `ToolEntry` types 
   - Estimate: 35m
   - Files: toolset/toolset_file.go, toolset/toolset_file_test.go, tool/fqn.go, toolset/toolset.go
   - Verify: GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s
-- [ ] **T02: Resolve parsed toolset files through Builder.AddFromRegistry with cache-backed integration tests** — ## Description
+- [x] **T02: Added ToolsetFile.Resolve and cache-backed tests that drive declarative package resolution through the builder registry path.** — ## Description
 Extend `toolset/toolset_file.go` with `(*ToolsetFile).Resolve(ctx, resolver)` so declarative toolset files resolve declared packages via the same builder/resolver/cache path introduced in S08. The method should use `NewWithResolver`, iterate packages in a deterministic order, call `AddFromRegistry` for each package, and return the resulting `ResolvedToolset` without introducing any direct resolver bypass.
 
 ## Failure Modes

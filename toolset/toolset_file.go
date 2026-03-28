@@ -25,12 +25,14 @@ type ToolEntry struct {
 	parsed tooldef.ToolFQN
 }
 
-// ToolsetFile is the minimal declarative toolbox.toolset.json format.
+// ToolsetFile is the minimal declarative *.toolset.json format.
 type ToolsetFile struct {
 	Packages map[string]string `json:"packages"`
 	Tools    []ToolEntry       `json:"tools"`
 
 	parsedPackages map[tooldef.ModulePath]tooldef.Version
+	filename       string
+	lockFilename   string
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -45,9 +47,14 @@ func mustResolveSchema(raw []byte) *jsonschema.Resolved {
 	return resolved
 }
 
-// Load reads a toolbox.toolset.json file, decodes it, and validates its
-// package and tool references before any registry resolution happens.
+// Load reads a *.toolset.json file, decodes it, and validates its package and
+// tool references before any registry resolution happens.
 func Load(filename string) (*ToolsetFile, error) {
+	lockFilename, err := deriveToolsetLockFilename(filename)
+	if err != nil {
+		return nil, err
+	}
+
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("read toolset file %q: %w", filename, err)
@@ -70,6 +77,8 @@ func Load(filename string) (*ToolsetFile, error) {
 		return nil, err
 	}
 
+	file.filename = filename
+	file.lockFilename = lockFilename
 	return &file, nil
 }
 
@@ -114,6 +123,22 @@ func (f *ToolsetFile) validate() error {
 
 	f.parsedPackages = parsedPackages
 	return nil
+}
+
+// SourceFilename returns the loaded *.toolset.json path.
+func (f *ToolsetFile) SourceFilename() string {
+	if f == nil {
+		return ""
+	}
+	return f.filename
+}
+
+// LockFilename returns the derived sibling *.toolset.lock path.
+func (f *ToolsetFile) LockFilename() string {
+	if f == nil {
+		return ""
+	}
+	return f.lockFilename
 }
 
 // Resolve materializes the declared packages through the same builder and

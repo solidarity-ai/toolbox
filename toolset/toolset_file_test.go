@@ -53,6 +53,29 @@ func TestToolsetFileLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("StoresSourceAndDerivedLockFilename", func(t *testing.T) {
+		filename := writeToolsetJSONNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{
+				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+			},
+		})
+
+		got, err := Load(filename)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got.SourceFilename() != filename {
+			t.Fatalf("SourceFilename() = %q, want %q", got.SourceFilename(), filename)
+		}
+		wantLock := strings.TrimSuffix(filename, ".json") + ".lock"
+		if got.LockFilename() != wantLock {
+			t.Fatalf("LockFilename() = %q, want %q", got.LockFilename(), wantLock)
+		}
+	})
+
 	t.Run("MissingFileReturnsReadErrorWithFilename", func(t *testing.T) {
 		filename := filepath.Join(t.TempDir(), "toolbox.toolset.json")
 
@@ -532,13 +555,18 @@ func loadFixtureArchiveAndManifestBytes(t *testing.T, fixtureName string) ([]byt
 
 func writeToolsetJSON(t *testing.T, value any) string {
 	t.Helper()
+	return writeToolsetJSONNamed(t, "toolbox.toolset.json", value)
+}
+
+func writeToolsetJSONNamed(t *testing.T, basename string, value any) string {
+	t.Helper()
 
 	data, err := json.Marshal(value)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 
-	filename := filepath.Join(t.TempDir(), "toolbox.toolset.json")
+	filename := filepath.Join(t.TempDir(), basename)
 	if err := os.WriteFile(filename, data, 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", filename, err)
 	}

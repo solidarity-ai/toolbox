@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T11:59:42.102Z",
+  "exported_at": "2026-03-28T14:25:05.453Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -193,16 +193,16 @@
       "milestone_id": "M001-zku9aj",
       "id": "S09",
       "title": "Toolset file parsing",
-      "status": "pending",
+      "status": "complete",
       "risk": "medium",
       "depends": [
         "S08"
       ],
       "demo": "After this: TBD",
       "created_at": "2026-03-28T00:39:27.198Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-28T13:07:09.401Z",
+      "full_summary_md": "---\nid: S09\nparent: M001-zku9aj\nmilestone: M001-zku9aj\nprovides:\n  - A validated `ToolsetFile` API for reading declarative package/tool declarations from `toolbox.toolset.json`.\n  - A `ToolsetFile.Resolve` path that resolves declared packages through `Builder.AddFromRegistry` and returns the same `ResolvedToolset` shape as imperative assembly.\n  - Contract tests that distinguish shape errors, semantic declaration errors, cache-load failures, and deterministic stop-on-first-resolution behavior.\nrequires:\n  - slice: S08\n    provides: `Builder.AddFromRegistry`, cache-backed resolver orchestration, and ordered source fallback that declarative resolution now reuses unchanged.\naffects:\n  - S10\n  - S11\n  - S12\nkey_files:\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/PROJECT.md\nkey_decisions:\n  - `ToolsetFile.Resolve` is intentionally implemented only through `NewWithResolver` plus `Builder.AddFromRegistry`, so declarative and imperative assembly share the same cache, integrity, and fallback behavior.\n  - `toolbox.toolset.json` shape validation is split into embedded JSON Schema for structure and Go validation for semantic rules like module/version parsing and tool-to-package matching.\n  - Package iteration during resolve is sorted by module path so failure ordering and downstream behavior stay deterministic despite Go map iteration order.\npatterns_established:\n  - Use embedded JSON Schema for file-shape validation, then explicit Go validation for semantic cross-field rules.\n  - Keep declarative and imperative assembly on the same builder/resolver/cache path rather than adding a second resolution flow.\n  - Sort map-derived package keys before validation or resolution whenever error ordering needs to stay deterministic.\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  - .gsd/milestones/M001-zku9aj/slices/S09/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S09/tasks/T02-SUMMARY.md\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T13:07:09.402Z\nblocker_discovered: false\n---\n\n# S09: Toolset file parsing\n\n**Declarative `toolbox.toolset.json` files now load with upfront validation and resolve through the same cache-backed registry path as imperative builder usage.**\n\n## What Happened\n\nS09 turned `toolbox.toolset.json` into a real declarative entry point for toolset assembly. T01 added `ToolsetFile`, `ToolEntry`, and `Load(filename)` in `toolset/toolset_file.go`. The loader now reads JSON from disk, validates the file shape with an embedded schema, then reuses the existing FQN parsing helpers to validate package module paths, versions, and full tool FQNs before any registry work runs. Semantic validation cross-checks that each declared tool belongs to a declared package and that tool/package versions match exactly, while keeping parsed identities on the `ToolsetFile` for later resolution. T02 completed the path by adding `(*ToolsetFile).Resolve(ctx, resolver)`, which builds a new resolver-backed builder, sorts package modules deterministically, and resolves each declared package through `Builder.AddFromRegistry` instead of bypassing the established cache/source chain. The tests prove both halves of the contract: parse-time failures stay localized and deterministic, and resolve-time behavior matches imperative builder usage while stopping on the first sorted package failure and surfacing cache/resolver errors unchanged.\n\n## Verification\n\nSlice-level verification passed. I ran `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s`; all passed and covered the S09 load and resolve contract. I also ran `GOWORK=$(pwd)/go.work go test ./... -count=1 -timeout 120s` as a broader check: S09-related packages stayed green, while an unrelated pre-existing failure remained in `runtime/tswasmcli` because local WASI artifacts were not built.\n\n## Requirements Advanced\n\n- R007 — Implemented the declarative file API and registry-backed resolution path required for config-driven toolset assembly.\n\n## Requirements Validated\n\n- R007 — `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` all passed, proving validated load and resolver-backed package resolution through the builder path.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Deviations\n\nThe implemented file contract is slightly broader and more explicit than the original slice plan: `toolset.Load` first applies embedded JSON Schema validation for structural errors, then semantic validation in Go. Empty `packages` and `tools` collections are accepted at the file layer, with package/tool cross-checking enforced only when entries are present. This supersedes the earlier plan wording that expected non-empty collections to be rejected.\n\n## Known Limitations\n\nThis slice does not implement lockfiles, replace directives, or CLI entry points; those remain in S10-S12. `ToolsetFile.Resolve` returns the full `ResolvedToolset` produced by loading declared packages, so downstream work must not assume the `tools` array currently filters the resolved tool list. The broader repo test run still fails in `runtime/tswasmcli` when local WASI build artifacts are missing; that failure is outside S09 and was not changed here.\n\n## Follow-ups\n\nS10 should decide how lockfile generation represents declared tools versus all tools present in resolved packages. S11 should apply replace directives ahead of `ToolsetFile.Resolve` so file parsing stays a pure declaration layer. S12 should expose the load/resolve flow through CLI commands and prove the end-to-end UX.\n\n## Files Created/Modified\n\n- `toolset/toolset_file.go` — Added declarative toolset-file loading, schema-backed shape validation, semantic package/tool cross-checking, and `ToolsetFile.Resolve` via the shared builder/resolver path.\n- `toolset/toolset_file_test.go` — Added parse-contract and resolve-contract tests covering schema failures, semantic failures, deterministic ordering, cache-backed resolution, and stop-on-first-error behavior.\n- `.gsd/PROJECT.md` — Updated current-state project summary to reflect that declarative `toolbox.toolset.json` loading and resolution are now implemented.\n",
+      "full_uat_md": "# S09: Toolset file parsing — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28T13:07:09.402Z\n\n# S09: Toolset file parsing — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28\n\n## UAT Type\n\n- UAT mode: artifact-driven\n- Why this mode is sufficient: S09 adds file parsing and resolver orchestration library behavior with no standalone runtime surface. The contract is proven by focused Go tests against real fixture archives and the existing cache-backed resolver path.\n\n## Preconditions\n\n- Working directory: the M001-zku9aj worktree root\n- Go toolchain available\n- `go.work` present so tests can be run with `GOWORK=$(pwd)/go.work`\n- Dist fixtures available under `testutil/fixtures/toolbox.pkgs/`\n\n## Smoke Test\n\nRun `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -timeout 30s` — all toolset tests pass, including both `TestToolsetFileLoad` and `TestToolsetFileResolve`.\n\n## Test Cases\n\n### 1. Valid declarative file loads and preserves declared entries\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad/ValidFileWithMultipleEntriesPreservesDeclaredTools -timeout 30s`\n2. **Expected:** Test passes. `Load()` returns a `ToolsetFile` whose `Packages` map contains the declared module/version pairs and whose `Tools` slice preserves the declared tool order.\n\n### 2. Structural schema errors fail before semantic resolution\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileLoad/(SchemaRejectsUnknownTopLevelField|SchemaRejectsWrongPackagesShape)' -timeout 30s`\n2. **Expected:** Both subtests pass. Unknown top-level fields and wrong `packages` shapes fail with `validate toolset file` errors rather than reaching resolver logic.\n\n### 3. Semantic declaration errors are localized to the offending entry\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileLoad/(InvalidModulePathRejected|InvalidVersionRejected|InvalidToolFQNRejected|ToolReferencesUndeclaredPackageRejected|ToolVersionMismatchRejected)' -timeout 30s`\n2. **Expected:** All subtests pass. Errors point at the relevant `packages[...]` or `tools[i].tool` field and reject malformed declarations before any package resolution occurs.\n\n### 4. Empty declarative containers remain loadable\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileLoad/(EmptyToolsetAllowed|EmptyToolsAllowed)' -timeout 30s`\n2. **Expected:** Both subtests pass. `Load()` accepts empty `packages` and/or `tools` collections as a valid file shape.\n\n### 5. Declarative resolve matches imperative builder behavior through cache\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve/ResolvesFromPrePopulatedCacheMatchesImperativeBuilderInSortedPackageOrder -timeout 30s`\n2. **Expected:** Test passes. `ToolsetFile.Resolve` produces the same resolved tool/package output as imperative `Builder.AddFromRegistry`, and package processing follows sorted module order.\n\n### 6. Resolve rejects invalid call sites before any package work\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/(NilToolsetRejected|UnvalidatedToolsetRejected|NilResolverReturnsErrNoResolver)' -timeout 30s`\n2. **Expected:** All subtests pass. Nil toolsets, manually-constructed unvalidated toolsets, and nil resolvers fail immediately with explicit errors, and the declared `Tools` slice is left unchanged on error.\n\n### 7. Resolve stops on the first sorted package failure and surfaces the underlying cause\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve/(CacheLoadFailureSurfacesResolverErrorAndStopsBeforeLaterPackages|StopsOnFirstSortedPackageError)' -timeout 30s`\n2. **Expected:** Both subtests pass. Cache corruption and source failures surface through the resolver error chain, and later packages are not attempted once the first sorted package fails.\n\n## Edge Cases\n\n### Missing file and invalid JSON\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileLoad/(MissingFileReturnsReadErrorWithFilename|InvalidJSONReturnsParseError)' -timeout 30s`\n2. **Expected:** Both subtests pass. Missing files include filename context and wrap `os.ErrNotExist`; malformed JSON returns a parse error with filename context.\n\n## Failure Signals\n\n- Any subtest in `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -timeout 30s` failing\n- `Load()` accepting unknown top-level fields, wrong `packages` shape, or invalid package/tool references\n- `Resolve()` bypassing builder behavior, mutating declared tool entries on error, or continuing past the first sorted package failure\n\n## Requirements Proved By This UAT\n\n- R007 — `toolset.Load()` parses declarative `toolbox.toolset.json` files with upfront structural and semantic validation, and `ToolsetFile.Resolve()` resolves declared packages through the shared registry/builder path.\n\n## Not Proven By This UAT\n\n- Lockfile generation or verification (S10)\n- Replace-directive behavior (S11)\n- CLI-driven end-to-end flows and user-facing command UX (S12)\n- Repository-wide green status when optional local WASI artifacts are absent; `go test ./...` still fails in `runtime/tswasmcli` without those prebuilt binaries, but that is outside the S09 surface area\n\n## Notes for Tester\n\nUse `GOWORK=$(pwd)/go.work` in this worktree so Go resolves packages from the active checkout rather than the linked root checkout. The focused toolset tests complete quickly and do not require network access because resolve coverage is cache-backed using existing dist fixtures.\n",
       "goal": "Implement declarative `toolbox.toolset.json` loading so a caller can parse a toolset file, validate its package/tool references up front, and resolve declared packages through `Builder.AddFromRegistry` into the same `ResolvedToolset` shape produced by imperative builder usage.",
       "success_criteria": "## Must-Haves\n- Add exported `ToolsetFile` and `ToolEntry` types in `toolset` for the S09-scoped file format: `packages` as module-path → exact-version strings and `tools` as full-FQN entries.\n- `Load(filename)` must read JSON, unmarshal it, and validate package module paths, package versions, tool FQNs, package membership, and exact version matches using the existing `tool.Parse*` helpers.\n- `ToolsetFile.Resolve(ctx, resolver)` must create a builder with `NewWithResolver`, call `AddFromRegistry` for each declared package, and return the resulting `ResolvedToolset` without bypassing the resolver/cache path proven in S08.\n- Tests in `toolset/toolset_file_test.go` must cover the happy path plus missing file, invalid JSON, empty packages, invalid module path, invalid version, undeclared tool package, mismatched tool version, nil resolver, and resolve-from-cache success.\n- Package resolution order must be deterministic so repeated runs do not depend on Go map iteration.\n\n## Threat Surface\n- **Abuse**: Malformed or internally inconsistent `toolbox.toolset.json` content must fail validation before any registry resolution runs; tool references must not smuggle undeclared modules or version drift past the parser.\n- **Data exposure**: None in scope. This slice reads local JSON config and package metadata only; it must not introduce credential loading or secret-bearing diagnostics.\n- **Input trust**: `toolbox.toolset.json` contents are untrusted local input. Module paths, versions, and tool FQNs must be validated with existing `tool.Parse*` helpers before calling `AddFromRegistry`.\n\n## Requirement Impact\n- **Requirements touched**: R007, R006\n- **Re-verify**: Declarative toolset loading still resolves packages exclusively through `Builder.AddFromRegistry`, preserving the cache-backed resolution contract validated in S08.\n- **Decisions revisited**: D004, D014, D015, D017\n\n## Verification\n- `toolset/toolset_file_test.go` is the slice contract file for both parse-time and resolve-time behavior.\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFile -timeout 30s`\n- `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`",
       "proof_level": "- This slice proves: integration\n- Real runtime required: no\n- Human/UAT required: no",
@@ -225,11 +225,11 @@
       "completed_at": null,
       "full_summary_md": "",
       "full_uat_md": "",
-      "goal": "Implement lockfile generation on resolve and verification on subsequent resolves.",
-      "success_criteria": "",
-      "proof_level": "",
-      "integration_closure": "",
-      "observability_impact": "",
+      "goal": "Implement declarative lockfile generation and verification so resolving any `*.toolset.json` writes a sibling `*.toolset.lock`, subsequent resolves verify cached packages against committed lock metadata, and declarative resolution still rides the existing Builder/Resolver path from S09.",
+      "success_criteria": "**Demo:** Resolving `toolbox.toolset.json` or any sibling-named `*.toolset.json` writes a deterministic `*.toolset.lock` keyed by `<module>@<version>` with `archive_sha256`, `git_sha`, `resolved_from`, and `resolved_at`; a later resolve validates the lockfile shape via JSON Schema plus semantic checks, verifies those expectations before trusting cache state, refetches corrupt cache entries, and fails if freshly fetched bytes still do not match the lock.\n\n## Must-Haves\n\n- Add toolset-level lockfile types and filename derivation so `toolbox.toolset.json` maps to `toolbox.toolset.lock` and arbitrary filenames like `support-agent.toolset.json` map to `support-agent.toolset.lock`.\n- Follow the S09 validation pattern for lockfiles: embedded JSON Schema for shape validation, then Go validation for semantic rules like `<module>@<version>` keys and required provenance fields.\n- Preserve S09's single declarative resolve path: `ToolsetFile.Resolve` must continue through `Builder.AddFromRegistry` / `registry.Resolver` rather than adding a second resolver/cache path.\n- Extend resolver/source results so declarative resolve can persist and verify `archive_sha256`, exact `git_sha`, `resolved_from`, and `resolved_at` for cache hits, GitHub release fetches, and git-source fallback.\n- On lock mismatch, treat the cache entry as untrusted: refetch once and fail if the re-fetched result still disagrees with the lock; never silently accept mismatched bytes.\n- Write or update the sibling lockfile only after all packages resolve successfully in sorted order; failed resolves must leave the prior lockfile untouched.\n- Advance active requirement `R008` directly and re-verify `R007` by proving the shared declarative builder/resolver path still works after lock integration.\n\n## Threat Surface\n\n- **Abuse**: malicious or stale cache entries, force-pushed tags that move to a different commit, tampered release assets/manifests, or malformed committed lockfiles trying to bypass integrity checks.\n- **Data exposure**: none beyond module/version and provenance metadata written to the repo-local lockfile; no tokens, secrets, or archive contents may be persisted or logged.\n- **Input trust**: untrusted remote archive/manifest bytes from release or git sources and untrusted on-disk `*.toolset.lock` JSON until validated.\n\n## Requirement Impact\n\n- **Requirements touched**: R007, R008.\n- **Re-verify**: declarative `ToolsetFile.Resolve` still uses `Builder.AddFromRegistry`; cache hits, fallback resolution, lock mismatch refetch, deterministic stop-on-first-error behavior, schema-backed lockfile validation, and lockfile write semantics all need regression coverage.\n- **Decisions revisited**: D020.\n\n## Verification\n\n- `toolset/toolset_lock_test.go` proves embedded lockfile schema validation, sibling filename derivation, deterministic key ordering, read/write round-trips, and malformed lockfile rejection.\n- `registry/resolver_test.go`, `registry/source_test.go`, and `registry/git_source_test.go` prove provenance metadata, exact `git_sha`, fallback provenance, cache-hit metadata, and mismatch/refetch behavior.\n- `toolset/toolset_file_test.go` proves initial lockfile generation, subsequent verification against lock metadata, schema-vs-semantic validation failures, refetch-on-cache-mismatch, fail-on-refetched-mismatch, deterministic sorted-package ordering, and no partial lockfile rewrite on failure.\n- `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s`\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s`\n- `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`",
+      "proof_level": "- This slice proves: integration\n- Real runtime required: yes\n- Human/UAT required: no",
+      "integration_closure": "- Upstream surfaces consumed: `toolset/toolset_file.go`, `toolset/toolset.go`, `registry/resolver.go`, `registry/source.go`, `registry/git_source.go`, `registry/cache.go`, and the existing source/cache fixture test helpers.\n- New wiring introduced in this slice: `ToolsetFile` derives and loads a sibling lockfile, validates its shape via embedded JSON Schema plus Go semantic checks, consumes resolver metadata during declarative resolve, verifies lock expectations before trusting cache state, and writes deterministic lock output after successful resolution.\n- What remains before the milestone is truly usable end-to-end: CLI commands and replace-directive interaction still land in S11/S12.",
+      "observability_impact": "- Runtime signals: resolver and toolset errors must distinguish malformed lockfile shape, semantic lock mismatch, cache mismatch, refetch mismatch, source provenance, and package identity.\n- Inspection surfaces: focused Go tests in `toolset/toolset_file_test.go`, `toolset/toolset_lock_test.go`, `registry/resolver_test.go`, `registry/source_test.go`, and `registry/git_source_test.go` become the contract surfaces for diagnosis.\n- Failure visibility: returned errors should surface lock path or package key, expected vs actual archive hash, source used, schema-vs-semantic validation context, and git SHA lookup failures without dumping archive contents.\n- Redaction constraints: never log credentials, HTTP auth headers, or raw asset bodies.",
       "sequence": 0,
       "replan_triggered_at": null
     },
@@ -812,19 +812,26 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S09",
       "id": "T02",
-      "title": "Resolve parsed toolset files through Builder.AddFromRegistry with cache-backed integration tests",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Added ToolsetFile.Resolve and cache-backed tests that drive declarative package resolution through the builder registry path.",
+      "status": "complete",
+      "one_liner": "Added ToolsetFile.Resolve and cache-backed tests that drive declarative package resolution through the builder registry path.",
+      "narrative": "Extended toolset/toolset_file.go with (*ToolsetFile).Resolve(ctx, resolver). The method rejects nil or unvalidated toolset state, creates a builder with NewWithResolver, sorts parsed package module keys deterministically, and calls AddFromRegistry for each declared package so declarative resolution uses the same resolver/cache/load path as imperative builder usage. Preserved the parsed Tools entries on ToolsetFile. Expanded toolset/toolset_file_test.go with resolve-focused coverage for nil toolset handling, unvalidated state rejection, nil-resolver ErrNoResolver, deterministic cache-backed resolution matching imperative builder output, cache-load failure propagation, and stop-on-first-error behavior. Fixed a test-only fixture helper mismatch by adding a local loader that discovers the single .toolbox.pkg file in each dist fixture directory.",
+      "verification_result": "Ran the task verification command `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, which passed. Then ran `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` as a broader regression check, which also passed.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T12:22:00.830Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S09/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Implemented ToolsetFile.Resolve strictly in terms of NewWithResolver plus AddFromRegistry to preserve the shared builder/resolver/cache path.",
+        "Added a fixture-local archive loader in the resolve tests so cache-backed declarative resolution can use multiple real dist fixtures without modifying the existing calc-specific helper."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S09\nmilestone: M001-zku9aj\nkey_files:\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S09/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Implemented ToolsetFile.Resolve strictly in terms of NewWithResolver plus AddFromRegistry to preserve the shared builder/resolver/cache path.\n  - Added a fixture-local archive loader in the resolve tests so cache-backed declarative resolution can use multiple real dist fixtures without modifying the existing calc-specific helper.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T12:22:00.908Z\nblocker_discovered: false\n---\n\n# T02: Added ToolsetFile.Resolve and cache-backed tests that drive declarative package resolution through the builder registry path.\n\n**Added ToolsetFile.Resolve and cache-backed tests that drive declarative package resolution through the builder registry path.**\n\n## What Happened\n\nExtended toolset/toolset_file.go with (*ToolsetFile).Resolve(ctx, resolver). The method rejects nil or unvalidated toolset state, creates a builder with NewWithResolver, sorts parsed package module keys deterministically, and calls AddFromRegistry for each declared package so declarative resolution uses the same resolver/cache/load path as imperative builder usage. Preserved the parsed Tools entries on ToolsetFile. Expanded toolset/toolset_file_test.go with resolve-focused coverage for nil toolset handling, unvalidated state rejection, nil-resolver ErrNoResolver, deterministic cache-backed resolution matching imperative builder output, cache-load failure propagation, and stop-on-first-error behavior. Fixed a test-only fixture helper mismatch by adding a local loader that discovers the single .toolbox.pkg file in each dist fixture directory.\n\n## Verification\n\nRan the task verification command `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, which passed. Then ran `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` as a broader regression check, which also passed.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s` | 0 | ✅ pass | 695ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` | 0 | ✅ pass | 724ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `toolset/toolset_file.go`\n- `toolset/toolset_file_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S09/tasks/T02-SUMMARY.md`\n",
       "description": "## Description\nExtend `toolset/toolset_file.go` with `(*ToolsetFile).Resolve(ctx, resolver)` so declarative toolset files resolve declared packages via the same builder/resolver/cache path introduced in S08. The method should use `NewWithResolver`, iterate packages in a deterministic order, call `AddFromRegistry` for each package, and return the resulting `ResolvedToolset` without introducing any direct resolver bypass.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| `toolset.NewWithResolver` / `Builder.AddFromRegistry` | Return `ErrNoResolver` or the wrapped builder/parse error immediately and stop resolving additional packages. | Respect the caller's `context.Context`; tests should keep resolution cache-backed so no long-running dependency exists. | Propagate resolver/cache load errors unchanged so callers can diagnose the failing package. |\n| `registry.Resolver` cache path | Stop on the first package that cannot be resolved or loaded from cache; do not silently skip packages. | Use the passed context for future source-backed resolvers even though S09 tests run against a pre-populated cache. | Surface integrity/manifest errors from the resolver path instead of masking them. |\n\n## Load Profile\n\n- **Shared resources**: Resolver cache directory and ordered source chain accessed through `Builder.AddFromRegistry`.\n- **Per-operation cost**: One resolver call per declared package plus package load into the builder.\n- **10x breakpoint**: Resolution scales linearly with package count; deterministic iteration and cache-backed tests keep the contract stable without adding concurrency in this slice.\n\n## Negative Tests\n\n- **Malformed inputs**: nil resolver, package entries that were parse-valid but cannot be resolved, and empty/invalid parsed state rejected before or during resolution.\n- **Error paths**: resolver/cache failure for a declared package stops resolution and surfaces the underlying error.\n- **Boundary conditions**: pre-populated cache round-trip produces the same resolved package/tools as imperative builder usage.\n\n## Steps\n\n1. Implement `(*ToolsetFile).Resolve(ctx, resolver)` in `toolset/toolset_file.go` by creating a builder with `NewWithResolver`, sorting package module keys, and calling `AddFromRegistry` for each declared package.\n2. Preserve the already-parsed `Tools` list on the `ToolsetFile` while returning the `ResolvedToolset` produced by the builder so downstream slices can consume the same parsed structure.\n3. Extend `toolset/toolset_file_test.go` with resolve-focused tests that seed a temp cache with the existing dist fixture, prove nil-resolver behavior, and verify cache-backed declarative resolution succeeds without regressing S08 behavior.\n\n## Must-Haves\n\n- [ ] `ToolsetFile.Resolve` uses `Builder.AddFromRegistry` for every declared package instead of talking to the resolver directly.\n- [ ] Package iteration is deterministic and tested.\n- [ ] Resolve-focused tests prove nil-resolver handling and cache-backed success using the existing dist fixture pattern.",
       "estimate": "35m",
       "files": [
@@ -849,6 +856,154 @@
         "toolset/toolset_file_test.go"
       ],
       "observability_impact": "Keeps declarative resolution failures inspectable at the same builder/resolver/cache boundaries proven in S08, so future agents can distinguish parse errors, missing resolver wiring, and cache/integrity failures quickly.",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S10",
+      "id": "T01",
+      "title": "Added schema-validated toolset lockfile helpers, deterministic sibling filename derivation, and contract tests for declarative toolset lockfiles.",
+      "status": "complete",
+      "one_liner": "Added schema-validated toolset lockfile helpers, deterministic sibling filename derivation, and contract tests for declarative toolset lockfiles.",
+      "narrative": "Implemented toolset-level lockfile support in `toolset/toolset_lock.go` with an embedded JSON Schema, semantic validation of `<module>@<version>` keys plus provenance fields, and deterministic sorted JSON writes through a temp-file rename path. Updated `toolset.Load` to retain the source toolset filename and derived sibling lockfile path on `ToolsetFile`, then added focused contract tests covering filename derivation, invalid JSON, schema failures, semantic failures, and deterministic write/read round-trips.",
+      "verification_result": "Ran `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s` and confirmed the new lockfile tests plus updated toolset-file load tests all passed.",
+      "duration": "",
+      "completed_at": "2026-03-28T14:25:05.439Z",
+      "blocker_discovered": false,
+      "deviations": "Used temp-file write-and-rename for lockfile persistence instead of a direct `os.WriteFile` path so future lockfile rewrites preserve the previous on-disk file if a write fails.",
+      "known_issues": "None.",
+      "key_files": [
+        "toolset/toolset_lock.go",
+        "toolset/toolbox.toolset.lock.schema.json",
+        "toolset/toolset_lock_test.go",
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S10/tasks/T01-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Toolset lockfiles now validate in two phases (embedded JSON Schema first, Go semantic checks second) and write stable sorted JSON through a temp-file rename path."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S10\nmilestone: M001-zku9aj\nkey_files:\n  - toolset/toolset_lock.go\n  - toolset/toolbox.toolset.lock.schema.json\n  - toolset/toolset_lock_test.go\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S10/tasks/T01-SUMMARY.md\nkey_decisions:\n  - Toolset lockfiles now validate in two phases (embedded JSON Schema first, Go semantic checks second) and write stable sorted JSON through a temp-file rename path.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T14:25:05.439Z\nblocker_discovered: false\n---\n\n# T01: Added schema-validated toolset lockfile helpers, deterministic sibling filename derivation, and contract tests for declarative toolset lockfiles.\n\n**Added schema-validated toolset lockfile helpers, deterministic sibling filename derivation, and contract tests for declarative toolset lockfiles.**\n\n## What Happened\n\nImplemented toolset-level lockfile support in `toolset/toolset_lock.go` with an embedded JSON Schema, semantic validation of `<module>@<version>` keys plus provenance fields, and deterministic sorted JSON writes through a temp-file rename path. Updated `toolset.Load` to retain the source toolset filename and derived sibling lockfile path on `ToolsetFile`, then added focused contract tests covering filename derivation, invalid JSON, schema failures, semantic failures, and deterministic write/read round-trips.\n\n## Verification\n\nRan `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s` and confirmed the new lockfile tests plus updated toolset-file load tests all passed.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s` | 0 | ✅ pass | 1187ms |\n\n\n## Deviations\n\nUsed temp-file write-and-rename for lockfile persistence instead of a direct `os.WriteFile` path so future lockfile rewrites preserve the previous on-disk file if a write fails.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `toolset/toolset_lock.go`\n- `toolset/toolbox.toolset.lock.schema.json`\n- `toolset/toolset_lock_test.go`\n- `toolset/toolset_file.go`\n- `toolset/toolset_file_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S10/tasks/T01-SUMMARY.md`\n",
+      "description": "## Description\n\nAdd toolset-level lockfile types and helpers beside `ToolsetFile`. This task establishes the file contract for S10: derive the sibling `*.toolset.lock` filename from any `*.toolset.json`, validate lockfile shape with an embedded JSON Schema, run Go semantic validation on the decoded entries, and support deterministic JSON encoding keyed by `<module>@<version>` without changing resolver behavior yet.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| `os.ReadFile` / `os.WriteFile` | Return the filesystem error with lockfile or toolset filename context and do not partially accept or rewrite lock state. | N/A for local file I/O; tests should cover ordinary read/write failures indirectly through missing files and malformed content. | N/A |\n| Embedded JSON Schema resolution and validation | Fail fast with lockfile path context when the file shape is wrong and do not continue to semantic validation or resolution. | N/A | Reject wrong top-level structure, wrong field types, missing required fields, and unknown shape errors before any resolver work can trust the file. |\n| Go semantic validation helpers | Reject invalid package keys or provenance semantics with entry-specific context after schema validation succeeds. | N/A | Never accept partially valid lock entries; fail before later resolve code can trust them. |\n\n## Load Profile\n\n- **Shared resources**: Repo-local toolset and lock files only.\n- **Per-operation cost**: One sibling filename derivation plus one JSON read/write per lockfile load or persist.\n- **10x breakpoint**: Deterministic encoding and error locality matter more than throughput; no meaningful performance bottleneck is expected here.\n\n## Negative Tests\n\n- **Malformed inputs**: invalid JSON, wrong top-level shape, missing required entry fields, wrong field types, invalid `<module>@<version>` package keys, and unsupported filenames.\n- **Error paths**: malformed lockfile content fails before any resolver work is attempted, with schema-vs-semantic failures distinguishable in tests.\n- **Boundary conditions**: `toolbox.toolset.json` and arbitrary names like `support-agent.toolset.json` both derive the correct sibling `.lock` path; write/read round-trips preserve deterministic package ordering.\n\n## Steps\n\n1. Add `toolset/toolset_lock.go` plus an embedded lockfile schema file, mirroring S09's `toolset` schema-loading pattern for shape validation.\n2. Implement lockfile load, schema validate, semantic validate, and write helpers that keep JSON output stable and reject malformed entries with path and key context.\n3. Add focused lockfile contract tests in `toolset/toolset_lock_test.go`, and store the source filename on `ToolsetFile` so later resolve work can reuse the derived lock path instead of guessing it.\n\n## Must-Haves\n\n- [ ] Toolset lockfiles are keyed by `<module>@<version>` and carry `archive_sha256`, `git_sha`, `resolved_from`, and `resolved_at`.\n- [ ] Lockfile shape validation follows the S09 pattern: embedded JSON Schema first, then semantic Go validation.\n- [ ] Any `*.toolset.json` filename derives a sibling `*.toolset.lock` path deterministically.\n- [ ] Malformed lockfiles fail with specific file or entry context, and deterministic write/read behavior is covered by tests.",
+      "estimate": "40m",
+      "files": [
+        "toolset/toolset_lock.go",
+        "toolset/toolset_lock_test.go",
+        "toolset/toolbox.toolset.lock.schema.json",
+        "toolset/toolset_file.go",
+        "docs/rfc-tool-registry.md"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s",
+      "inputs": [
+        "toolset/toolset_file.go",
+        "docs/rfc-tool-registry.md"
+      ],
+      "expected_output": [
+        "toolset/toolset_lock.go",
+        "toolset/toolset_lock_test.go",
+        "toolset/toolbox.toolset.lock.schema.json",
+        "toolset/toolset_file.go"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S10",
+      "id": "T02",
+      "title": "Return provenance-aware resolver results and enforce integrity-aware cache refetch semantics",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "## Description\n\nWiden the registry source and resolver seam so declarative resolve can capture the metadata required by R008 without introducing a second resolution path. This task should preserve S08/S09 fallback behavior while returning `archive_sha256`, exact `git_sha`, `resolved_from`, and `resolved_at`, and it should make cache hits refetch rather than silently trust bytes that disagree with the lock.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| GitHub release metadata and tag lookup HTTP calls | Return source-specific context; non-404 errors must still short-circuit before fallback. | Respect `context.Context` and return timeout/cancel errors without partially populating cache metadata. | Reject malformed release or tag/ref payloads before cache write or metadata persistence. |\n| `git` clone / checkout / `rev-parse` in `GitSourceFallback` | Return step-specific git errors with module/version context and do not produce partially trusted metadata. | Respect caller cancellation and fail the fetch cleanly. | Reject timestamp or commit mismatches before packaging succeeds. |\n| Cache load / mismatch handling in `registry.Resolver` | Treat mismatched cached bytes as untrusted, refetch once, and fail if the fetched bytes still disagree with the expected lock metadata. | Do not spin or retry indefinitely; one refetch attempt is the contract. | Surface expected-vs-actual hash context rather than collapsing everything into a generic load failure. |\n\n## Load Profile\n\n- **Shared resources**: Cache directory, ordered source chain, git subprocesses, and GitHub API/emulate responses.\n- **Per-operation cost**: One resolver call per package; on GitHub release success that may include release metadata, tag/commit lookup, and two asset downloads; on fallback it may include one clone plus packaging.\n- **10x breakpoint**: API round-trips and cache rewrites become the first pressure points; correctness of fallback and refetch behavior matters more than parallelism in this slice.\n\n## Negative Tests\n\n- **Malformed inputs**: malformed release/tag lookup payloads, bad cached archive bytes, and invalid expected lock metadata.\n- **Error paths**: primary non-404 errors must still block fallback; cache mismatch must trigger exactly one refetch; a second mismatch must fail.\n- **Boundary conditions**: cache hits return enough metadata for lock verification, fallback success records fallback provenance instead of primary provenance, and pseudo-version or tagged git fetches expose the exact commit SHA.\n\n## Steps\n\n1. Introduce resolver/source metadata types in `registry/source.go` and `registry/resolver.go`, and keep `Builder.AddFromRegistry` compatible by consuming the richer result internally rather than forking resolution behavior.\n2. Capture provenance and commit identity in both source paths: GitHub release should resolve the tag to a commit SHA, while git fallback should return the checked-out commit SHA for tagged and pseudo-version fetches.\n3. Extend `registry/resolver_test.go`, `registry/source_test.go`, and `registry/git_source_test.go` to prove cache-hit metadata, fallback provenance, exact `git_sha`, and refetch/fail semantics; use emulate or focused HTTP stubs where needed for tag lookup coverage.\n\n## Must-Haves\n\n- [ ] Resolver/source results expose the lock metadata required by R008 without bypassing the existing builder/resolver path.\n- [ ] Cache hash mismatches refetch instead of being silently trusted, and persistent mismatches fail with explicit context.\n- [ ] GitHub release and git-source fallback both record deterministic provenance and exact commit identity, with compatibility tests guarding `Builder.AddFromRegistry`.",
+      "estimate": "55m",
+      "files": [
+        "registry/source.go",
+        "registry/source_test.go",
+        "registry/git_source.go",
+        "registry/git_source_test.go",
+        "registry/resolver.go",
+        "registry/resolver_test.go",
+        "toolset/toolset.go",
+        "registry/testutil/emulatetest/seed.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver|TestGitHubReleaseSource|TestGitSource' -timeout 60s",
+      "inputs": [
+        "registry/source.go",
+        "registry/source_test.go",
+        "registry/git_source.go",
+        "registry/git_source_test.go",
+        "registry/resolver.go",
+        "registry/resolver_test.go",
+        "toolset/toolset.go"
+      ],
+      "expected_output": [
+        "registry/source.go",
+        "registry/source_test.go",
+        "registry/git_source.go",
+        "registry/git_source_test.go",
+        "registry/resolver.go",
+        "registry/resolver_test.go",
+        "toolset/toolset.go"
+      ],
+      "observability_impact": "Resolver failures become materially more diagnosable: they should name package identity, source provenance, cache-mismatch state, and git-SHA lookup failures so future agents can tell whether the breakage is in cache integrity, release metadata, or fallback resolution.",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S10",
+      "id": "T03",
+      "title": "Wire ToolsetFile.Resolve to verify and rewrite sibling lockfiles through the shared resolver path",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "## Description\n\nIntegrate the new lockfile contract into declarative resolution without bypassing the builder/resolver chain. `ToolsetFile.Resolve` should load an existing sibling lockfile, rely on the schema-plus-semantic validation introduced in T01, resolve packages in sorted order using the metadata-aware resolver seam, verify lock expectations before trusting cache state, and write the updated lockfile only after all packages succeed.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| Existing sibling lockfile load/schema-validation | Abort before resolution starts and leave the current lockfile untouched. | N/A for local file reads. | Reject malformed shape errors separately from semantic entry errors so callers can localize the problem quickly. |\n| Metadata-aware resolver path from T02 | Stop on the first sorted package failure and propagate resolver or mismatch context unchanged. | Respect caller cancellation across multi-package resolve loops. | Never downgrade hash mismatches or missing provenance into a generic success. |\n| Final lockfile write | Return the write error and preserve the previous on-disk lockfile contents. | N/A | Never leave a partially rewritten lockfile behind after a mid-write failure. |\n\n## Load Profile\n\n- **Shared resources**: Repo-local lockfile plus resolver cache and source chain.\n- **Per-operation cost**: One lock lookup and one resolver call per declared package, followed by a single lockfile write after full success.\n- **10x breakpoint**: Resolve remains linear in package count; deterministic ordering and single-write semantics matter more than concurrency here.\n\n## Negative Tests\n\n- **Malformed inputs**: malformed existing lockfile, schema-valid but semantically invalid lock entries, missing or stale lock entries, and mismatched cached archive hashes.\n- **Error paths**: stale cache refetch succeeds when fresh bytes match the lock; refetched mismatch still fails; a package resolution failure leaves the prior lockfile untouched.\n- **Boundary conditions**: first resolve with no lockfile writes one, later resolves accept matching cache hits, and sorted package ordering still determines the first failing package.\n\n## Steps\n\n1. Extend `toolset.Load` / `ToolsetFile` to retain the source filename and derived lock path so resolve-time code always knows which sibling lockfile it owns.\n2. Update `ToolsetFile.Resolve` to use the metadata-aware resolver contract from T02, verify existing lock expectations before accepting cache results, and accumulate deterministic updated entries while keeping S09's sorted stop-on-first-error behavior.\n3. Expand `toolset/toolset_file_test.go` to cover first-write, subsequent verification, schema-vs-semantic validation failures, cache-mismatch refetch, persistent mismatch failure, and no-partial-rewrite behavior, then run the focused toolset and registry regressions together.\n\n## Must-Haves\n\n- [ ] Successful declarative resolves write or update the sibling `*.toolset.lock` deterministically.\n- [ ] Subsequent resolves validate existing lockfiles via schema plus semantic checks before trusting cache state.\n- [ ] Subsequent resolves verify lock expectations before trusting cache state and fail cleanly when fresh content still disagrees with the lock.\n- [ ] Declarative resolve still goes through `Builder.AddFromRegistry` / `registry.Resolver` and preserves sorted, stop-on-first-error behavior from S09.",
+      "estimate": "50m",
+      "files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset_lock.go",
+        "toolset/toolset_lock_test.go",
+        "toolset/toolset.go",
+        "registry/resolver.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s",
+      "inputs": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset_lock.go",
+        "toolset/toolset_lock_test.go",
+        "toolset/toolset.go",
+        "registry/resolver.go"
+      ],
+      "expected_output": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset_lock.go",
+        "toolset/toolset_lock_test.go"
+      ],
+      "observability_impact": "This task defines the failure surface executors and later agents will actually use: lockfile path, schema-vs-semantic validation context, package key, expected vs actual archive hash, and sorted failing package must remain visible in toolset-level errors and tests so lock mismatches are localizable without re-reading cache internals.",
       "full_plan_md": "",
       "sequence": 0
     }
@@ -1055,6 +1210,66 @@
       "choice": "`toolset.Load(filename)` returns a validated `*ToolsetFile`, package resolution happens in `(*ToolsetFile).Resolve(ctx, resolver)`, and `tools[].tool` entries must use full FQNs whose module and version exactly match the `packages` map.",
       "rationale": "Separating parse-time validation from registry resolution keeps configuration errors distinct from fetch/load failures, preserves the parsed structure for downstream lockfile/replace work, and avoids ambiguous short-name expansion before package manifests are loaded.",
       "revisable": "Yes — revisit when replace directives, lockfiles, or short-name expansion are implemented.",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 18,
+      "id": "D018",
+      "when_context": "M001-zku9aj/S09/T01 follow-up",
+      "scope": "validation",
+      "decision": "How toolbox.toolset.json should validate shape versus semantics",
+      "choice": "Use embedded JSON Schema for file shape validation, then run explicit Go semantic validation; allow empty packages/tools at this layer.",
+      "rationale": "Schema provides consistent structural errors for required fields, types, and unexpected properties, while semantic rules like module/version parsing and tool-to-package cross-checks remain clearer in Go. Allowing empty packages and tools keeps the file layer as a permissive declarative container and avoids prematurely encoding tool-selection semantics in M001.",
+      "revisable": "Yes — revisit when tool selection semantics, bindings, or lockfile-driven constraints become first-class.",
+      "made_by": "collaborative",
+      "superseded_by": null
+    },
+    {
+      "seq": 19,
+      "id": "D019",
+      "when_context": "",
+      "scope": "requirement",
+      "decision": "R007",
+      "choice": "validated",
+      "rationale": "S09 verification proved that toolset.Load parses and validates toolbox.toolset.json with schema and semantic checks, and TestToolsetFileResolve proved declared packages resolve through Builder.AddFromRegistry using the shared resolver/cache path. Commands run: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s`.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 20,
+      "id": "D020",
+      "when_context": "M001-zku9aj / S10 planning",
+      "scope": "architecture",
+      "decision": "Where lockfile provenance and verification live for declarative toolset resolution",
+      "choice": "Keep lockfile ownership in `toolset`, add a provenance-bearing resolver result in `registry`, and have declarative lock verification continue through `ToolsetFile.Resolve` -> `Builder.AddFromRegistry` -> `registry.Resolver` rather than adding a second cache/verification path.",
+      "rationale": "R008 needs `archive_sha256`, `git_sha`, `resolved_from`, and `resolved_at` at the declarative toolset boundary, but S09 already established that declarative and imperative assembly must share one builder/resolver/cache path. Keeping file I/O and lock ownership in `toolset` preserves the repo-local lockfile contract, while a richer resolver result lets both cache-hit verification and source provenance flow through the existing registry seam without duplicating integrity logic or silently bypassing fallback behavior.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 21,
+      "id": "D021",
+      "when_context": "M001-zku9aj / S10 planning",
+      "scope": "validation",
+      "decision": "How lockfile shape validation should be implemented",
+      "choice": "Validate `*.toolset.lock` files with embedded JSON Schema for structural shape, then apply Go semantic validation for package-key and provenance rules.",
+      "rationale": "This keeps S10 aligned with S09's proven pattern for config files: schema catches top-level structure, required fields, and type errors early, while Go code handles cross-field and semantic rules such as `<module>@<version>` keys and provenance semantics. It improves error locality without duplicating semantic logic in schema alone.",
+      "revisable": "Yes",
+      "made_by": "human",
+      "superseded_by": null
+    },
+    {
+      "seq": 22,
+      "id": "D022",
+      "when_context": "M001-zku9aj S10 T01",
+      "scope": "architecture",
+      "decision": "How toolset lockfiles are validated and written",
+      "choice": "Validate toolset lockfiles in two phases (embedded JSON Schema, then Go semantic checks) and write them with sorted package-key JSON via temp-file rename",
+      "rationale": "Schema validation catches structural shape errors before any semantic trust is placed in entries, while semantic validation enforces package-key, hash, provenance, and timestamp rules with entry-local context. Stable sorted encoding makes lockfile diffs deterministic, and temp-file rename avoids partial rewrites when later resolve code updates sibling lockfiles.",
+      "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
     }
@@ -1301,6 +1516,39 @@
       "verdict": "✅ pass",
       "duration_ms": 1298,
       "created_at": "2026-03-28T11:59:42.088Z"
+    },
+    {
+      "id": 23,
+      "task_id": "T02",
+      "slice_id": "S09",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 695,
+      "created_at": "2026-03-28T12:22:00.830Z"
+    },
+    {
+      "id": 24,
+      "task_id": "T02",
+      "slice_id": "S09",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 724,
+      "created_at": "2026-03-28T12:22:00.830Z"
+    },
+    {
+      "id": 25,
+      "task_id": "T01",
+      "slice_id": "S10",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLock|TestToolsetFileLoad' -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1187,
+      "created_at": "2026-03-28T14:25:05.439Z"
     }
   ]
 }

@@ -34,7 +34,7 @@ drill_down_paths:
   - .gsd/milestones/M001-zku9aj/slices/S05/tasks/T02-SUMMARY.md
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T21:42:03.231Z
+completed_at: 2026-03-28T00:36:53.060Z
 blocker_discovered: false
 ---
 
@@ -44,11 +44,11 @@ blocker_discovered: false
 
 ## What Happened
 
-This slice delivered two artifacts: the `PackageSource` interface in `registry/source.go` and its first implementation `GitHubReleaseSource`, which resolves packages from GitHub Release assets given a module path and version.\n\n**PackageSource interface** defines a single method: `Fetch(ctx, module, version) → (archive, manifest, error)`. This is the contract that S08's resolver orchestration will consume.\n\n**GitHubReleaseSource** derives owner/repo from module path segments, looks up releases by tag via the GitHub API, identifies `.toolbox.pkg` and `toolbox.pkg.json` assets, and downloads both with `Accept: application/octet-stream`. It supports `GITHUB_BASE_URL` override via the constructor for emulate testing. Error handling distinguishes release-not-found (sentinel `ErrReleaseNotFound`), missing archive/manifest assets, empty releases, and download failures.\n\n**Integration tests** in `registry/source_test.go` cover 5 cases against a real emulate subprocess: happy path, release not found, missing archive, missing manifest, and empty release. The happy-path test tolerates emulate's known limitation where asset downloads return JSON instead of binary, while still validating the full API traversal.
+This slice delivered two artifacts: the PackageSource interface in registry/source.go and its first implementation GitHubReleaseSource, which resolves packages from GitHub Release assets given a module path and version. PackageSource defines a single method: Fetch(ctx, module, version) → (archive, manifest, error). GitHubReleaseSource derives owner/repo from module path segments, looks up releases by tag via the GitHub API, identifies `.toolbox.pkg` and `toolbox.pkg.json` assets, and downloads both with `Accept: application/octet-stream`. It supports GITHUB_BASE_URL override via the constructor for emulate testing. Error handling distinguishes release-not-found (sentinel ErrReleaseNotFound), missing archive/manifest assets, empty releases, and download failures. Integration tests in registry/source_test.go cover 5 cases against a real emulate subprocess: happy path, release not found, missing archive, missing manifest, and empty release. The happy-path test tolerates emulate's known limitation where asset downloads return JSON instead of binary, while still validating the full API traversal.
 
 ## Verification
 
-Ran `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` — all 5 subtests passed (happy_path, release_not_found, missing_archive_asset, missing_manifest_asset, empty_release). Build and vet clean.
+Ran `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` — all 5 subtests passed. Build and vet clean.
 
 ## Requirements Advanced
 

@@ -3,7 +3,7 @@ id: S04
 parent: M001-zku9aj
 milestone: M001-zku9aj
 provides:
-  - Cache type with Has/Put/LoadArchive for downstream resolvers (S05, S06) to store and retrieve packages
+  - Cache type with Has/Put/LoadArchive for downstream resolvers to store and retrieve packages
 requires:
   - slice: S03
     provides: ModulePath and Version types used as cache keys
@@ -24,7 +24,7 @@ drill_down_paths:
   - .gsd/milestones/M001-zku9aj/slices/S04/tasks/T01-SUMMARY.md
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T16:25:10.314Z
+completed_at: 2026-03-28T00:35:58.798Z
 blocker_discovered: false
 ---
 
@@ -34,11 +34,11 @@ blocker_discovered: false
 
 ## What Happened
 
-Implemented registry/cache.go with a Cache type that resolves its root directory from an explicit parameter, the TOOLBOX_CACHE_DIR env var, or os.UserCacheDir fallback. The cache stores packages under a deterministic path layout: `<root>/<module>/@v/<version>.{pkg,manifest,info}`. Put writes all three sidecar files atomically. Has checks for the archive file's existence. LoadArchive delegates to packaging.LoadArchive for sha256 verification against the manifest. Registry-local type aliases (ModulePath, Version) keep the cache API concise while staying compatible with the canonical tool package types. A comprehensive table-driven test suite in registry/cache_test.go covers Put+Has round-trips, missing entry detection, real archive round-tripping through packaging.LoadArchive using test fixtures, path structure verification, TOOLBOX_CACHE_DIR override, and missing-entry load error handling.
+Implemented registry/cache.go with a Cache type that resolves its root directory from an explicit parameter, the TOOLBOX_CACHE_DIR env var, or os.UserCacheDir fallback. The cache stores packages under a deterministic path layout: `<root>/<module>/@v/<version>.{pkg,manifest,info}`. Put writes all three sidecar files atomically. Has checks for the archive file's existence. LoadArchive delegates to packaging.LoadArchive for sha256 verification against the manifest. Registry-local type aliases keep the cache API concise while staying compatible with the canonical tool package types. A comprehensive table-driven test suite in registry/cache_test.go covers Put+Has round-trips, missing entry detection, real archive round-tripping through packaging.LoadArchive using test fixtures, path structure verification, TOOLBOX_CACHE_DIR override, and missing-entry load error handling.
 
 ## Verification
 
-All 6 TestCache subtests pass: PutHasRoundTrip, HasMissingEntry, PutLoadArchiveRoundTrip, PathStructureVerification, ToolboxCacheDirOverride, LoadArchiveMissingEntryReturnsError. go vet ./registry/... clean.
+All 6 TestCache subtests pass and `go vet ./registry/...` is clean.
 
 ## Requirements Advanced
 

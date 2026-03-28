@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran the task verification commands directly. `go test ./registry/... -v -count=1 -run TestCache` passed with all cache scenarios green, including real fixture round-tripping through packaging.LoadArchive. `go vet ./registry/...` also passed with no findings."
-completed_at: 2026-03-27T16:16:03.173Z
+verification_result: "Ran `go test ./registry/... -v -count=1 -run TestCache` and `go vet ./registry/...`; both passed."
+completed_at: 2026-03-28T00:32:49.507Z
 blocker_discovered: false
 ---
 
@@ -34,7 +34,7 @@ key_decisions:
   - Delegated cache archive validation to packaging.LoadArchive rather than re-implementing sha256 or manifest verification inside registry.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T16:16:03.179Z
+completed_at: 2026-03-28T00:32:49.508Z
 blocker_discovered: false
 ---
 
@@ -48,7 +48,7 @@ Implemented registry/cache.go with a Cache type that resolves its root from an e
 
 ## Verification
 
-Ran the task verification commands directly. `go test ./registry/... -v -count=1 -run TestCache` passed with all cache scenarios green, including real fixture round-tripping through packaging.LoadArchive. `go vet ./registry/...` also passed with no findings.
+Ran `go test ./registry/... -v -count=1 -run TestCache` and `go vet ./registry/...`; both passed.
 
 ## Verification Evidence
 

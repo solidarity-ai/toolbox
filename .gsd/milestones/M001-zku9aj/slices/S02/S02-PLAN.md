@@ -1,10 +1,92 @@
+# S02: 
+
+**Goal:** ---
+id: S02
+parent: M001-zku9aj
+milestone: M001-zku9aj
+provides:
+  - SeedCorruptArchiveRelease, SeedMismatchedHashRelease, SeedMissingAssetRelease, SeedEmptyRelease helpers for emulate-backed resolver error tests
+  - CreateBrokenRepo, CreateRepoMissingTag, CreateCorruptPackageRepo helpers for git-source resolver error tests
+requires:
+  - slice: S01
+    provides: Emulate lifecycle, SeedPackageRelease pattern, git fixture CreateTaggedRepo foundation
+affects:
+  - S05
+  - S06
+key_files:
+  - registry/testutil/emulatetest/seed.go
+  - registry/testutil/emulatetest/emulatetest_test.go
+  - registry/testutil/gitfixture/gitfixture.go
+  - registry/testutil/gitfixture/gitfixture_test.go
+key_decisions:
+  - Reused shared internal pack-and-upload pipeline so all emulate failure helpers preserve the SeedPackageRelease contract.
+  - Validated corrupt archive via exported packaging.LoadArchive API rather than internal package imports.
+  - Kept missing-tag helper narrow so callers choose the absent tag they need.
+  - Reused CreateTaggedRepo for all git failure fixtures to centralize git setup logic.
+patterns_established:
+  - Failure fixture pattern: each builder creates one specific failure precondition, returns enough context for downstream tests to exercise the error path without setup boilerplate
+observability_surfaces:
+  - none
+drill_down_paths:
+  - .gsd/milestones/M001-zku9aj/slices/S02/tasks/T01-SUMMARY.md
+  - .gsd/milestones/M001-zku9aj/slices/S02/tasks/T02-SUMMARY.md
+duration: ""
+verification_result: passed
+completed_at: 2026-03-28T00:35:58.797Z
+blocker_discovered: false
+---
+
 # S02: Failure scenario test builders
 
-**Goal:** Add failure scenario seed helpers to emulatetest and gitfixture packages so downstream resolver slices (S05, S06) can test error paths: corrupt archives, mismatched hashes, missing assets, empty releases, broken git repos.
+**Failure-scenario seed helpers for emulate and git fixtures enabling downstream resolver error-path testing.**
+
+## What Happened
+
+Built on the S01 emulate lifecycle and git fixture foundations, this slice added seven failure-scenario builders across two packages. In emulatetest/seed.go, four new exported helpers were added: SeedCorruptArchiveRelease, SeedMismatchedHashRelease, SeedMissingAssetRelease, and SeedEmptyRelease. All reuse a shared internal pack-and-upload pipeline to stay aligned with the SeedPackageRelease contract while varying only the failure dimension. In gitfixture/gitfixture.go, three new helpers were added: CreateBrokenRepo, CreateRepoMissingTag, and CreateCorruptPackageRepo. All reuse CreateTaggedRepo internally so git setup logic stays centralized. Each helper has corresponding tests validating the intended failure precondition: corrupt archives fail LoadArchive, mismatched hashes disagree, missing-asset releases have exactly 1 asset, empty releases have 0 assets, broken repos lack the manifest file, missing tags are not found by git, and corrupt packages fail json.Unmarshal.
+
+## Verification
+
+Ran `go test ./registry/... -v -count=1 -timeout 60s` — all tests pass across both emulatetest and gitfixture packages. No regressions in S01 tests.
+
+## Requirements Advanced
+
+- R011 — Added failure-scenario builders (corrupt archives, mismatched hashes, missing assets, empty releases, broken git repos) completing the Builder API failure scenario coverage specified in R011
+
+## Requirements Validated
+
+None.
+
+## New Requirements Surfaced
+
+None.
+
+## Requirements Invalidated or Re-scoped
+
+None.
+
+## Deviations
+
+None.
+
+## Known Limitations
+
+None.
+
+## Follow-ups
+
+None.
+
+## Files Created/Modified
+
+- `registry/testutil/emulatetest/seed.go` — Added SeedCorruptArchiveRelease, SeedMismatchedHashRelease, SeedMissingAssetRelease, SeedEmptyRelease helpers and shared internal pipeline
+- `registry/testutil/emulatetest/emulatetest_test.go` — Added tests for all four emulate failure scenarios
+- `registry/testutil/gitfixture/gitfixture.go` — Added CreateBrokenRepo, CreateRepoMissingTag, CreateCorruptPackageRepo helpers
+- `registry/testutil/gitfixture/gitfixture_test.go` — Added tests for all three git fixture failure scenarios
+
 **Demo:** After this: # S02: Failure scenario test builders — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T10:57:47.642Z
+**Written:** 2026-03-28T00:35:58.797Z
 
 # S02: Failure scenario test builders — UAT
 
@@ -85,38 +167,7 @@ Run `go test ./registry/... -v -count=1 -timeout 60s` — all tests pass with no
 All emulate tests require a ~2s startup for the emulate server. The gitfixture tests are fast (~0.2s total).
 
 
+
 ## Tasks
-- [x] **T01: Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.** — Add four failure scenario helpers to emulatetest/seed.go:
-
-1. `SeedCorruptArchiveRelease(owner, repo, tag, pkgDir)` — packs a real package, uploads valid manifest but replaces archive bytes with random garbage. Returns SeedResult with corrupt ArchiveBytes.
-2. `SeedMismatchedHashRelease(owner, repo, tag, pkgDir)` — packs a real package, uploads valid archive but modifies the manifest sha256 to a wrong value before uploading. Returns SeedResult with real ArchiveBytes and tampered ManifestBytes.
-3. `SeedMissingAssetRelease(owner, repo, tag, pkgDir, mode)` — creates release with only one asset. `mode` selects which is missing: "archive" (manifest only) or "manifest" (archive only).
-4. `SeedEmptyRelease(owner, repo, tag)` — creates repo + release with zero assets.
-
-All helpers follow the existing SeedPackageRelease pattern: create repo (ignore already-exists), create release, upload assets selectively. Return SeedResult so S05 can access bytes directly (emulate binary download workaround).
-
-Add tests in emulatetest_test.go verifying:
-- Corrupt archive: SeedResult.ArchiveBytes is not valid (attempt LoadArchive fails)
-- Mismatched hash: manifest sha256 does not match actual archive sha256
-- Missing asset: release has exactly 1 asset with expected name
-- Empty release: release has 0 assets
-  - Estimate: 45m
-  - Files: registry/testutil/emulatetest/seed.go, registry/testutil/emulatetest/emulatetest_test.go
-  - Verify: go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s
-- [x] **T02: Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.** — Add three failure scenario helpers to gitfixture/gitfixture.go:
-
-1. `CreateBrokenRepo(t, tag)` — creates a tagged repo with no `toolbox.devpkg.json` (just a README). S06 resolver expects this file; its absence is the failure.
-2. `CreateRepoMissingTag(t, existingTag, missingTag)` — creates repo tagged at existingTag. Returns repo path. Caller can attempt checkout of missingTag which won't exist.
-3. `CreateCorruptPackageRepo(t, tag)` — creates tagged repo where `toolbox.devpkg.json` contains invalid JSON (`{broken`).
-
-All helpers use existing runGit/commitAllAndTag internals. Follow the established pattern: t.Helper(), t.TempDir(), explicit git user config.
-
-Add tests in gitfixture_test.go verifying:
-- Broken repo: clone + ls shows no toolbox.devpkg.json
-- Missing tag: clone succeeds, `git tag -l missingTag` returns empty
-- Corrupt package: toolbox.devpkg.json exists but json.Unmarshal fails
-
-Finally run `go test ./registry/... -v -count=1 -timeout 60s` to confirm no regressions across both packages.
-  - Estimate: 30m
-  - Files: registry/testutil/gitfixture/gitfixture.go, registry/testutil/gitfixture/gitfixture_test.go
-  - Verify: go test ./registry/... -v -count=1 -timeout 60s
+- [x] **T01: Added emulate release seeding helpers for corrupt, mismatched, missing-asset, and empty-release failure scenarios with tests.** — 
+- [x] **T02: Added git fixture failure builders and tests for missing manifest, missing tag, and corrupt package scenarios.** — 

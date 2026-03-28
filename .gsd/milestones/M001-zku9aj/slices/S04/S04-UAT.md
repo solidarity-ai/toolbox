@@ -1,7 +1,7 @@
 # S04: Local cache layout — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T16:25:10.315Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S04: Local cache layout — UAT
 
@@ -75,3 +75,4 @@ Run `go test ./registry/... -v -count=1 -run TestCache` — all 6 subtests pass.
 ## Notes for Tester
 
 Tests run in ~6ms total. No external dependencies required.
+

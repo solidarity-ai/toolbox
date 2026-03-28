@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and confirmed all five required `TestGitHubReleaseSource` subtests passed against a real emulate subprocess. Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/testutil/emulatetest -v -count=1 -run 'TestSeed(PackageRelease|MissingAssetRelease|EmptyRelease)$' -timeout 60s` and confirmed the seed helpers that power those integration tests also passed. The happy-path verification again showed the known emulate asset-download limitation, with JSON responses accepted as planned when the API traversal succeeds and returns non-empty bytes."
-completed_at: 2026-03-27T21:34:44.358Z
+verification_result: "Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/testutil/emulatetest -v -count=1 -run 'TestSeed(PackageRelease|MissingAssetRelease|EmptyRelease)$' -timeout 60s`; both passed."
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -34,7 +34,7 @@ key_decisions:
   - Recorded the worktree-specific `go test` invocation workaround in `.gsd/KNOWLEDGE.md` instead of changing product code, because the failure mode was environmental rather than a defect in `GitHubReleaseSource` or its tests.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T21:34:44.364Z
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -48,7 +48,7 @@ Validated the T02 contract against the current repository and confirmed `registr
 
 ## Verification
 
-Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and confirmed all five required `TestGitHubReleaseSource` subtests passed against a real emulate subprocess. Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/testutil/emulatetest -v -count=1 -run 'TestSeed(PackageRelease|MissingAssetRelease|EmptyRelease)$' -timeout 60s` and confirmed the seed helpers that power those integration tests also passed. The happy-path verification again showed the known emulate asset-download limitation, with JSON responses accepted as planned when the API traversal succeeds and returns non-empty bytes.
+Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/testutil/emulatetest -v -count=1 -run 'TestSeed(PackageRelease|MissingAssetRelease|EmptyRelease)$' -timeout 60s`; both passed.
 
 ## Verification Evidence
 

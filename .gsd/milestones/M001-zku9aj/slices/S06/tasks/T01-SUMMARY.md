@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran the slice-defined verification command: env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s. The final run passed and confirmed the happy-path Fetch flow clones, packages, and returns non-empty bytes."
-completed_at: 2026-03-27T22:17:46.939Z
+verification_result: "Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s`; it passed."
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -34,7 +34,7 @@ key_decisions:
   - Included module, tag, clone URL, and captured git output in git clone failure errors for direct debugging context.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T22:17:46.948Z
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -48,7 +48,7 @@ Implemented registry/git_source.go with GitSourceFallback, a PackageSource imple
 
 ## Verification
 
-Ran the slice-defined verification command: env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s. The final run passed and confirmed the happy-path Fetch flow clones, packages, and returns non-empty bytes.
+Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s`; it passed.
 
 ## Verification Evidence
 

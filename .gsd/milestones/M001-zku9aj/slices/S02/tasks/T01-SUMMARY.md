@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran the task-plan verification command `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios. An LSP diagnostics check was attempted afterward, but no Go language server was available in this environment."
-completed_at: 2026-03-27T01:27:06.153Z
+verification_result: "Ran `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios."
+completed_at: 2026-03-28T00:32:22.327Z
 blocker_discovered: false
 ---
 
@@ -34,7 +34,7 @@ key_decisions:
   - Validated corrupt archive behavior through the exported packaging.LoadArchive API instead of importing packaging/internal/archive from a sibling package test.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T01:27:06.179Z
+completed_at: 2026-03-28T00:32:22.327Z
 blocker_discovered: false
 ---
 
@@ -48,7 +48,7 @@ Extended registry/testutil/emulatetest/seed.go with four exported helpers: SeedC
 
 ## Verification
 
-Ran the task-plan verification command `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios. An LSP diagnostics check was attempted afterward, but no Go language server was available in this environment.
+Ran `go test ./registry/testutil/emulatetest/ -v -count=1 -timeout 60s` and it passed, covering the existing lifecycle and normal seeding tests plus the new corrupt archive, mismatched hash, missing asset, and empty release scenarios.
 
 ## Verification Evidence
 

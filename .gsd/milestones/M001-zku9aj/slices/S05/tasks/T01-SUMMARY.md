@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran go test ./registry/... -v -count=1 -run TestGitHubReleaseSource -timeout 60s and confirmed all five source subtests passed against a real emulate subprocess. Ran go build ./registry/... && go vet ./registry/... and both completed successfully after formatting the new Go files with gofmt."
-completed_at: 2026-03-27T21:24:42.640Z
+verification_result: "Ran `go test ./registry/... -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and `go build ./registry/... && go vet ./registry/...`; both passed."
+completed_at: 2026-03-28T00:34:32.571Z
 blocker_discovered: false
 ---
 
@@ -34,7 +34,7 @@ key_decisions:
   - Separated release metadata lookup from asset downloads to keep GitHubReleaseSource failure reporting contextual and easy to test.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T21:24:42.648Z
+completed_at: 2026-03-28T00:34:32.571Z
 blocker_discovered: false
 ---
 
@@ -48,7 +48,7 @@ Implemented registry/source.go with the new PackageSource interface and a GitHub
 
 ## Verification
 
-Ran go test ./registry/... -v -count=1 -run TestGitHubReleaseSource -timeout 60s and confirmed all five source subtests passed against a real emulate subprocess. Ran go build ./registry/... && go vet ./registry/... and both completed successfully after formatting the new Go files with gofmt.
+Ran `go test ./registry/... -v -count=1 -run TestGitHubReleaseSource -timeout 60s` and `go build ./registry/... && go vet ./registry/...`; both passed.
 
 ## Verification Evidence
 

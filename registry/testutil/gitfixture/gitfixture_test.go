@@ -3,12 +3,15 @@ package gitfixture
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/tool"
 )
 
 func TestCreateTaggedRepo(t *testing.T) {
@@ -58,6 +61,81 @@ func TestCreateTaggedRepoFromDir(t *testing.T) {
 
 	t.Logf("created repo %s from fixture dir %s", repoDir, srcDir)
 	t.Logf("checked out v2.0.0 and verified toolbox.devpkg.json")
+}
+
+func TestCreatePseudoVersionRepo(t *testing.T) {
+	srcDir := fixtureSourceDir(t, "calc")
+	meta := CreatePseudoVersionRepoFromDir(t, srcDir)
+
+	if meta.RepoDir == "" {
+		t.Fatal("CreatePseudoVersionRepoFromDir returned empty RepoDir")
+	}
+	if meta.PseudoVersion == "" {
+		t.Fatal("CreatePseudoVersionRepoFromDir returned empty PseudoVersion")
+	}
+	if meta.PseudoTimestamp == "" {
+		t.Fatal("CreatePseudoVersionRepoFromDir returned empty PseudoTimestamp")
+	}
+	if meta.ShortCommit == "" {
+		t.Fatal("CreatePseudoVersionRepoFromDir returned empty ShortCommit")
+	}
+	if meta.CommitSHA == "" {
+		t.Fatal("CreatePseudoVersionRepoFromDir returned empty CommitSHA")
+	}
+	if len(meta.ShortCommit) != 12 {
+		t.Fatalf("ShortCommit length = %d, want 12", len(meta.ShortCommit))
+	}
+	if len(meta.CommitSHA) != 40 {
+		t.Fatalf("CommitSHA length = %d, want 40", len(meta.CommitSHA))
+	}
+	if !strings.HasPrefix(meta.CommitSHA, meta.ShortCommit) {
+		t.Fatalf("CommitSHA %q does not start with ShortCommit %q", meta.CommitSHA, meta.ShortCommit)
+	}
+
+	version, err := tool.ParseVersion(meta.PseudoVersion)
+	if err != nil {
+		t.Fatalf("ParseVersion(%q): %v", meta.PseudoVersion, err)
+	}
+	if !version.IsPseudo() {
+		t.Fatalf("version %q was not parsed as pseudo", version)
+	}
+	if version.PseudoTimestamp() != meta.PseudoTimestamp {
+		t.Fatalf("PseudoTimestamp() = %q, want %q", version.PseudoTimestamp(), meta.PseudoTimestamp)
+	}
+	if version.PseudoCommit() != meta.ShortCommit {
+		t.Fatalf("PseudoCommit() = %q, want %q", version.PseudoCommit(), meta.ShortCommit)
+	}
+
+	cloneDir := filepath.Join(t.TempDir(), "clone")
+	runGit(t, ".", "clone", fmt.Sprintf("file://%s", meta.RepoDir), cloneDir)
+
+	resolvedCommit := strings.TrimSpace(runGit(t, cloneDir, "rev-parse", meta.ShortCommit))
+	if resolvedCommit != meta.CommitSHA {
+		t.Fatalf("git rev-parse %s = %q, want %q", meta.ShortCommit, resolvedCommit, meta.CommitSHA)
+	}
+
+	pointsAt := strings.TrimSpace(runGit(t, cloneDir, "tag", "--points-at", meta.CommitSHA))
+	if pointsAt != "" {
+		t.Fatalf("pseudo commit %s unexpectedly tagged: %q", meta.CommitSHA, pointsAt)
+	}
+
+	timestampOut := strings.TrimSpace(runGit(t, cloneDir, "show", "-s", "--format=%aI", meta.CommitSHA))
+	commitTime, err := time.Parse(time.RFC3339, timestampOut)
+	if err != nil {
+		t.Fatalf("parse commit author date %q: %v", timestampOut, err)
+	}
+	if got := commitTime.UTC().Format("20060102150405"); got != meta.PseudoTimestamp {
+		t.Fatalf("commit timestamp = %q, want %q", got, meta.PseudoTimestamp)
+	}
+
+	manifestPath := filepath.Join(cloneDir, "toolbox.devpkg.json")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", manifestPath, err)
+	}
+	if !strings.Contains(string(manifest), `"name": "calc"`) {
+		t.Fatalf("manifest missing calc name: %s", manifest)
+	}
 }
 
 func TestMultipleTags(t *testing.T) {

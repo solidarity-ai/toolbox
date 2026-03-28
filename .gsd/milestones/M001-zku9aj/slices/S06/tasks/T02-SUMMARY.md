@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Ran the slice-defined verification commands: env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource -timeout 30s and env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/... -v -count=1 -timeout 60s. Both passed, including the new missing_tag, broken_repo, and corrupt_package subtests."
-completed_at: 2026-03-27T22:21:19.664Z
+verification_result: "Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource -timeout 30s` and `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/... -v -count=1 -timeout 60s`; both passed."
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -32,7 +32,7 @@ key_decisions:
   - Asserted failure shape by subsystem boundary: missing tags must fail at git clone, while broken and corrupt packages must fail at the packaging step.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T22:21:19.682Z
+completed_at: 2026-03-28T00:34:32.572Z
 blocker_discovered: false
 ---
 
@@ -46,7 +46,7 @@ Extended registry/git_source_test.go with three new TestGitSource subtests cover
 
 ## Verification
 
-Ran the slice-defined verification commands: env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource -timeout 30s and env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/... -v -count=1 -timeout 60s. Both passed, including the new missing_tag, broken_repo, and corrupt_package subtests.
+Ran `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry -v -count=1 -run TestGitSource -timeout 30s` and `env -u PWD GOWORK=$(pwd)/go.work GOMOD=$(pwd)/go.mod go test ./registry/... -v -count=1 -timeout 60s`; both passed.
 
 ## Verification Evidence
 

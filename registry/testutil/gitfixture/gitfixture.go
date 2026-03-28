@@ -1,13 +1,27 @@
 package gitfixture
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+const pseudoCommitTimeRFC3339 = "2026-03-27T11:22:33Z"
+
+// PseudoVersionRepo describes a repository whose HEAD is an untagged commit
+// addressable via a Go-style pseudo-version.
+type PseudoVersionRepo struct {
+	RepoDir         string
+	PseudoVersion   string
+	PseudoTimestamp string
+	ShortCommit     string
+	CommitSHA       string
+}
 
 // CreateTaggedRepo creates a temporary git repository with the provided files,
 // commits them, tags the initial commit, and returns the repository path.
@@ -72,6 +86,53 @@ func CreateTaggedRepoFromDir(t *testing.T, tag string, srcDir string) string {
 	return repoDir
 }
 
+// CreatePseudoVersionRepoFromDir copies srcDir into a temporary git repository,
+// tags the initial commit, adds a second untagged commit with an explicit author
+// date, and returns pseudo-version metadata for that HEAD commit.
+func CreatePseudoVersionRepoFromDir(t *testing.T, srcDir string) PseudoVersionRepo {
+	t.Helper()
+
+	repoDir := CreateTaggedRepoFromDir(t, "v1.0.0", srcDir)
+
+	pseudoNotePath := filepath.Join(repoDir, "PSEUDO_VERSION.txt")
+	pseudoNote := []byte("pseudo-version fixture\n")
+	if err := os.WriteFile(pseudoNotePath, pseudoNote, 0o644); err != nil {
+		t.Fatalf("gitfixture: write %s: %v", pseudoNotePath, err)
+	}
+
+	commitTime, err := time.Parse(time.RFC3339, pseudoCommitTimeRFC3339)
+	if err != nil {
+		t.Fatalf("gitfixture: parse pseudo commit time %q: %v", pseudoCommitTimeRFC3339, err)
+	}
+
+	runGit(t, repoDir, "add", ".")
+	runGitWithEnv(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
+	}, "-c", "user.name=test", "-c", "user.email=test@test.com", "commit", "-m", "pseudo commit")
+
+	commitSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	if len(commitSHA) < 12 {
+		t.Fatalf("gitfixture: rev-parse HEAD returned short commit %q", commitSHA)
+	}
+	shortCommit := commitSHA[:12]
+
+	authorDate := strings.TrimSpace(runGit(t, repoDir, "show", "-s", "--format=%aI", "HEAD"))
+	authorTime, err := time.Parse(time.RFC3339, authorDate)
+	if err != nil {
+		t.Fatalf("gitfixture: parse HEAD author date %q: %v", authorDate, err)
+	}
+	pseudoTimestamp := authorTime.UTC().Format("20060102150405")
+
+	return PseudoVersionRepo{
+		RepoDir:         repoDir,
+		PseudoVersion:   fmt.Sprintf("v0.0.0-%s-%s", pseudoTimestamp, shortCommit),
+		PseudoTimestamp: pseudoTimestamp,
+		ShortCommit:     shortCommit,
+		CommitSHA:       commitSHA,
+	}
+}
+
 // CreateBrokenRepo creates a tagged repository without toolbox.devpkg.json so
 // resolver tests can verify missing-manifest failures.
 func CreateBrokenRepo(t *testing.T, tag string) string {
@@ -116,9 +177,15 @@ func commitAllAndTag(t *testing.T, repoDir string, tag string) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	return runGitWithEnv(t, dir, nil, args...)
+}
+
+func runGitWithEnv(t *testing.T, dir string, env []string, args ...string) string {
+	t.Helper()
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gitfixture: git %s in %s failed: %v\n%s", strings.Join(args, " "), dir, err, strings.TrimSpace(string(output)))

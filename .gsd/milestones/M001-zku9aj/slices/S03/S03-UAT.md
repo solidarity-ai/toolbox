@@ -1,7 +1,7 @@
 # S03: FQN types and parsing — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T15:45:08.070Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S03: FQN types and parsing — UAT
 
@@ -79,3 +79,4 @@ Run `go test ./tool/... -v -count=1 -run TestFQN` — all tests pass.
 ## Notes for Tester
 
 Tests run in ~3ms total. No external dependencies required.
+

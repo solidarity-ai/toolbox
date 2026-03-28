@@ -1,10 +1,94 @@
+# S05: 
+
+**Goal:** ---
+id: S05
+parent: M001-zku9aj
+milestone: M001-zku9aj
+provides:
+  - PackageSource interface for S08 resolver orchestration
+  - GitHubReleaseSource implementation for S08
+  - ErrReleaseNotFound sentinel for S08 fallback logic
+requires:
+  - slice: S01
+    provides: emulatetest.Start() and SeedPackageRelease helpers
+  - slice: S02
+    provides: SeedMissingAssetRelease and SeedEmptyRelease failure builders
+  - slice: S03
+    provides: ModulePath and Version types for Fetch signature
+  - slice: S04
+    provides: Cache layout design (not directly consumed yet but informed interface shape)
+affects:
+  - S06
+  - S08
+key_files:
+  - registry/source.go
+  - registry/source_test.go
+key_decisions:
+  - PackageSource interface with single Fetch method (archive+manifest bytes)
+  - ErrReleaseNotFound sentinel for resolver fallback in S08
+  - GITHUB_BASE_URL constructor param for emulate testing
+patterns_established:
+  - PackageSource interface pattern: Fetch(ctx, ModulePath, Version) → ([]byte, []byte, error) — S06 git-source will implement the same interface
+observability_surfaces:
+  - none
+drill_down_paths:
+  - .gsd/milestones/M001-zku9aj/slices/S05/tasks/T01-SUMMARY.md
+  - .gsd/milestones/M001-zku9aj/slices/S05/tasks/T02-SUMMARY.md
+duration: ""
+verification_result: passed
+completed_at: 2026-03-28T00:36:53.060Z
+blocker_discovered: false
+---
+
 # S05: GitHub Releases source + PackageSource interface
 
-**Goal:** Define the PackageSource interface and implement GitHubReleaseSource — given (module, version), fetch .toolbox.pkg and toolbox.pkg.json from GitHub Release assets with GITHUB_BASE_URL override for emulate testing.
+**Defined the PackageSource interface and implemented GitHubReleaseSource with full emulate-backed integration tests for success and failure modes.**
+
+## What Happened
+
+This slice delivered two artifacts: the PackageSource interface in registry/source.go and its first implementation GitHubReleaseSource, which resolves packages from GitHub Release assets given a module path and version. PackageSource defines a single method: Fetch(ctx, module, version) → (archive, manifest, error). GitHubReleaseSource derives owner/repo from module path segments, looks up releases by tag via the GitHub API, identifies `.toolbox.pkg` and `toolbox.pkg.json` assets, and downloads both with `Accept: application/octet-stream`. It supports GITHUB_BASE_URL override via the constructor for emulate testing. Error handling distinguishes release-not-found (sentinel ErrReleaseNotFound), missing archive/manifest assets, empty releases, and download failures. Integration tests in registry/source_test.go cover 5 cases against a real emulate subprocess: happy path, release not found, missing archive, missing manifest, and empty release. The happy-path test tolerates emulate's known limitation where asset downloads return JSON instead of binary, while still validating the full API traversal.
+
+## Verification
+
+Ran `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` — all 5 subtests passed. Build and vet clean.
+
+## Requirements Advanced
+
+- R003 — Implemented GitHubReleaseSource that fetches .toolbox.pkg and toolbox.pkg.json from GitHub Release assets with GITHUB_BASE_URL override, verified by 5 emulate-backed integration tests
+
+## Requirements Validated
+
+None.
+
+## New Requirements Surfaced
+
+None.
+
+## Requirements Invalidated or Re-scoped
+
+None.
+
+## Deviations
+
+None. T02 confirmed the T01-written tests already satisfied the full integration coverage plan, so no additional test code was needed.
+
+## Known Limitations
+
+Emulate's asset download endpoint returns JSON instead of raw binary bytes. The happy-path test tolerates this while verifying API traversal correctness. Real GitHub API returns binary — no product code workaround needed.
+
+## Follow-ups
+
+None.
+
+## Files Created/Modified
+
+- `registry/source.go` — PackageSource interface and GitHubReleaseSource implementation
+- `registry/source_test.go` — 5 emulate-backed integration tests for GitHubReleaseSource
+
 **Demo:** After this: # S05: GitHub Releases source + PackageSource interface — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T21:42:03.232Z
+**Written:** 2026-03-28T00:36:53.060Z
 
 # S05: GitHub Releases source + PackageSource interface — UAT
 
@@ -55,59 +139,7 @@ Run `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` �
 - Cache population after fetch (S08)
 
 
+
 ## Tasks
-- [x] **T01: Added the PackageSource interface and a GitHubReleaseSource with emulate-backed integration tests for success and release/asset failure modes.** — Define the `PackageSource` interface with a single `Fetch` method and implement `GitHubReleaseSource` that resolves packages from GitHub Release assets.
-
-The interface: `Fetch(ctx context.Context, module ModulePath, version Version) (archive []byte, manifest []byte, err error)`
-
-`GitHubReleaseSource` struct holds `baseURL` (defaults to `https://api.github.com`) and `httpClient`. It:
-1. Derives owner/repo from module path segments (e.g. `github.com/owner/repo` → owner=segments[1], repo=segments[2])
-2. Calls `GET /repos/{owner}/{repo}/releases/tags/v{version}` (prepend 'v' only if version doesn't start with 'v' — but Version type already includes the 'v' prefix per S03)
-3. Finds assets by name: one ending in `.toolbox.pkg` (archive) and one named `toolbox.pkg.json` (manifest)
-4. Downloads each asset via `GET /repos/{owner}/{repo}/releases/assets/{id}` with `Accept: application/octet-stream`
-5. Returns (archiveBytes, manifestBytes, nil) on success
-
-Error cases to handle:
-- Release not found (404) → return a sentinel or typed error
-- Archive asset not found in release → descriptive error
-- Manifest asset not found in release → descriptive error
-- No assets at all → descriptive error
-- HTTP errors during download → wrap with context
-
-Constructor: `NewGitHubReleaseSource(baseURL string, client *http.Client) *GitHubReleaseSource`. Empty baseURL defaults to `https://api.github.com`.
-  - Estimate: 45m
-  - Files: registry/source.go
-  - Verify: go build ./registry/... && go vet ./registry/...
-- [x] **T02: Verified the existing emulate-backed GitHubReleaseSource integration suite and documented the worktree-safe Go test invocation needed to run it reliably here.** — Write integration tests in `registry/source_test.go` that exercise `GitHubReleaseSource.Fetch()` against a real emulate subprocess using the seed helpers from S01/S02.
-
-Test cases (all use `emulatetest.Start(t)` for the emulate server):
-
-1. **Happy path**: Call `SeedPackageRelease` to create a release with real archive+manifest assets. Call `Fetch()` with the seeded module+version. Due to the emulate binary download bug (returns JSON instead of binary for asset downloads), the test should verify that the Fetch call completes without error and returns non-nil bytes. If the returned bytes match `SeedResult.ArchiveBytes`/`ManifestBytes`, assert that. If emulate returns JSON instead, document the limitation and verify the API call sequence works (no HTTP errors, correct asset identification).
-
-2. **Release not found**: Call `Fetch()` with a version that was never seeded. Expect an error (ideally a typed/sentinel error indicating 'not found').
-
-3. **Missing archive asset**: Use `SeedMissingAssetRelease(... , "archive")` which uploads only the manifest. Call `Fetch()`. Expect an error about missing archive.
-
-4. **Missing manifest asset**: Use `SeedMissingAssetRelease(... , "manifest")` which uploads only the archive. Call `Fetch()`. Expect an error about missing manifest.
-
-5. **Empty release**: Use `SeedEmptyRelease()`. Call `Fetch()`. Expect an error about no assets.
-
-Test setup pattern:
-```go
-func TestGitHubReleaseSource(t *testing.T) {
-    srv := emulatetest.Start(t)
-    src := NewGitHubReleaseSource(srv.BaseURL(), srv.Client())
-    // subtests...
-}
-```
-
-Module path for tests: use `ParseModulePath` to create a valid module path like `github.com/admin/testrepo` (emulate creates repos under the 'admin' owner per D006).
-
-Version: use `ParseVersion("v1.0.0")` or similar.
-
-Fixture directory for SeedPackageRelease: use `registry/testutil/emulatetest/testdata/calc-pkg` (the existing fixture from S01).
-
-Important: each subtest should use a unique repo name to avoid collisions since the emulate server is shared across the test binary.
-  - Estimate: 45m
-  - Files: registry/source_test.go
-  - Verify: go test ./registry/... -v -count=1 -run TestGitHubReleaseSource -timeout 60s
+- [x] **T01: Added the PackageSource interface and a GitHubReleaseSource with emulate-backed integration tests for success and release/asset failure modes.** — 
+- [x] **T02: Verified the existing emulate-backed GitHubReleaseSource integration suite and documented the worktree-safe Go test invocation needed to run it reliably here.** — 

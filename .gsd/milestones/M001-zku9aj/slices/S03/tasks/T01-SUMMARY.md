@@ -11,8 +11,8 @@ patterns_established: []
 drill_down_paths: []
 observability_surfaces: []
 duration: ""
-verification_result: "Formatted the new files with gofmt and ran the task-specified verification commands. `go test ./tool/... -v -count=1 -run TestFQN` passed with all parser and round-trip tests green. `go vet ./tool/...` passed with no findings."
-completed_at: 2026-03-27T15:39:56.980Z
+verification_result: "Formatted the new files with gofmt and ran `go test ./tool/... -v -count=1 -run TestFQN` and `go vet ./tool/...`; both passed."
+completed_at: 2026-03-28T00:32:40.719Z
 blocker_discovered: false
 ---
 
@@ -33,7 +33,7 @@ key_decisions:
   - Treat digit-prefixed `v0.0.0-...` versions as pseudo-version candidates that must match the exact Go pseudo-version shape rather than falling through to generic semver prerelease parsing.
 duration: ""
 verification_result: passed
-completed_at: 2026-03-27T15:39:56.986Z
+completed_at: 2026-03-28T00:32:40.720Z
 blocker_discovered: false
 ---
 
@@ -47,7 +47,7 @@ Implemented tool/fqn.go with ModulePath, Version, ToolPath, ToolFQN, and Package
 
 ## Verification
 
-Formatted the new files with gofmt and ran the task-specified verification commands. `go test ./tool/... -v -count=1 -run TestFQN` passed with all parser and round-trip tests green. `go vet ./tool/...` passed with no findings.
+Formatted the new files with gofmt and ran `go test ./tool/... -v -count=1 -run TestFQN` and `go vet ./tool/...`; both passed.
 
 ## Verification Evidence
 

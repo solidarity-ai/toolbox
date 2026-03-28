@@ -1,63 +1,16 @@
-# M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
+# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
 
 ## Vision
-M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
+M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
 
 ## Slice Overview
 | ID | Slice | Risk | Depends | Done | After this |
 |----|-------|------|---------|------|------------|
-| S01 | Emulate lifecycle + happy-path fixtures | high | — | ✅ | # S01: Emulate lifecycle + happy-path fixtures — UAT
+| S01 | Emulate lifecycle + happy-path fixtures | high | — | ✅ | TBD |
+| S02 |  | medium | — | ✅ | # S02: Failure scenario test builders — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-26T23:12:38.741Z
-
-# S01 UAT: Emulate lifecycle + happy-path fixtures
-
-## Preconditions
-- Node.js and npx available on PATH
-- Git available on PATH
-- Working directory: the M001-zku9aj worktree root
-
-## Test 1: Emulate lifecycle starts and responds
-1. Run `go test ./registry/testutil/emulatetest/ -run TestEmulateLifecycle -v -count=1 -timeout 60s`
-2. **Expected:** Test passes. Output shows emulate starting on a dynamic port. `GET /rate_limit` returns 200.
-
-## Test 2: Seed repo and release via emulate API
-1. Run `go test ./registry/testutil/emulatetest/ -run TestSeedRepoAndRelease -v -count=1 -timeout 60s`
-2. **Expected:** Test passes. Repo created (201), release created with tag "v1.0.0", release ID > 0.
-
-## Test 3: Seed full package release with real archives
-1. Run `go test ./registry/testutil/emulatetest/ -run TestSeedPackageRelease -v -count=1 -timeout 60s`
-2. **Expected:** Test passes. Release at tag "v1.0.0" has 2 assets: `calc.toolbox.pkg` and `toolbox.pkg.json`, both with size > 0.
-
-## Test 4: Git fixture — single tagged repo
-1. Run `go test ./registry/testutil/gitfixture/ -run TestCreateTaggedRepo -v -count=1 -timeout 30s`
-2. **Expected:** Test passes. Repo cloned to separate dir, tag v1.0.0 found, hello.txt contains "hello".
-
-## Test 5: Git fixture — repo from fixture directory
-1. Run `go test ./registry/testutil/gitfixture/ -run TestCreateTaggedRepoFromDir -v -count=1 -timeout 30s`
-2. **Expected:** Test passes. Tag v2.0.0 checked out, `toolbox.devpkg.json` exists and contains `"name": "calc"`.
-
-## Test 6: Git fixture — multiple tags
-1. Run `go test ./registry/testutil/gitfixture/ -run TestMultipleTags -v -count=1 -timeout 30s`
-2. **Expected:** Test passes. Both v1.0.0 and v2.0.0 tags exist. File contents differ between tags.
-
-## Test 7: Full registry test suite
-1. Run `go test ./registry/... -v -count=1 -timeout 60s`
-2. **Expected:** All tests pass across both packages with no port conflicts.
-
-## Test 8: CI workflow validity
-1. Run `grep -q 'setup-node' .github/workflows/ci.yml && grep -q 'npm install -g emulate' .github/workflows/ci.yml && echo PASS`
-2. **Expected:** Prints PASS. CI includes Node.js setup and emulate pre-install.
-
-## Edge case: npx not available
-1. If npx is removed from PATH, emulate tests should skip with message "emulatetest: npx not available" rather than fail.
-
- |
-| S02 | Failure scenario test builders | medium | S01 | ✅ | # S02: Failure scenario test builders — UAT
-
-**Milestone:** M001-zku9aj
-**Written:** 2026-03-27T10:57:47.642Z
+**Written:** 2026-03-28T00:35:58.797Z
 
 # S02: Failure scenario test builders — UAT
 
@@ -136,11 +89,12 @@ Run `go test ./registry/... -v -count=1 -timeout 60s` — all tests pass with no
 ## Notes for Tester
 
 All emulate tests require a ~2s startup for the emulate server. The gitfixture tests are fast (~0.2s total).
+
  |
-| S03 | FQN types and parsing | low | — | ✅ | # S03: FQN types and parsing — UAT
+| S03 |  | medium | — | ✅ | # S03: FQN types and parsing — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T15:45:08.070Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S03: FQN types and parsing — UAT
 
@@ -218,11 +172,12 @@ Run `go test ./tool/... -v -count=1 -run TestFQN` — all tests pass.
 ## Notes for Tester
 
 Tests run in ~3ms total. No external dependencies required.
+
  |
-| S04 | Local cache layout | low | S03 | ✅ | # S04: Local cache layout — UAT
+| S04 |  | medium | — | ✅ | # S04: Local cache layout — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T16:25:10.315Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S04: Local cache layout — UAT
 
@@ -296,11 +251,12 @@ Run `go test ./registry/... -v -count=1 -run TestCache` — all 6 subtests pass.
 ## Notes for Tester
 
 Tests run in ~6ms total. No external dependencies required.
+
  |
-| S05 | GitHub Releases source + PackageSource interface | high | S01, S02, S03, S04 | ✅ | # S05: GitHub Releases source + PackageSource interface — UAT
+| S05 |  | medium | — | ✅ | # S05: GitHub Releases source + PackageSource interface — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T21:42:03.232Z
+**Written:** 2026-03-28T00:36:53.060Z
 
 # S05: GitHub Releases source + PackageSource interface — UAT
 
@@ -349,11 +305,87 @@ Run `go test ./registry -v -count=1 -run TestGitHubReleaseSource -timeout 60s` �
 - Auth token handling for private repos (R003 partial — deferred to S08/S12)
 - Integration with resolver orchestration (S08)
 - Cache population after fetch (S08)
+
  |
-| S06 | Git-source fallback resolver | high | S01, S02, S03, S04 | ✅ | TBD |
-| S07 | Pseudo-version resolution | medium | S03, S06 | ⬜ | TBD |
-| S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ⬜ | TBD |
-| S09 | Toolset file parsing | medium | S08 | ⬜ | TBD |
-| S10 | Lockfile generation and verification | medium | S09 | ⬜ | TBD |
-| S11 | Replace directives | low | S09 | ⬜ | TBD |
-| S12 | CLI commands + end-to-end UAT | low | S10, S11 | ⬜ | TBD |
+| S06 |  | medium | — | ✅ | # S06: Git-source fallback resolver — UAT
+
+**Milestone:** M001-zku9aj
+**Written:** 2026-03-28T00:36:53.060Z
+
+# S06: Git-source fallback resolver — UAT
+
+**Milestone:** M001-zku9aj
+**Written:** 2026-03-27T22:30:00.000Z
+
+## UAT Type
+
+- UAT mode: artifact-driven
+- Why this mode is sufficient: Library code with no runtime behavior — validated entirely by unit tests against local git fixture repos.
+
+## Preconditions
+
+- Git available on PATH
+- Working directory: the M001-zku9aj worktree root
+
+## Smoke Test
+
+Run `go test ./registry -v -count=1 -run TestGitSource -timeout 30s` — all 4 subtests pass.
+
+## Test Cases
+
+### 1. Happy path — clone tagged repo, pack, return bytes
+
+1. Run `go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s`
+2. **Expected:** Passes. Fetch returns non-empty archive and manifest bytes from a calc fixture repo tagged v1.0.0.
+
+### 2. Missing tag — absent version fails at git clone
+
+1. Run `go test ./registry -v -count=1 -run TestGitSource/missing_tag -timeout 30s`
+2. **Expected:** Passes. Fetching version v9.9.9 from a repo that only has v1.0.0 returns a non-nil error. Error originates from git clone, not packaging.
+
+### 3. Broken repo — no package manifest fails at packaging
+
+1. Run `go test ./registry -v -count=1 -run TestGitSource/broken_repo -timeout 30s`
+2. **Expected:** Passes. Repo clones successfully but has no toolbox.devpkg.json. Error originates from packaging.Pack.
+
+### 4. Corrupt package — malformed manifest fails at packaging
+
+1. Run `go test ./registry -v -count=1 -run TestGitSource/corrupt_package -timeout 30s`
+2. **Expected:** Passes. Repo clones successfully but toolbox.devpkg.json contains invalid JSON. Error originates from packaging.Pack.
+
+## Edge Cases
+
+### Full regression suite
+
+1. Run `go test ./registry/... -v -count=1 -timeout 60s`
+2. **Expected:** All tests pass across registry, emulatetest, and gitfixture packages with no regressions.
+
+### Git not on PATH
+
+1. If git is removed from PATH, GitSourceFallback.Fetch returns an exec error rather than panicking.
+2. **Expected:** Non-nil error with exec context, no panic.
+
+## Failure Signals
+
+- Any subtest in `go test ./registry -run TestGitSource` failing
+- Compilation errors in git_source.go
+- Regressions in existing Cache or GitHubReleaseSource tests
+
+## Not Proven By This UAT
+
+- Auth token handling for private git repos (deferred to S08/S12)
+- Cache population after fetch (S08 resolver orchestration responsibility)
+- Pseudo-version resolution via git refs (S07)
+- Integration with resolver orchestration fallback logic (S08)
+
+## Notes for Tester
+
+Tests run in ~0.13s total. No network access required — all tests clone local file:// repos created by gitfixture helpers. No Node.js/npx dependency (unlike S05's emulate tests).
+
+ |
+| S07 | Pseudo-version resolution | medium | S03, S06 | ⬜ | After this: TBD |
+| S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ⬜ | After this: TBD |
+| S09 | Toolset file parsing | medium | S08 | ⬜ | After this: TBD |
+| S10 | Lockfile generation and verification | medium | S09 | ⬜ | After this: TBD |
+| S11 | Replace directives | low | S09 | ⬜ | After this: TBD |
+| S12 | CLI commands + end-to-end UAT | low | S10, S11 | ⬜ | After this: TBD |

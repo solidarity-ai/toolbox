@@ -1,10 +1,86 @@
+# S03: 
+
+**Goal:** ---
+id: S03
+parent: M001-zku9aj
+milestone: M001-zku9aj
+provides:
+  - ModulePath, Version, ToolPath, ToolFQN, PackageVer types with Parse/String/validation in tool package
+requires:
+  []
+affects:
+  - S04
+  - S05
+  - S06
+  - S07
+  - S08
+  - S09
+key_files:
+  - tool/fqn.go
+  - tool/fqn_test.go
+key_decisions:
+  - Treat digit-prefixed v0.0.0-... versions as pseudo-version candidates that must match the exact Go pseudo-version shape rather than falling through to generic semver prerelease parsing.
+patterns_established:
+  - Named string types for identity values with Parse*/String() round-trip pattern in the tool package.
+observability_surfaces:
+  - none
+drill_down_paths:
+  - .gsd/milestones/M001-zku9aj/slices/S03/tasks/T01-SUMMARY.md
+duration: ""
+verification_result: passed
+completed_at: 2026-03-28T00:35:58.797Z
+blocker_discovered: false
+---
+
 # S03: FQN types and parsing
 
-**Goal:** Provide typed FQN identity types (ModulePath, Version, ToolPath, ToolFQN, PackageVer) with parsing, formatting, validation, and round-trip faithfulness. Pseudo-versions are recognized and decomposable.
+**Typed FQN identity types with parsing, validation, formatting, round-trip fidelity, and pseudo-version decomposition.**
+
+## What Happened
+
+Implemented tool/fqn.go with five identity types: ModulePath, Version, ToolPath, ToolFQN, and PackageVer. Each type has a Parse constructor that validates format and a String method for round-trip formatting. Version includes IsPseudo, PseudoTimestamp, and PseudoCommit helpers. Added tool/fqn_test.go with comprehensive table-driven tests covering valid/invalid parsing, round-trip fidelity, pseudo-version extraction, and edge cases. During implementation, tightened pseudo-version detection so digit-prefixed v0.0.0-... strings must match the exact Go pseudo-version shape rather than falling through to generic semver prerelease acceptance.
+
+## Verification
+
+All verification passed: `go test ./tool/... -v -count=1 -run TestFQN` and `go vet ./tool/...`.
+
+## Requirements Advanced
+
+- R001 — All FQN identity types implemented with parsing, formatting, validation, round-trip fidelity, and pseudo-version support.
+
+## Requirements Validated
+
+- R001 — Table-driven tests prove parse/format round-trips, semver and pseudo-version acceptance, and rejection of invalid inputs.
+
+## New Requirements Surfaced
+
+None.
+
+## Requirements Invalidated or Re-scoped
+
+None.
+
+## Deviations
+
+None.
+
+## Known Limitations
+
+None. All planned types and validation rules are implemented.
+
+## Follow-ups
+
+None.
+
+## Files Created/Modified
+
+- `tool/fqn.go` — FQN identity types, Parse constructors, String methods, pseudo-version helpers
+- `tool/fqn_test.go` — Table-driven tests for all parsers, round-trip, pseudo-version extraction, and edge cases
+
 **Demo:** After this: # S03: FQN types and parsing — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T15:45:08.070Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S03: FQN types and parsing — UAT
 
@@ -84,34 +160,6 @@ Run `go test ./tool/... -v -count=1 -run TestFQN` — all tests pass.
 Tests run in ~3ms total. No external dependencies required.
 
 
+
 ## Tasks
-- [x] **T01: Added typed FQN parsers and round-trip tests for module, version, package, and tool identities.** — Add all FQN identity types and their Parse/String/validation functions to the tool package, plus comprehensive table-driven tests.
-
-## Why
-R001 requires parseable, formattable, round-trip-faithful FQN types. Every downstream slice (S04–S12) depends on these types.
-
-## Steps
-1. Create `tool/fqn.go` with these types (all as named string types except ToolFQN/PackageVer which are structs):
-   - `ModulePath` — validated: ≥2 path segments, first segment has a dot
-   - `Version` — validated: semver `v{major}.{minor}.{patch}` with optional pre-release/build metadata, OR pseudo-version `v0.0.0-{14digits}-{12hex}`
-   - `ToolPath` — validated: dot-separated non-empty segments
-   - `ToolFQN` struct `{Module ModulePath, Version Version, Tool ToolPath}` — parsed from `module@version/toolpath`
-   - `PackageVer` struct `{Module ModulePath, Version Version}` — parsed from `module@version`
-2. Implement `ParseModulePath(s string) (ModulePath, error)`, `ParseVersion(s string) (Version, error)`, `ParseToolPath(s string) (ToolPath, error)`, `ParseToolFQN(s string) (ToolFQN, error)`, `ParsePackageVer(s string) (PackageVer, error)`
-3. Implement `String()` methods on all types
-4. Implement `Version.IsPseudo() bool`, `Version.PseudoTimestamp() string`, `Version.PseudoCommit() string` helpers
-5. Create `tool/fqn_test.go` with table-driven tests:
-   - Valid and invalid cases for each Parse function
-   - Round-trip: `Parse*(x.String()) == x` for all valid inputs
-   - Pseudo-version helper extraction
-   - Edge cases: empty strings, missing @, missing /, no dot in host, single-segment paths
-
-## Constraints
-- Use standard library only (`strings`, `regexp`, `fmt`, `errors`)
-- Types live in `tool` package per D002
-- Pseudo-version format must exactly match Go modules: `v0.0.0-{yyyyMMddHHmmss}-{12hex}`
-- ModulePath validation: first segment must contain a dot (hostname), at least host/path
-- Version regex should accept optional pre-release (`-alpha.1`) and build metadata (`+build`) on semver
-  - Estimate: 45m
-  - Files: tool/fqn.go, tool/fqn_test.go
-  - Verify: go test ./tool/... -v -count=1 -run TestFQN && go vet ./tool/...
+- [x] **T01: Added typed FQN parsers and round-trip tests for module, version, package, and tool identities.** — 

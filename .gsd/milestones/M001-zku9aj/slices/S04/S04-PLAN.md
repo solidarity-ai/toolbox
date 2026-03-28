@@ -1,10 +1,84 @@
+# S04: 
+
+**Goal:** ---
+id: S04
+parent: M001-zku9aj
+milestone: M001-zku9aj
+provides:
+  - Cache type with Has/Put/LoadArchive for downstream resolvers to store and retrieve packages
+requires:
+  - slice: S03
+    provides: ModulePath and Version types used as cache keys
+affects:
+  - S05
+  - S06
+key_files:
+  - registry/cache.go
+  - registry/cache_test.go
+key_decisions:
+  - Used registry-local aliases for ModulePath and Version backed by tool package types so the cache API stays concise while matching the existing canonical types.
+  - Delegated cache archive validation to packaging.LoadArchive rather than re-implementing sha256 or manifest verification inside registry.
+patterns_established:
+  - Cache path layout: <root>/<module>/@v/<version>.{pkg,manifest,info} — mirrors Go module proxy protocol structure
+observability_surfaces:
+  - none
+drill_down_paths:
+  - .gsd/milestones/M001-zku9aj/slices/S04/tasks/T01-SUMMARY.md
+duration: ""
+verification_result: passed
+completed_at: 2026-03-28T00:35:58.798Z
+blocker_discovered: false
+---
+
 # S04: Local cache layout
 
-**Goal:** Provide a local filesystem cache at `~/.cache/toolbox/pkg/` that stores and loads resolved packages keyed by module path + version, with sha256 verification via `packaging.LoadArchive`.
+**Filesystem cache at ~/.cache/toolbox/pkg/ stores and loads resolved packages keyed by module path + version with sha256 verification via packaging.LoadArchive.**
+
+## What Happened
+
+Implemented registry/cache.go with a Cache type that resolves its root directory from an explicit parameter, the TOOLBOX_CACHE_DIR env var, or os.UserCacheDir fallback. The cache stores packages under a deterministic path layout: `<root>/<module>/@v/<version>.{pkg,manifest,info}`. Put writes all three sidecar files atomically. Has checks for the archive file's existence. LoadArchive delegates to packaging.LoadArchive for sha256 verification against the manifest. Registry-local type aliases keep the cache API concise while staying compatible with the canonical tool package types. A comprehensive table-driven test suite in registry/cache_test.go covers Put+Has round-trips, missing entry detection, real archive round-tripping through packaging.LoadArchive using test fixtures, path structure verification, TOOLBOX_CACHE_DIR override, and missing-entry load error handling.
+
+## Verification
+
+All 6 TestCache subtests pass and `go vet ./registry/...` is clean.
+
+## Requirements Advanced
+
+- R002 — Implemented the cache layout at ~/.cache/toolbox/pkg/ with module+version keying and sha256 verification via packaging.LoadArchive
+
+## Requirements Validated
+
+- R002 — TestCache suite proves: packages stored at correct paths, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected
+
+## New Requirements Surfaced
+
+None.
+
+## Requirements Invalidated or Re-scoped
+
+None.
+
+## Deviations
+
+None.
+
+## Known Limitations
+
+No cache eviction or size management — deferred to later work. No concurrent write protection beyond OS-level atomicity.
+
+## Follow-ups
+
+None.
+
+## Files Created/Modified
+
+- `registry/cache.go` — Cache type with Has/Put/LoadArchive methods and env-aware root selection
+- `registry/cache_test.go` — Table-driven test suite covering 6 cache scenarios including real archive round-trips
+
 **Demo:** After this: # S04: Local cache layout — UAT
 
 **Milestone:** M001-zku9aj
-**Written:** 2026-03-27T16:25:10.315Z
+**Written:** 2026-03-28T00:35:58.798Z
 
 # S04: Local cache layout — UAT
 
@@ -80,8 +154,6 @@ Run `go test ./registry/... -v -count=1 -run TestCache` — all 6 subtests pass.
 Tests run in ~6ms total. No external dependencies required.
 
 
+
 ## Tasks
-- [x] **T01: Added the registry filesystem cache with env-aware root selection, deterministic package paths, and real archive round-trip tests.** — Implement `registry/cache.go` with a `Cache` struct holding a root directory. Constructor `NewCache(dir string)` defaults to `os.UserCacheDir()/toolbox/pkg` when dir is empty, and respects `TOOLBOX_CACHE_DIR` env var. Methods: `Has(module ModulePath, version Version) bool`, `Put(module ModulePath, version Version, archiveBytes, manifestBytes []byte) error`, `LoadArchive(module ModulePath, version Version) (packaging.LoadedPackage, error)`. Internal path helper computes `<root>/<module>/@v/<version>.{pkg,manifest,info}`. Put writes all three files (info can be a JSON blob with version string). LoadArchive delegates to `packaging.LoadArchive(archivePath, manifestPath)`. Then implement `registry/cache_test.go` with table-driven tests covering: (1) Put+Has round-trip, (2) Has returns false for missing entry, (3) Put+LoadArchive round-trip with a real archive from packaging test fixtures, (4) path structure verification (check files land at expected paths), (5) TOOLBOX_CACHE_DIR override, (6) LoadArchive on missing entry returns error.
-  - Estimate: 45m
-  - Files: registry/cache.go, registry/cache_test.go
-  - Verify: go test ./registry/... -v -count=1 -run TestCache && go vet ./registry/...
+- [x] **T01: Added the registry filesystem cache with env-aware root selection, deterministic package paths, and real archive round-trip tests.** — 

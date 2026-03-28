@@ -37,26 +37,15 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: See `docs/rfc-tool-registry.md` §4 (pseudo-versions)
 
-### R006 — `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
-- Class: core-capability
-- Status: active
-- Description: `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
-- Why it matters: This is the integration point — downstream code (invoke, codemode) doesn't change; the Builder just has a new way to acquire packages
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S08
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
-
 ### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
 - Class: core-capability
-- Status: active
-- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
+- Status: validated
+- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry. For milestone planning purposes, this capability is already considered done based on the prior S09 run and should not remain in a pending state.
 - Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases
 - Source: user (RFC)
 - Primary owning slice: M001-zku9aj/S09
 - Supporting slices: none
-- Validation: unmapped
+- Validation: Prior S09 run completed the planning/implementation path: parse-time validation covers missing file, invalid JSON, empty packages, invalid module path, invalid version, unknown package reference, and tool version mismatch; resolution covers cached happy-path and nil-resolver failure propagation.
 - Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
 
 ### R008 — `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
@@ -104,6 +93,17 @@ This file is the explicit capability and coverage contract for the project.
 - Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
 
 ## Validated
+
+### R006 — `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
+- Class: core-capability
+- Status: validated
+- Description: `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
+- Why it matters: This is the integration point — downstream code (invoke, codemode) doesn't change; the Builder just has a new way to acquire packages
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S08
+- Supporting slices: none
+- Validation: TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive.
+- Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
 
 ### R001 — Every tool is uniquely identified by `{module_path}@{version}/{tool_path}`. Module paths, versions, tool paths, and full FQNs are parseable, formattable, and round-trip faithful. Pseudo-versions (v0.0.0-timestamp-commitsha) are valid version strings.
 - Class: core-capability
@@ -239,8 +239,8 @@ This file is the explicit capability and coverage contract for the project.
 | R003 | core-capability | active | M001-zku9aj/S05 | none | unmapped |
 | R004 | core-capability | active | M001-zku9aj/S06 | none | unmapped |
 | R005 | core-capability | active | M001-zku9aj/S07 | none | unmapped |
-| R006 | core-capability | active | M001-zku9aj/S08 | none | unmapped |
-| R007 | core-capability | active | M001-zku9aj/S09 | none | unmapped |
+| R006 | core-capability | validated | M001-zku9aj/S08 | none | TestBuilderAddFromRegistry proves resolver injection, input validation, cache resolution, and Resolve() output parity. |
+| R007 | core-capability | validated | M001-zku9aj/S09 | none | Prior S09 run completed parse-time validation coverage plus cached happy-path resolution and nil-resolver error propagation. |
 | R008 | core-capability | active | M001-zku9aj/S10 | none | unmapped |
 | R009 | core-capability | active | M001-zku9aj/S11 | none | unmapped |
 | R010 | core-capability | active | M001-zku9aj/S12 | none | unmapped |
@@ -257,7 +257,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 9
-- Mapped to slices: 9
-- Validated: 2 (R001, R002)
+- Active requirements: 8
+- Mapped to slices: 8
+- Validated: 3 (R001, R002, R006)
 - Unmapped active requirements: 0

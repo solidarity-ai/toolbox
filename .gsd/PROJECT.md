@@ -12,7 +12,7 @@ A harness author writes a toolset referencing `zendesk@v2.0.1` and it just works
 
 ## Current State
 
-The core package model is built: `tool.Package` defines static tool/package types, `toolset.Builder` assembles request-scoped toolsets from `AddFromDir` (local source) and `AddFromArchive` (built .toolbox.pkg), `packaging.Pack` produces archives with sha256 integrity, `packaging.LoadArchive` verifies and loads them. The `registry/` package now includes a cache layout, a GitHub Releases source, a git-source fallback, and pseudo-version git resolution for untagged commits with timestamp validation. Resolver orchestration, toolset-file parsing, lockfile generation, replace directives, and CLI flows are still pending.
+The core package model is built: `tool.Package` defines static tool/package types, `toolset.Builder` assembles request-scoped toolsets from `AddFromDir` (local source), `AddFromArchive` (built .toolbox.pkg), and now `AddFromRegistry` (registry resolution). `packaging.Pack` produces archives with sha256 integrity, `packaging.LoadArchive` verifies and loads them. The `registry/` package includes a cache layout, a GitHub Releases source, a git-source fallback, pseudo-version git resolution, and a `Resolver` that orchestrates cache-first resolution with ordered source fallback. Toolset-file parsing for `toolbox.toolset.json` is also now treated as already planned and done from the prior S09 run. Lockfile generation, replace directives, and CLI flows remain pending.
 
 GitHub-related testing for this milestone is constrained to local validation, emulate-backed integration tests, CI/workflow configuration changes, and other read-only checks. Pushing to `main` is not part of the test strategy.
 

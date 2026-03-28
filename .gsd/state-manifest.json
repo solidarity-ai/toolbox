@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T09:50:26.980Z",
+  "exported_at": "2026-03-28T11:59:42.102Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -170,7 +170,7 @@
       "milestone_id": "M001-zku9aj",
       "id": "S08",
       "title": "Resolver orchestration + Builder.AddFromRegistry",
-      "status": "pending",
+      "status": "complete",
       "risk": "medium",
       "depends": [
         "S05",
@@ -178,9 +178,9 @@
       ],
       "demo": "After this: TBD",
       "created_at": "2026-03-28T00:39:27.198Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-28T10:10:49.903620+00:00",
+      "full_summary_md": "---\nid: S08\nparent: M001-zku9aj\nmilestone: M001-zku9aj\nprovides:\n  - Resolver type that orchestrates cache-check → ordered PackageSource fetch → cache-write → LoadArchive for registry package resolution\n  - Builder.AddFromRegistry method that parses FQN inputs, delegates to Resolver, and appends loaded packages identically to AddFromDir/AddFromArchive\n  - NewWithResolver constructor that injects a Resolver into Builder without breaking existing New() callers\n  - ErrNoResolver sentinel error for diagnosing missing resolver wiring at the Builder boundary\nrequires:\n  - slice: S05\n    provides: PackageSource interface and GitHubReleaseSource implementation composed into Resolver source chains\n  - slice: S06\n    provides: GitSourceFallback PackageSource implementation composed as fallback in Resolver source chains\n  - slice: S04\n    provides: Cache with Has/Put/LoadArchive used by Resolver for cache-first resolution and post-fetch write-through\n  - slice: S03\n    provides: ParseModulePath and ParseVersion used by AddFromRegistry for input validation\naffects:\n  - S09\nkey_files:\n  - registry/resolver.go\n  - registry/resolver_test.go\n  - toolset/toolset.go\n  - toolset/toolset_test.go\nkey_decisions:\n  - Resolver.Resolve always returns via Cache.LoadArchive on both cache hits and post-fetch writes so the same integrity verification path is exercised regardless of how a package was obtained\n  - Source chain short-circuits on non-ErrReleaseNotFound errors — only 404s trigger fallback to the next source\n  - NewWithResolver constructor preserves backward compatibility for local-only callers using existing New()\n  - AddFromRegistry validates inputs with ParseModulePath/ParseVersion before calling resolver, surfacing parse errors at the Builder boundary\npatterns_established:\n  - Mock PackageSource pattern for resolver tests using real dist fixture bytes — tests prove orchestration logic without network access\n  - Pre-populated temp cache pattern for testing registry resolution at the Builder level without requiring any PackageSource\nobservability_surfaces:\n  - Resolver error messages include phase context — cache hit but load failed, source[N] failure, all N sources exhausted, cache write failed — for failure diagnosis\n  - ErrNoResolver sentinel error surfaces missing resolver wiring immediately at the Builder boundary\ndrill_down_paths:\n  - .gsd/milestones/M001-zku9aj/slices/S08/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S08/tasks/T02-SUMMARY.md\nduration: 25m\nverification_result: passed\ncompleted_at: 2026-03-28\nblocker_discovered: false\n---\n\n# S08: Resolver orchestration + Builder.AddFromRegistry\n\n**Wired Cache, PackageSource implementations, and Builder into a Resolver that orchestrates cache-first resolution with ordered source fallback, then exposed it through Builder.AddFromRegistry so downstream code acquires registry packages identically to local packages.**\n\n## What Happened\n\nT01 created `registry/resolver.go` with a `Resolver` struct holding a `*Cache` and ordered `[]PackageSource`. `Resolve(ctx, module, version)` checks `Cache.Has` first and returns `Cache.LoadArchive` on hit. On a miss, it walks sources in order — continuing past `ErrReleaseNotFound`, short-circuiting on any other error. On success, it writes through `Cache.Put` then loads via `Cache.LoadArchive` to exercise the same integrity path as `AddFromArchive`. Six contract tests using `mockSource` plus real dist fixture bytes prove: cache-hit bypass, primary success with cache population, fallback on ErrReleaseNotFound, no fallback on non-404 error, all-sources-exhausted, and no-sources-configured.\n\nT02 added `NewWithResolver(resolver)` to `toolset.Builder` to inject an optional `*registry.Resolver` while keeping `New()` backward-compatible. `AddFromRegistry(ctx, modulePath, version)` validates inputs via `tool.ParseModulePath` and `tool.ParseVersion`, returns `ErrNoResolver` when no resolver is configured, delegates to `Resolver.Resolve`, and appends the resulting `LoadedPackage` so `Packages()` and `Resolve()` work identically to the local package paths. Five tests prove: nil-resolver returns ErrNoResolver, invalid module path returns parse error, invalid version returns parse error, pre-populated cache resolves successfully, and resolved package appears in Resolve() output.\n\n## Verification\n\nAll verification commands pass:\n- `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver -timeout 30s` — 6/6 subtests pass (0.007s)\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry -timeout 30s` — 5/5 subtests pass (0.006s)\n- Full regression: `GOWORK=$(pwd)/go.work go test ./registry/... ./toolset/... -v -count=1 -timeout 60s` — all 31 tests pass across registry, emulatetest, gitfixture, and toolset packages (no regressions)\n\n## Requirements Advanced\n\n- R006 — `Builder.AddFromRegistry` now resolves, downloads/caches, and loads a package producing the same `LoadedPackage` as `AddFromDir` and `AddFromArchive`. Validated by 5 builder-level tests including round-trip resolution from a pre-populated cache.\n\n## New Requirements Surfaced\n\n- none\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\n- Resolver does not handle auth tokens for private repos (deferred to S12)\n- No concurrent resolution — Resolve is sequential across the source chain (sufficient for current use cases)\n\n## Follow-ups\n\n- S09 (toolset file parsing) can now call `Builder.AddFromRegistry` for each package declared in a toolset file\n- S12 CLI integration will wire real `GitHubReleaseSource` and `GitSourceFallback` into a `Resolver` and inject it via `NewWithResolver`\n\n## Files Created/Modified\n\n- `registry/resolver.go` — Resolver type with cache-first ordered source chain orchestration\n- `registry/resolver_test.go` — 6 contract tests covering cache hit, source success, fallback, short-circuit, exhaustion, and no-sources\n- `toolset/toolset.go` — Added ErrNoResolver sentinel, NewWithResolver constructor, and AddFromRegistry method\n- `toolset/toolset_test.go` — Added TestBuilderAddFromRegistry with 5 subtests plus test helpers for cache and fixture loading\n\n## Forward Intelligence\n\n### What the next slice should know\n- `Builder.AddFromRegistry(ctx, modulePath, version)` is the single entry point for registry packages — S09 toolset file parsing should call this for each `packages` entry\n- `NewWithResolver` accepts `*registry.Resolver` which is nil-safe — Builder returns `ErrNoResolver` instead of panicking\n\n### What's fragile\n- Resolver tests use `mockSource` that returns pre-built fixture bytes — if the dist fixture format changes, these tests will need updated bytes\n\n### Authoritative diagnostics\n- `TestResolver` subtests are the fastest way to verify resolver orchestration (0.007s, no network, no git) — run these first when debugging resolution issues\n- `TestBuilderAddFromRegistry` subtests verify the full Builder → Resolver → Cache → LoadedPackage path\n\n### What assumptions changed\n- None — the plan's design held without deviations\n",
+      "full_uat_md": "# S08: Resolver orchestration + Builder.AddFromRegistry — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28\n\n## UAT Type\n\n- UAT mode: artifact-driven\n- Why this mode is sufficient: Library code with no runtime behavior — validated entirely by unit tests using mock sources and pre-populated caches.\n\n## Preconditions\n\n- Working directory: the M001-zku9aj worktree root (or `/home/mackross/dev/toolbox`)\n- Go toolchain available\n\n## Smoke Test\n\nRun `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry -timeout 30s` — all 11 subtests pass.\n\n## Test Cases\n\n### 1. Resolver cache hit bypasses sources\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/CacheHitBypassesSources -timeout 30s`\n2. **Expected:** Passes. When cache already contains the requested module+version, Resolve returns the cached package without calling any source.\n\n### 2. Resolver primary source success populates cache\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/PrimarySourceSuccessPopulatesCache -timeout 30s`\n2. **Expected:** Passes. First source returns archive+manifest bytes. After Resolve, cache contains the entry and LoadArchive succeeds.\n\n### 3. Resolver falls back on ErrReleaseNotFound\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/FallbackOnErrReleaseNotFound -timeout 30s`\n2. **Expected:** Passes. First source returns ErrReleaseNotFound. Second source succeeds. Package is loaded from cache after write-through.\n\n### 4. Resolver does not fall back on non-404 errors\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/NoFallbackOnNon404Error -timeout 30s`\n2. **Expected:** Passes. First source returns a non-ErrReleaseNotFound error. Second source is never called. Resolve returns the original error.\n\n### 5. Resolver returns error when all sources exhausted\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/AllSourcesExhausted -timeout 30s`\n2. **Expected:** Passes. All sources return ErrReleaseNotFound. Resolve returns an error mentioning \"all N sources exhausted\".\n\n### 6. Resolver returns error when no sources configured\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver/NoSourcesConfigured -timeout 30s`\n2. **Expected:** Passes. Resolver with empty source list returns an error.\n\n### 7. Builder nil resolver returns ErrNoResolver\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry/NilResolverReturnsErrNoResolver -timeout 30s`\n2. **Expected:** Passes. `errors.Is(err, toolset.ErrNoResolver)` is true.\n\n### 8. Builder invalid module path returns parse error\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry/InvalidModulePathReturnsError -timeout 30s`\n2. **Expected:** Passes. Error mentions \"parse module path\".\n\n### 9. Builder invalid version returns parse error\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry/InvalidVersionReturnsError -timeout 30s`\n2. **Expected:** Passes. Error mentions \"parse version\".\n\n### 10. Builder resolves from pre-populated cache\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry/ResolvesFromPrePopulatedCache -timeout 30s`\n2. **Expected:** Passes. Builder loads the package with correct name from a pre-populated temp cache. No network access needed.\n\n### 11. Resolved package appears in Resolve output\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry/ResolvedPackageAppearsInResolve -timeout 30s`\n2. **Expected:** Passes. After AddFromRegistry, the package's tools are returned by `Builder.Resolve()`, matching the behavior of AddFromDir and AddFromArchive.\n\n## Edge Cases\n\n### Full regression — no regressions across registry and toolset\n\n1. Run `GOWORK=$(pwd)/go.work go test ./registry/... ./toolset/... -v -count=1 -timeout 60s`\n2. **Expected:** All 31 tests pass across registry (Cache, GitSource, GitHubReleaseSource, Resolver), emulatetest, gitfixture, and toolset packages.\n\n### Existing Builder path unaffected\n\n1. Run `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromDirLoadsPackageName -timeout 30s`\n2. **Expected:** Passes. The original AddFromDir path via `New()` still works — NewWithResolver is additive.\n\n## Failure Signals\n\n- Any subtest in `TestResolver` or `TestBuilderAddFromRegistry` failing\n- Compilation errors in `registry/resolver.go` or `toolset/toolset.go`\n- Regressions in existing Cache, GitSource, GitHubReleaseSource, or Builder tests\n\n## Not Proven By This UAT\n\n- Auth token handling for private repos (deferred to S12)\n- Integration with real GitHubReleaseSource and GitSourceFallback in a live resolver (S12 CLI wiring)\n- Toolset file parsing that invokes AddFromRegistry (S09)\n- Concurrent resolution safety\n\n## Notes for Tester\n\nAll tests run in <2s total with no network access. Resolver tests use mock sources with real dist fixture bytes. Builder tests use a pre-populated temp cache. The emulate-based tests in the full regression suite require npx.\n",
       "goal": "Wire `Cache`, `GitHubReleaseSource`, and `GitSourceFallback` into a `Resolver` that orchestrates cache-check → primary-source → fallback → cache-write → load, then expose it through `Builder.AddFromRegistry` so downstream code acquires registry packages the same way as local packages.",
       "success_criteria": "- `registry.Resolver` returns cached packages without calling remote sources when the cache already contains the requested module+version.\n- Resolver source ordering is explicit: fallback occurs only when a source returns `ErrReleaseNotFound`; other source errors stop resolution immediately.\n- Resolver persists fetched archive+manifest bytes through `Cache.Put` and returns the package via `Cache.LoadArchive`, preserving the same integrity-verification path as archive loading elsewhere.\n- `toolset.Builder.AddFromRegistry(ctx, modulePath, version)` parses FQN strings, delegates to the resolver, appends the resulting loaded package, and reports a clear error when the builder has no resolver configured.\n- Tests prove the orchestration contract and builder integration with real archive fixtures, advancing requirement `R006`.",
       "proof_level": "integration",
@@ -203,11 +203,11 @@
       "completed_at": null,
       "full_summary_md": "",
       "full_uat_md": "",
-      "goal": "Implement toolbox.toolset.json parsing with packages map and tools list. Wire into Resolver for package resolution.",
-      "success_criteria": "",
-      "proof_level": "",
-      "integration_closure": "",
-      "observability_impact": "",
+      "goal": "Implement declarative `toolbox.toolset.json` loading so a caller can parse a toolset file, validate its package/tool references up front, and resolve declared packages through `Builder.AddFromRegistry` into the same `ResolvedToolset` shape produced by imperative builder usage.",
+      "success_criteria": "## Must-Haves\n- Add exported `ToolsetFile` and `ToolEntry` types in `toolset` for the S09-scoped file format: `packages` as module-path → exact-version strings and `tools` as full-FQN entries.\n- `Load(filename)` must read JSON, unmarshal it, and validate package module paths, package versions, tool FQNs, package membership, and exact version matches using the existing `tool.Parse*` helpers.\n- `ToolsetFile.Resolve(ctx, resolver)` must create a builder with `NewWithResolver`, call `AddFromRegistry` for each declared package, and return the resulting `ResolvedToolset` without bypassing the resolver/cache path proven in S08.\n- Tests in `toolset/toolset_file_test.go` must cover the happy path plus missing file, invalid JSON, empty packages, invalid module path, invalid version, undeclared tool package, mismatched tool version, nil resolver, and resolve-from-cache success.\n- Package resolution order must be deterministic so repeated runs do not depend on Go map iteration.\n\n## Threat Surface\n- **Abuse**: Malformed or internally inconsistent `toolbox.toolset.json` content must fail validation before any registry resolution runs; tool references must not smuggle undeclared modules or version drift past the parser.\n- **Data exposure**: None in scope. This slice reads local JSON config and package metadata only; it must not introduce credential loading or secret-bearing diagnostics.\n- **Input trust**: `toolbox.toolset.json` contents are untrusted local input. Module paths, versions, and tool FQNs must be validated with existing `tool.Parse*` helpers before calling `AddFromRegistry`.\n\n## Requirement Impact\n- **Requirements touched**: R007, R006\n- **Re-verify**: Declarative toolset loading still resolves packages exclusively through `Builder.AddFromRegistry`, preserving the cache-backed resolution contract validated in S08.\n- **Decisions revisited**: D004, D014, D015, D017\n\n## Verification\n- `toolset/toolset_file_test.go` is the slice contract file for both parse-time and resolve-time behavior.\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFile -timeout 30s`\n- `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`",
+      "proof_level": "- This slice proves: integration\n- Real runtime required: no\n- Human/UAT required: no",
+      "integration_closure": "- Upstream surfaces consumed: `toolset/toolset.go` builder APIs, `tool/fqn.go` parsing helpers, and `registry/resolver.go` through `Builder.AddFromRegistry`.\n- New wiring introduced in this slice: `toolbox.toolset.json` → `ToolsetFile` → `Builder.AddFromRegistry` → `ResolvedToolset`.\n- What remains before the milestone is truly usable end-to-end: S10 lockfile generation, S11 replace directives, and S12 CLI wiring/UAT.",
+      "observability_impact": "- Runtime signals: phase-specific validation errors from `Load`, plus `ErrNoResolver` and resolver/cache errors surfaced by `Resolve`.\n- Inspection surfaces: focused `go test` runs in `toolset/toolset_file_test.go` and returned error messages that name the failing field/module/version.\n- Failure visibility: parse-time versus resolve-time failures are distinguishable, and deterministic package iteration keeps failures reproducible.\n- Redaction constraints: diagnostics must stay within local file/config values only; no secret material is in scope.",
       "sequence": 0,
       "replan_triggered_at": null
     },
@@ -673,17 +673,23 @@
       "slice_id": "S08",
       "id": "T01",
       "title": "Implement Resolver orchestration with cache-first source chaining and contract tests",
-      "status": "pending",
-      "one_liner": "",
+      "status": "complete",
+      "one_liner": "Added Resolver that orchestrates cache-check → ordered source fetch → cache-write → load with ErrReleaseNotFound-gated fallback",
       "narrative": "",
-      "verification_result": "",
-      "duration": "",
-      "completed_at": null,
+      "verification_result": "passed",
+      "duration": "15m",
+      "completed_at": "2026-03-28T10:10:49.903620+00:00",
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
+      "key_files": [
+        "registry/resolver.go",
+        "registry/resolver_test.go"
+      ],
+      "key_decisions": [
+        "Resolver.Resolve returns via Cache.LoadArchive on both cache hits and post-fetch writes so the same integrity path is always exercised",
+        "Source chain short-circuits on non-ErrReleaseNotFound errors; only 404s trigger fallback"
+      ],
       "full_summary_md": "",
       "description": "Add `registry/resolver.go` with a `Resolver` that owns a `*Cache` plus ordered `PackageSource` implementations. `Resolve(ctx, module, version)` should check `Cache.Has`/`LoadArchive` first, then try each source in order, continuing only when the current source returns `ErrReleaseNotFound`, otherwise failing immediately. On a successful fetch, it must write archive+manifest bytes through `Cache.Put` and return the package by calling `Cache.LoadArchive` so the same integrity path used by `AddFromArchive` is exercised. Cover this with focused tests in `registry/resolver_test.go` using mock `PackageSource` implementations plus real dist fixture bytes from `loadDistFixtureBytes` to prove cache-hit bypass, primary success with cache population, fallback on `ErrReleaseNotFound`, no fallback on non-404 source failure, and combined failure when all sources are exhausted.",
       "estimate": "1h",
@@ -712,17 +718,24 @@
       "slice_id": "S08",
       "id": "T02",
       "title": "Add Builder.AddFromRegistry with resolver injection and end-to-end builder tests",
-      "status": "pending",
-      "one_liner": "",
+      "status": "complete",
+      "one_liner": "Extended Builder with NewWithResolver constructor and AddFromRegistry method",
       "narrative": "",
-      "verification_result": "",
-      "duration": "",
-      "completed_at": null,
+      "verification_result": "passed",
+      "duration": "10m",
+      "completed_at": "2026-03-28T10:10:49.903620+00:00",
       "blocker_discovered": false,
       "deviations": "",
       "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
+      "key_files": [
+        "toolset/toolset.go",
+        "toolset/toolset_test.go"
+      ],
+      "key_decisions": [
+        "NewWithResolver constructor keeps New() backward-compatible while injecting resolver",
+        "AddFromRegistry validates inputs with ParseModulePath/ParseVersion before calling resolver",
+        "ErrNoResolver sentinel error makes missing resolver wiring immediately diagnosable"
+      ],
       "full_summary_md": "",
       "description": "Extend `toolset.Builder` to optionally hold a registry resolver while keeping existing `New()` behavior intact for local-only callers. Add a constructor or option such as `NewWithResolver(...)` and implement `AddFromRegistry(ctx, modulePath, version string) error` in `toolset/toolset.go`. The method must parse inputs with `tool.ParseModulePath` and `tool.ParseVersion`, return a clear error when no resolver is configured, call resolver resolution, and append the resulting `packaging.LoadedPackage` so `Packages()` and `Resolve()` behave the same as they do for `AddFromDir` and `AddFromArchive`. Add tests in `toolset/toolset_test.go` that use a pre-populated temp cache and a real dist fixture package to prove the builder can load from the registry path without network access, and that the nil-resolver path returns a specific error instead of panicking.",
       "estimate": "45m",
@@ -745,6 +758,97 @@
         "toolset/toolset_test.go"
       ],
       "observability_impact": "Surfaces configuration errors at the public Builder boundary, making missing resolver wiring immediately diagnosable by callers.",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S09",
+      "id": "T01",
+      "title": "Added validated `toolbox.toolset.json` loading and parse-time contract tests.",
+      "status": "complete",
+      "one_liner": "Added validated `toolbox.toolset.json` loading and parse-time contract tests.",
+      "narrative": "Created `toolset/toolset_file.go` with exported `ToolsetFile` and `ToolEntry` types plus `Load(filename)`. The loader reads JSON, validates non-empty `packages` and `tools`, reuses `tool.ParseModulePath`, `tool.ParseVersion`, and `tool.ParseToolFQN`, and rejects undeclared or version-mismatched tool references before any resolver work can run. The implementation keeps private parsed package/tool state for the next task and sorts package keys during validation so error ordering is stable. Added `toolset/toolset_file_test.go` with explicit happy-path and negative coverage for missing file, invalid JSON, empty collections, invalid module path, invalid version, invalid tool FQN, undeclared package references, and version mismatches. This task only covers parse-time loading; resolve-by-registry remains for T02.",
+      "verification_result": "Ran `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s` and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s`; both passed. `TestToolsetFileLoad` covered the happy path plus missing file, invalid JSON, empty collections, invalid module path, invalid version, invalid tool FQN, undeclared package references, and version mismatches.",
+      "duration": "",
+      "completed_at": "2026-03-28T11:59:42.088Z",
+      "blocker_discovered": false,
+      "deviations": "Added an `EmptyToolsRejected` negative case in addition to the planned failures because the task contract called for non-empty collections, and the loader now enforces that explicitly.",
+      "known_issues": "None.",
+      "key_files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S09/tasks/T01-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Kept `ToolsetFile`'s public JSON shape minimal and stored parsed package/tool identities privately for later resolver work.",
+        "Sorted package keys during validation so field-specific parse errors stay deterministic despite Go map iteration order."
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S09\nmilestone: M001-zku9aj\nkey_files:\n  - toolset/toolset_file.go\n  - toolset/toolset_file_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S09/tasks/T01-SUMMARY.md\nkey_decisions:\n  - Kept `ToolsetFile`'s public JSON shape minimal and stored parsed package/tool identities privately for later resolver work.\n  - Sorted package keys during validation so field-specific parse errors stay deterministic despite Go map iteration order.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T11:59:42.088Z\nblocker_discovered: false\n---\n\n# T01: Added validated `toolbox.toolset.json` loading and parse-time contract tests.\n\n**Added validated `toolbox.toolset.json` loading and parse-time contract tests.**\n\n## What Happened\n\nCreated `toolset/toolset_file.go` with exported `ToolsetFile` and `ToolEntry` types plus `Load(filename)`. The loader reads JSON, validates non-empty `packages` and `tools`, reuses `tool.ParseModulePath`, `tool.ParseVersion`, and `tool.ParseToolFQN`, and rejects undeclared or version-mismatched tool references before any resolver work can run. The implementation keeps private parsed package/tool state for the next task and sorts package keys during validation so error ordering is stable. Added `toolset/toolset_file_test.go` with explicit happy-path and negative coverage for missing file, invalid JSON, empty collections, invalid module path, invalid version, invalid tool FQN, undeclared package references, and version mismatches. This task only covers parse-time loading; resolve-by-registry remains for T02.\n\n## Verification\n\nRan `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s` and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s`; both passed. `TestToolsetFileLoad` covered the happy path plus missing file, invalid JSON, empty collections, invalid module path, invalid version, invalid tool FQN, undeclared package references, and version mismatches.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s` | 0 | ✅ pass | 1304ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` | 0 | ✅ pass | 1298ms |\n\n\n## Deviations\n\nAdded an `EmptyToolsRejected` negative case in addition to the planned failures because the task contract called for non-empty collections, and the loader now enforces that explicitly.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `toolset/toolset_file.go`\n- `toolset/toolset_file_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S09/tasks/T01-SUMMARY.md`\n",
+      "description": "## Description\nAdd `toolset/toolset_file.go` with exported `ToolsetFile` and `ToolEntry` types plus `Load(filename)` for the minimal S09 file format. The loader must read `toolbox.toolset.json`, unmarshal JSON, and validate the declared `packages` and `tools` before any registry resolution occurs so malformed configuration fails fast.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| `os.ReadFile` | Return the read error with filename context and do not partially populate the toolset. | N/A for local file reads; tests should assert ordinary read failures such as missing files instead. | N/A |\n| `tool.ParseModulePath` / `tool.ParseVersion` / `tool.ParseToolFQN` | Bubble field-specific validation errors so callers can localize the bad entry. | N/A | Reject the offending package or tool entry before any resolver work begins. |\n\n## Load Profile\n\n- **Shared resources**: Local filesystem reads only; no shared network or cache state.\n- **Per-operation cost**: One JSON file read plus linear validation over package and tool entries.\n- **10x breakpoint**: Error-message clarity and deterministic validation matter before raw performance; no scaling bottleneck is expected in this slice.\n\n## Negative Tests\n\n- **Malformed inputs**: missing file, invalid JSON, empty `packages`, invalid module path, invalid version, invalid tool FQN.\n- **Error paths**: tool references an undeclared package; tool version mismatches the declared package version.\n- **Boundary conditions**: a valid file with multiple entries preserves declared tools and keeps validation deterministic.\n\n## Steps\n\n1. Add exported types and JSON decoding in `toolset/toolset_file.go`, reusing the existing `tool.Parse*` helpers instead of duplicating parsing logic.\n2. Validate `packages` and `tools`, enforcing non-empty collections, exact-version package entries, full tool FQNs, declared-package membership, and version equality between each tool FQN and its package entry.\n3. Add focused tests in `toolset/toolset_file_test.go` covering the happy path and all parse-time failure modes required by R007.\n\n## Must-Haves\n\n- [ ] `Load(filename)` returns a validated `*ToolsetFile` with exported `Packages` and `Tools` fields.\n- [ ] Parse-time validation rejects malformed config before any resolver call is possible.\n- [ ] `toolset/toolset_file_test.go` names the parse contract and failure cases explicitly.",
+      "estimate": "35m",
+      "files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "tool/fqn.go",
+        "toolset/toolset.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s",
+      "inputs": [
+        "toolset/toolset.go",
+        "toolset/toolset_test.go",
+        "tool/fqn.go",
+        "testutil/fixtures/toolbox.pkgs/calc/toolbox.devpkg.json"
+      ],
+      "expected_output": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S09",
+      "id": "T02",
+      "title": "Resolve parsed toolset files through Builder.AddFromRegistry with cache-backed integration tests",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "## Description\nExtend `toolset/toolset_file.go` with `(*ToolsetFile).Resolve(ctx, resolver)` so declarative toolset files resolve declared packages via the same builder/resolver/cache path introduced in S08. The method should use `NewWithResolver`, iterate packages in a deterministic order, call `AddFromRegistry` for each package, and return the resulting `ResolvedToolset` without introducing any direct resolver bypass.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| `toolset.NewWithResolver` / `Builder.AddFromRegistry` | Return `ErrNoResolver` or the wrapped builder/parse error immediately and stop resolving additional packages. | Respect the caller's `context.Context`; tests should keep resolution cache-backed so no long-running dependency exists. | Propagate resolver/cache load errors unchanged so callers can diagnose the failing package. |\n| `registry.Resolver` cache path | Stop on the first package that cannot be resolved or loaded from cache; do not silently skip packages. | Use the passed context for future source-backed resolvers even though S09 tests run against a pre-populated cache. | Surface integrity/manifest errors from the resolver path instead of masking them. |\n\n## Load Profile\n\n- **Shared resources**: Resolver cache directory and ordered source chain accessed through `Builder.AddFromRegistry`.\n- **Per-operation cost**: One resolver call per declared package plus package load into the builder.\n- **10x breakpoint**: Resolution scales linearly with package count; deterministic iteration and cache-backed tests keep the contract stable without adding concurrency in this slice.\n\n## Negative Tests\n\n- **Malformed inputs**: nil resolver, package entries that were parse-valid but cannot be resolved, and empty/invalid parsed state rejected before or during resolution.\n- **Error paths**: resolver/cache failure for a declared package stops resolution and surfaces the underlying error.\n- **Boundary conditions**: pre-populated cache round-trip produces the same resolved package/tools as imperative builder usage.\n\n## Steps\n\n1. Implement `(*ToolsetFile).Resolve(ctx, resolver)` in `toolset/toolset_file.go` by creating a builder with `NewWithResolver`, sorting package module keys, and calling `AddFromRegistry` for each declared package.\n2. Preserve the already-parsed `Tools` list on the `ToolsetFile` while returning the `ResolvedToolset` produced by the builder so downstream slices can consume the same parsed structure.\n3. Extend `toolset/toolset_file_test.go` with resolve-focused tests that seed a temp cache with the existing dist fixture, prove nil-resolver behavior, and verify cache-backed declarative resolution succeeds without regressing S08 behavior.\n\n## Must-Haves\n\n- [ ] `ToolsetFile.Resolve` uses `Builder.AddFromRegistry` for every declared package instead of talking to the resolver directly.\n- [ ] Package iteration is deterministic and tested.\n- [ ] Resolve-focused tests prove nil-resolver handling and cache-backed success using the existing dist fixture pattern.",
+      "estimate": "35m",
+      "files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset.go",
+        "registry/resolver.go",
+        "registry/cache.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s",
+      "inputs": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset.go",
+        "registry/resolver.go",
+        "registry/cache.go",
+        "testutil/fixtures/toolbox.pkgs/calc-dist/calc.toolbox.pkg",
+        "testutil/fixtures/toolbox.pkgs/calc-dist/toolbox.pkg.json"
+      ],
+      "expected_output": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_file_test.go"
+      ],
+      "observability_impact": "Keeps declarative resolution failures inspectable at the same builder/resolver/cache boundaries proven in S08, so future agents can distinguish parse errors, missing resolver wiring, and cache/integrity failures quickly.",
       "full_plan_md": "",
       "sequence": 0
     }
@@ -904,6 +1008,54 @@
       "rationale": "The prior S07 implementation used author time, but Go pseudo-version semantics use commit time. The fixture now intentionally makes author and commit timestamps differ, and both the resolver and tests validate against commit time in UTC.",
       "revisable": "No",
       "made_by": "human",
+      "superseded_by": null
+    },
+    {
+      "seq": 14,
+      "id": "D014",
+      "when_context": "M001-zku9aj/S08",
+      "scope": "architecture",
+      "decision": "Resolver always returns via Cache.LoadArchive",
+      "choice": "Both cache hits and post-fetch writes go through Cache.LoadArchive so the same integrity verification path is exercised regardless of package origin",
+      "rationale": "Ensures that every resolved package passes the same sha256 verification as AddFromArchive, eliminating a class of bugs where fetched-but-unchecked bytes bypass integrity.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 15,
+      "id": "D015",
+      "when_context": "M001-zku9aj/S08",
+      "scope": "architecture",
+      "decision": "Source chain fallback gated on ErrReleaseNotFound",
+      "choice": "Only ErrReleaseNotFound triggers fallback to the next source; all other errors short-circuit immediately",
+      "rationale": "Prevents masking real failures (auth errors, network timeouts, corrupt data) behind a fallback that would succeed for the wrong reasons. Makes failure diagnosis deterministic.",
+      "revisable": "No",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 16,
+      "id": "D016",
+      "when_context": "M001-zku9aj/S08",
+      "scope": "requirement",
+      "decision": "R006",
+      "choice": "validated",
+      "rationale": "TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 17,
+      "id": "D017",
+      "when_context": "M001-zku9aj/S09 planning",
+      "scope": "architecture",
+      "decision": "S09 toolset file API and reference form",
+      "choice": "`toolset.Load(filename)` returns a validated `*ToolsetFile`, package resolution happens in `(*ToolsetFile).Resolve(ctx, resolver)`, and `tools[].tool` entries must use full FQNs whose module and version exactly match the `packages` map.",
+      "rationale": "Separating parse-time validation from registry resolution keeps configuration errors distinct from fetch/load failures, preserves the parsed structure for downstream lockfile/replace work, and avoids ambiguous short-name expansion before package manifests are loaded.",
+      "revisable": "Yes — revisit when replace directives, lockfiles, or short-name expansion are implemented.",
+      "made_by": "agent",
       "superseded_by": null
     }
   ],
@@ -1127,6 +1279,28 @@
       "verdict": "✅ pass",
       "duration_ms": 5055,
       "created_at": "2026-03-28T08:26:27.008Z"
+    },
+    {
+      "id": 21,
+      "task_id": "T01",
+      "slice_id": "S09",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1304,
+      "created_at": "2026-03-28T11:59:42.088Z"
+    },
+    {
+      "id": 22,
+      "task_id": "T01",
+      "slice_id": "S09",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1298,
+      "created_at": "2026-03-28T11:59:42.088Z"
     }
   ]
 }

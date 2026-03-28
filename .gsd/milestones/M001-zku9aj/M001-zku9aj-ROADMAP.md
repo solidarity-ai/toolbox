@@ -1,4 +1,4 @@
-# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download - Context
+# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
 
 ## Vision
 M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
@@ -384,7 +384,7 @@ Tests run in ~0.13s total. No network access required — all tests clone local 
 
  |
 | S07 | Pseudo-version resolution | medium | S03, S06 | ✅ | After this: TBD |
-| S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ⬜ | After this: TBD |
+| S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ✅ | After this: TBD |
 | S09 | Toolset file parsing | medium | S08 | ⬜ | After this: TBD |
 | S10 | Lockfile generation and verification | medium | S09 | ⬜ | After this: TBD |
 | S11 | Replace directives | low | S09 | ⬜ | After this: TBD |

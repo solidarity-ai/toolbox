@@ -15,71 +15,16 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: unmapped
 - Notes: See `docs/rfc-tool-registry.md` §2 for GitHub Releases source spec
 
-### R004 — When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
-- Class: core-capability
-- Status: active
-- Description: When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
-- Why it matters: Ensures the system works with any git host, even without CI-published release artifacts
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S06
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §2 (git-source fallback) and §3
-
-### R005 — Packages can be pinned to a specific untagged git commit using pseudo-version format `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`. The resolver fetches the specified commit, runs Pack locally, and caches the result.
-- Class: core-capability
-- Status: active
-- Description: Packages can be pinned to a specific untagged git commit using pseudo-version format `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`. The resolver fetches the specified commit, runs Pack locally, and caches the result.
-- Why it matters: Enables depending on unreleased commits during development and testing
-- Source: user
-- Primary owning slice: M001-zku9aj/S07
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §4 (pseudo-versions)
-
-### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. A dedicated declarative toolset-file package parses the file and resolves all packages via the shared registry/builder flow.
-- Class: core-capability
-- Status: active
-- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. The declarative file/lock/overlay layer may live outside `toolset`, but it must parse the file, validate it, and resolve all packages through the same shared registry and builder path.
-- Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases while keeping file concerns separate from request-scoped assembly.
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S09
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred. Package ownership was revisited by D029 and is now the extracted `toolsetfile` package before S12 closeout.
-
-### R009 — A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The declarative toolset-file layer loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
-- Class: core-capability
-- Status: active
-- Description: A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The declarative toolset-file layer loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
-- Why it matters: Essential for the "developing a package and consuming it" workflow
-- Source: user (RFC)
-- Primary owning slice: M001-zku9aj/S11
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §7 (replace directives). D029 extracted the declarative file/lock/overlay layer to `toolsetfile`; replace semantics stay unchanged.
-
-### R010 — `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
-- Class: core-capability
-- Status: active
-- Description: `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection, and S12 closeout proof must cover the real CLI entrypoint plus the extracted declarative toolset-file package rather than library-only calls or another round of command-surface planning.
-- Why it matters: Makes the workflow tangible — humans and CI can invoke resolution directly, and final assembly is only proven once the actual CLI path works end-to-end across the extracted declarative layer.
-- Source: user
-- Primary owning slice: M001-zku9aj/S12
-- Supporting slices: none
-- Validation: unmapped
-- Notes: See `docs/rfc-tool-registry.md` §5 (upgrade workflow). M001 closeout is limited to the shipped command surface (`resolve`, `versions`, single-module `resolve --upgrade`, `--file`). Baseline proof remains emulate-backed; optional real GitHub-account UAT may be used for S12 if explicitly approved and kept off `main`. D029 requires the declarative file/lock/overlay code to move out of `toolset` before this slice closes.
-
-### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and—when explicitly approved for S12—real GitHub-account UAT on a non-`main` branch or disposable repository.
+### R011 — Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
 - Class: quality-attribute
 - Status: active
-- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and—when explicitly approved for S12—real GitHub-account UAT on a non-`main` branch or disposable repository.
-- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while still allowing the final slice to retire real-hosted GitHub risk without involving the protected mainline.
+- Description: Shared Go test fixture starts vercel-labs/emulate once per test binary, seeds repos with real .toolbox.pkg release assets and local git repos at tags. Builder API supports constructing failure scenarios (corrupt archives, mismatched hashes, missing assets, broken git repos). Works in GitHub Actions CI. GitHub-related verification must be satisfiable without pushing to `main`; acceptable proof comes from local runs, CI/workflow validation, emulate-backed integration tests, and read-only GitHub inspection.
+- Why it matters: Every resolver test exercises real HTTP against a real GitHub API emulator — no mocked HTTP clients — while keeping GitHub testing off the protected mainline
 - Source: user
 - Primary owning slice: M001-zku9aj/S01
 - Supporting slices: M001-zku9aj/S02
 - Validation: unmapped
-- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if used for S12 final UAT, must stay off `main` and requires explicit user confirmation plus a real account/token.
+- Notes: Uses https://github.com/vercel-labs/emulate. Remote GitHub testing, if ever needed, must use a non-`main` branch and explicit user confirmation.
 
 ## Validated
 
@@ -105,6 +50,28 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: TestCache suite proves: packages stored at ~/.cache/toolbox/pkg/<module>/@v/<version>.{pkg,manifest,info}, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected.
 - Notes: See `docs/rfc-tool-registry.md` §3 for cache layout spec
 
+### R004 — When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
+- Class: core-capability
+- Status: validated
+- Description: When no release assets exist, the resolver clones the git repo at the tagged version, reads the package source, runs `packaging.Pack` locally, and caches the result. Uses the same `PackageSource` interface as GitHub Releases.
+- Why it matters: Ensures the system works with any git host, even without CI-published release artifacts
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S06
+- Supporting slices: none
+- Validation: Validated by S06 focused git-source proof: `go test ./registry -v -count=1 -run TestGitSource -timeout 30s` passed, proving tagged git fallback clone + local packaging, archive/manifest return values, and correct failure behavior for missing tags, broken repos, and corrupt package manifests.
+- Notes: See `docs/rfc-tool-registry.md` §2 (git-source fallback) and §3
+
+### R005 — Packages can be pinned to a specific untagged git commit using pseudo-version format `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`. The resolver fetches the specified commit, runs Pack locally, and caches the result.
+- Class: core-capability
+- Status: validated
+- Description: Packages can be pinned to a specific untagged git commit using pseudo-version format `v0.0.0-{yyyyMMddHHmmss}-{12-char commit SHA prefix}`. The resolver fetches the specified commit, runs Pack locally, and caches the result.
+- Why it matters: Enables depending on unreleased commits during development and testing
+- Source: user
+- Primary owning slice: M001-zku9aj/S07
+- Supporting slices: none
+- Validation: Validated by focused pseudo-version proof at both source and resolver/cache layers: `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver/PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache|TestGitSource/pseudo_version_happy_path' -timeout 60s` passed, proving fetch of the targeted untagged commit, local packaging, cache population, and cache reuse on the second resolve.
+- Notes: Validation no longer relies on composition alone; resolver-level pseudo-version cache proof now exists directly in `registry/resolver_test.go`.
+
 ### R006 — `toolset.Builder` gains `AddFromRegistry(modulePath, version string)` that resolves, downloads/caches, and loads a package — producing the same `LoadedPackage` that `AddFromDir` and `AddFromArchive` produce.
 - Class: core-capability
 - Status: validated
@@ -116,6 +83,17 @@ This file is the explicit capability and coverage contract for the project.
 - Validation: TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive.
 - Notes: See `docs/rfc-tool-registry.md` §3 (AddFromRegistry)
 
+### R007 — A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
+- Class: core-capability
+- Status: validated
+- Description: A `toolbox.toolset.json` file declares package dependencies (module path → version) and a tools list. `toolset.Load()` parses the file and resolves all packages via the registry.
+- Why it matters: Declarative toolset assembly replaces imperative Builder calls for config-driven use cases
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S09
+- Supporting slices: none
+- Validation: Validated by S09 declarative toolset proof: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` passed, proving schema + semantic validation and registry-backed declarative resolution through the shared builder path.
+- Notes: See `docs/rfc-tool-registry.md` §4. First version: packages + tools only. Bindings, credentials, context deferred.
+
 ### R008 — `toolbox resolve` writes a `toolbox.toolset.lock` recording archive_sha256, git_sha, resolved_from, and resolved_at for each package. On subsequent resolves, the lockfile is verified — mismatched hashes error.
 - Class: core-capability
 - Status: validated
@@ -126,6 +104,28 @@ This file is the explicit capability and coverage contract for the project.
 - Supporting slices: none
 - Validation: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, proving declarative resolves write sibling `*.toolset.lock` files with archive_sha256/git_sha/resolved_from/resolved_at metadata and subsequently verify cache state against committed lock expectations.
 - Notes: See `docs/rfc-tool-registry.md` §4 (lockfile)
+
+### R009 — A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
+- Class: core-capability
+- Status: validated
+- Description: A `toolbox.toolset.local.json` overlay file (gitignored) can redirect any module path to a local directory. The resolver loads from the local dir (dev mode) instead of fetching remotely. The lockfile entry for replaced packages is not updated.
+- Why it matters: Essential for the "developing a package and consuming it" workflow
+- Source: user (RFC)
+- Primary owning slice: M001-zku9aj/S11
+- Supporting slices: none
+- Validation: Validated by S11/S12 overlay proof: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`, and the S12 focused CLI suite passed, proving sibling overlay loading, local-dir replacement, preserved lock entries, no synthetic lock entries for replaced-only packages, and CLI-level overlay behavior.
+- Notes: See `docs/rfc-tool-registry.md` §7 (replace directives)
+
+### R010 — `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
+- Class: core-capability
+- Status: validated
+- Description: `toolbox resolve` reads a toolset file and resolves all packages. `toolbox versions` lists available versions. `toolbox resolve --upgrade` bumps packages. All commands support `--file` for toolset file selection.
+- Why it matters: Makes the workflow tangible — humans and CI can invoke resolution directly
+- Source: user
+- Primary owning slice: M001-zku9aj/S12
+- Supporting slices: none
+- Validation: Validated by S12 focused CLI proof: `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` passed, covering `toolbox versions`, `toolbox resolve`, single-module `toolbox resolve --upgrade`, `--file` selection, committed-lock cache-hit re-resolve, sibling local-overlay behavior, token-auth header wiring without token leakage, and CLI validation failures.
+- Notes: S12 closes R010 on the real `cmd/toolbox` boundary rather than on library seams alone.
 
 ## Deferred
 
@@ -237,13 +237,13 @@ This file is the explicit capability and coverage contract for the project.
 | R001 | core-capability | validated | M001-zku9aj/S03 | none | Table-driven tests prove parse/format round-trips for ModulePath, Version, ToolPath, ToolFQN, PackageVer. Pseudo-version decomposition verified. All edge cases covered. |
 | R002 | core-capability | validated | M001-zku9aj/S04 | none | TestCache suite proves: packages stored at ~/.cache/toolbox/pkg/<module>/@v/<version>.{pkg,manifest,info}, round-trip through LoadArchive with sha256 verification, env override works, missing entries detected. |
 | R003 | core-capability | active | M001-zku9aj/S05 | none | unmapped |
-| R004 | core-capability | active | M001-zku9aj/S06 | none | unmapped |
-| R005 | core-capability | active | M001-zku9aj/S07 | none | unmapped |
+| R004 | core-capability | validated | M001-zku9aj/S06 | none | Validated by S06 focused git-source proof: `go test ./registry -v -count=1 -run TestGitSource -timeout 30s` passed, proving tagged git fallback clone + local packaging, archive/manifest return values, and correct failure behavior for missing tags, broken repos, and corrupt package manifests. |
+| R005 | core-capability | validated | M001-zku9aj/S07 | none | Validated by focused pseudo-version proof at both source and resolver/cache layers: `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run 'TestResolver/PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache|TestGitSource/pseudo_version_happy_path' -timeout 60s` passed, proving fetch of the targeted untagged commit, local packaging, cache population, and cache reuse on the second resolve. |
 | R006 | core-capability | validated | M001-zku9aj/S08 | none | TestBuilderAddFromRegistry proves: nil-resolver returns ErrNoResolver, invalid inputs return parse errors, pre-populated cache resolves successfully producing correct package name, resolved package appears in Resolve() output identically to AddFromDir/AddFromArchive. |
-| R007 | core-capability | active | M001-zku9aj/S09 | none | unmapped |
+| R007 | core-capability | validated | M001-zku9aj/S09 | none | Validated by S09 declarative toolset proof: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileLoad -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestToolsetFileResolve -timeout 30s`, and `GOWORK=$(pwd)/go.work go test ./toolset/... -v -count=1 -timeout 30s` passed, proving schema + semantic validation and registry-backed declarative resolution through the shared builder path. |
 | R008 | core-capability | validated | M001-zku9aj/S10 | none | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetFileResolve|TestToolsetLock' -timeout 30s && GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` passed, proving declarative resolves write sibling `*.toolset.lock` files with archive_sha256/git_sha/resolved_from/resolved_at metadata and subsequently verify cache state against committed lock expectations. |
-| R009 | core-capability | active | M001-zku9aj/S11 | none | unmapped |
-| R010 | core-capability | active | M001-zku9aj/S12 | none | unmapped |
+| R009 | core-capability | validated | M001-zku9aj/S11 | none | Validated by S11/S12 overlay proof: `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`, `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`, and the S12 focused CLI suite passed, proving sibling overlay loading, local-dir replacement, preserved lock entries, no synthetic lock entries for replaced-only packages, and CLI-level overlay behavior. |
+| R010 | core-capability | validated | M001-zku9aj/S12 | none | Validated by S12 focused CLI proof: `GOWORK=$(pwd)/go.work go test ./cmd/toolbox/... -v -count=1 -run 'TestRun(Versions|Resolve)' -timeout 120s` passed, covering `toolbox versions`, `toolbox resolve`, single-module `toolbox resolve --upgrade`, `--file` selection, committed-lock cache-hit re-resolve, sibling local-overlay behavior, token-auth header wiring without token leakage, and CLI validation failures. |
 | R011 | quality-attribute | active | M001-zku9aj/S01 | M001-zku9aj/S02 | unmapped |
 | R020 | core-capability | deferred | none | none | unmapped |
 | R021 | core-capability | deferred | none | none | unmapped |
@@ -257,8 +257,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 7
-- Mapped to slices: 7
-- Validated: 4 (R001, R002, R006, R008)
+- Active requirements: 2
+- Mapped to slices: 2
+- Validated: 9 (R001, R002, R004, R005, R006, R007, R008, R009, R010)
 - Unmapped active requirements: 0
-: 0

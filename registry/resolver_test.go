@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
 )
 
 // mockSource is a test PackageSource that returns preconfigured results.
@@ -18,6 +20,16 @@ type mockSource struct {
 func (m *mockSource) Fetch(_ context.Context, _ ModulePath, _ Version) (FetchResult, error) {
 	m.called++
 	return m.result, m.err
+}
+
+type countingSource struct {
+	inner  PackageSource
+	called int
+}
+
+func (s *countingSource) Fetch(ctx context.Context, module ModulePath, version Version) (FetchResult, error) {
+	s.called++
+	return s.inner.Fetch(ctx, module, version)
 }
 
 func TestResolver(t *testing.T) {
@@ -89,6 +101,56 @@ func TestResolver(t *testing.T) {
 		}
 		if !cache.Has(module, version) {
 			t.Fatal("cache.Has() = false after successful resolve, want true")
+		}
+	})
+
+	t.Run("PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache", func(t *testing.T) {
+		meta := gitfixture.CreatePseudoVersionRepoFromDir(t, fixtureSourceDir(t, "calc"))
+		cache := newTempCache(t)
+		src := &countingSource{inner: &GitSourceFallback{URLPrefix: "file://"}}
+		resolver := NewResolver(cache, src)
+		module := ModulePath(meta.RepoDir)
+		version := mustVersion(t, meta.PseudoVersion)
+
+		first, err := resolver.Resolve(ctx, module, version)
+		if err != nil {
+			t.Fatalf("first Resolve() error: %v", err)
+		}
+		if first.Package.Package.Name != "calc" {
+			t.Fatalf("first package name = %q, want %q", first.Package.Package.Name, "calc")
+		}
+		if src.called != 1 {
+			t.Fatalf("source called %d times after first resolve, want 1", src.called)
+		}
+		if !cache.Has(module, version) {
+			t.Fatal("cache.Has() = false after pseudo-version resolve, want true")
+		}
+		archiveSHA, err := cache.ArchiveSHA256(module, version)
+		if err != nil {
+			t.Fatalf("ArchiveSHA256() error: %v", err)
+		}
+		if archiveSHA != first.Metadata.ArchiveSHA256 {
+			t.Fatalf("cache archive sha = %q, want %q", archiveSHA, first.Metadata.ArchiveSHA256)
+		}
+		if first.Metadata.GitSHA != strings.ToLower(meta.CommitSHA) {
+			t.Fatalf("git_sha = %q, want %q", first.Metadata.GitSHA, strings.ToLower(meta.CommitSHA))
+		}
+		if first.Metadata.ResolvedFrom != ResolvedFromGitSource {
+			t.Fatalf("resolved_from = %q, want %q", first.Metadata.ResolvedFrom, ResolvedFromGitSource)
+		}
+
+		second, err := resolver.Resolve(ctx, module, version)
+		if err != nil {
+			t.Fatalf("second Resolve() error: %v", err)
+		}
+		if second.Package.Package.Name != "calc" {
+			t.Fatalf("second package name = %q, want %q", second.Package.Package.Name, "calc")
+		}
+		if src.called != 1 {
+			t.Fatalf("source called %d times after second resolve, want 1", src.called)
+		}
+		if second.Metadata.ArchiveSHA256 != first.Metadata.ArchiveSHA256 {
+			t.Fatalf("second archive sha = %q, want %q", second.Metadata.ArchiveSHA256, first.Metadata.ArchiveSHA256)
 		}
 	})
 

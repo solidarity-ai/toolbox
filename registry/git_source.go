@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/packaging"
 )
@@ -32,18 +33,20 @@ func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, versio
 	defer os.RemoveAll(outDir)
 
 	checkoutDir := filepath.Join(cloneRoot, "repo")
-	tag := version.String()
 	cloneURL := s.cloneURL(module)
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth=1", "--branch", tag, cloneURL, checkoutDir)
-	output, err := cmd.CombinedOutput()
+	if version.IsPseudo() {
+		err = s.clonePseudoVersion(ctx, module, version, cloneURL, checkoutDir)
+	} else {
+		err = s.cloneTaggedVersion(ctx, module, version, cloneURL, checkoutDir)
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("git clone %s@%s from %s: %w: %s", module, tag, cloneURL, err, strings.TrimSpace(string(output)))
+		return nil, nil, err
 	}
 
 	packed, err := packaging.Pack(checkoutDir, outDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("pack cloned repo %s@%s: %w", module, tag, err)
+		return nil, nil, fmt.Errorf("pack cloned repo %s@%s: %w", module, version, err)
 	}
 
 	archiveBytes, err := os.ReadFile(packed.ArchivePath)
@@ -56,6 +59,54 @@ func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, versio
 	}
 
 	return archiveBytes, manifestBytes, nil
+}
+
+func (s *GitSourceFallback) cloneTaggedVersion(ctx context.Context, module ModulePath, version Version, cloneURL string, checkoutDir string) error {
+	_, err := runGitForVersion(ctx, "", module, version, cloneURL, "clone", "clone", "--depth=1", "--branch", version.String(), cloneURL, checkoutDir)
+	return err
+}
+
+func (s *GitSourceFallback) clonePseudoVersion(ctx context.Context, module ModulePath, version Version, cloneURL string, checkoutDir string) error {
+	if _, err := runGitForVersion(ctx, "", module, version, cloneURL, "clone", "clone", cloneURL, checkoutDir); err != nil {
+		return err
+	}
+
+	commit, err := runGitForVersion(ctx, checkoutDir, module, version, cloneURL, "rev-parse", "rev-parse", "--verify", version.PseudoCommit()+"^{commit}")
+	if err != nil {
+		return err
+	}
+
+	commitDate, err := runGitForVersion(ctx, checkoutDir, module, version, cloneURL, "show", "show", "-s", "--format=%cI", commit)
+	if err != nil {
+		return err
+	}
+
+	commitTime, err := time.Parse(time.RFC3339, commitDate)
+	if err != nil {
+		return fmt.Errorf("git show %s@%s returned invalid commit timestamp %q for commit %s: %w", module, version, commitDate, commit, err)
+	}
+
+	resolvedTimestamp := commitTime.UTC().Format("20060102150405")
+	if resolvedTimestamp != version.PseudoTimestamp() {
+		return fmt.Errorf("git show %s@%s timestamp mismatch for commit %s: pseudo-version timestamp %s, git commit timestamp %s", module, version, commit, version.PseudoTimestamp(), resolvedTimestamp)
+	}
+
+	if _, err := runGitForVersion(ctx, checkoutDir, module, version, cloneURL, "checkout", "checkout", commit); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runGitForVersion(ctx context.Context, dir string, module ModulePath, version Version, cloneURL string, step string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(output))
+	if err != nil {
+		return "", fmt.Errorf("git %s %s@%s from %s: %w: %s", step, module, version, cloneURL, err, trimmed)
+	}
+	return trimmed, nil
 }
 
 func (s *GitSourceFallback) cloneURL(module ModulePath) string {

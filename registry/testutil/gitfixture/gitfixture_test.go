@@ -119,13 +119,24 @@ func TestCreatePseudoVersionRepo(t *testing.T) {
 		t.Fatalf("pseudo commit %s unexpectedly tagged: %q", meta.CommitSHA, pointsAt)
 	}
 
-	timestampOut := strings.TrimSpace(runGit(t, cloneDir, "show", "-s", "--format=%aI", meta.CommitSHA))
-	commitTime, err := time.Parse(time.RFC3339, timestampOut)
+	authorTimestampOut := strings.TrimSpace(runGit(t, cloneDir, "show", "-s", "--format=%aI", meta.CommitSHA))
+	authorTime, err := time.Parse(time.RFC3339, authorTimestampOut)
 	if err != nil {
-		t.Fatalf("parse commit author date %q: %v", timestampOut, err)
+		t.Fatalf("parse commit author date %q: %v", authorTimestampOut, err)
+	}
+	commitTimestampOut := strings.TrimSpace(runGit(t, cloneDir, "show", "-s", "--format=%cI", meta.CommitSHA))
+	commitTime, err := time.Parse(time.RFC3339, commitTimestampOut)
+	if err != nil {
+		t.Fatalf("parse commit commit date %q: %v", commitTimestampOut, err)
+	}
+	if authorTime.UTC().Equal(commitTime.UTC()) {
+		t.Fatalf("expected fixture author and commit timestamps to differ, both were %q", commitTimestampOut)
 	}
 	if got := commitTime.UTC().Format("20060102150405"); got != meta.PseudoTimestamp {
 		t.Fatalf("commit timestamp = %q, want %q", got, meta.PseudoTimestamp)
+	}
+	if got := authorTime.UTC().Format("20060102150405"); got == meta.PseudoTimestamp {
+		t.Fatalf("author timestamp unexpectedly matched pseudo timestamp %q", got)
 	}
 
 	manifestPath := filepath.Join(cloneDir, "toolbox.devpkg.json")

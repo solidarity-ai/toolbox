@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T01:02:58.056Z",
+  "exported_at": "2026-03-28T08:26:27.017Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -624,19 +624,25 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S07",
       "id": "T02",
-      "title": "Teach GitSourceFallback to resolve pseudo-version commits",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Extended GitSourceFallback to resolve pseudo-version commits with timestamp validation while keeping tagged fetches on the existing shallow clone path.",
+      "status": "complete",
+      "one_liner": "Extended GitSourceFallback to resolve pseudo-version commits with timestamp validation while keeping tagged fetches on the existing shallow clone path.",
+      "narrative": "Refactored registry/git_source.go so GitSourceFallback.Fetch branches on Version.IsPseudo() instead of treating every version as a tag. Tagged versions still use the shallow clone-by-tag fast path. Pseudo-versions now do a full clone, resolve Version.PseudoCommit() with git rev-parse --verify <prefix>^{commit}, read the commit author timestamp with git show --format=%aI, compare the UTC timestamp to Version.PseudoTimestamp(), and check out the resolved full commit before reusing the existing packaging and archive/manifest readback flow. Extended registry/git_source_test.go with pseudo-version happy-path coverage plus negative tests for missing commit prefixes and timestamp mismatches, while preserving the existing tagged subtests.",
+      "verification_result": "Ran `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s` and `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s`. Both passed. The targeted suite exercised tagged and pseudo-version paths, and the full registry regression stayed green.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T08:26:27.008Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "registry/git_source.go",
+        "registry/git_source_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S07/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Kept tagged fetches on the existing shallow clone path and added a separate full-clone pseudo-version path with rev-parse and timestamp validation."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S07\nmilestone: M001-zku9aj\nkey_files:\n  - registry/git_source.go\n  - registry/git_source_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S07/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Kept tagged fetches on the existing shallow clone path and added a separate full-clone pseudo-version path with rev-parse and timestamp validation.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T08:26:27.008Z\nblocker_discovered: false\n---\n\n# T02: Extended GitSourceFallback to resolve pseudo-version commits with timestamp validation while keeping tagged fetches on the existing shallow clone path.\n\n**Extended GitSourceFallback to resolve pseudo-version commits with timestamp validation while keeping tagged fetches on the existing shallow clone path.**\n\n## What Happened\n\nRefactored registry/git_source.go so GitSourceFallback.Fetch branches on Version.IsPseudo() instead of treating every version as a tag. Tagged versions still use the shallow clone-by-tag fast path. Pseudo-versions now do a full clone, resolve Version.PseudoCommit() with git rev-parse --verify <prefix>^{commit}, read the commit author timestamp with git show --format=%aI, compare the UTC timestamp to Version.PseudoTimestamp(), and check out the resolved full commit before reusing the existing packaging and archive/manifest readback flow. Extended registry/git_source_test.go with pseudo-version happy-path coverage plus negative tests for missing commit prefixes and timestamp mismatches, while preserving the existing tagged subtests.\n\n## Verification\n\nRan `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s` and `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s`. Both passed. The targeted suite exercised tagged and pseudo-version paths, and the full registry regression stayed green.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s` | 0 | ✅ pass | 1793ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s` | 0 | ✅ pass | 5055ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `registry/git_source.go`\n- `registry/git_source_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S07/tasks/T02-SUMMARY.md`\n",
       "description": "Close the slice by extending the real git fetch path for pseudo versions while preserving the S06 tagged fast path.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| `git` CLI in `registry/git_source.go` | Return a phase-specific error that names the module, version, and failing git step | Surface the context cancellation / command failure from `exec.CommandContext` without retry loops | Treat ambiguous or unresolved commit prefixes as hard errors from `rev-parse` |\n| `packaging.Pack` | Abort fetch and return a `pack cloned repo` error after checkout succeeds | Not applicable — packaging is local CPU/filesystem work | Treat missing or corrupt manifests as packaging errors after the pseudo-version checkout is proven |\n\n## Load Profile\n\n- **Shared resources**: temp clone directories, local git object database, packaging output directory\n- **Per-operation cost**: tagged versions stay at one shallow clone; pseudo versions pay for one full clone plus `rev-parse`, `show`, and `checkout`\n- **10x breakpoint**: pseudo-version full clones increase disk and process cost first, but only on pseudo-version requests\n\n## Negative Tests\n\n- **Malformed inputs**: Unknown or ambiguous 12-character commit prefixes must fail before packaging.\n- **Error paths**: Timestamp mismatches between the pseudo version and git author time must return explicit errors.\n- **Boundary conditions**: Existing tagged subtests still pass unchanged, proving the tagged fast path was preserved.\n\n## Steps\n\n1. Extend `registry/git_source_test.go` with pseudo-version happy-path, missing-commit, and timestamp-mismatch coverage using the new fixture helper, while keeping the existing tagged subtests intact.\n2. Refactor `registry/git_source.go` so `Version.IsPseudo()` decides between the existing shallow tag checkout and a new pseudo-version checkout path.\n3. In the pseudo-version path, clone without `--depth=1 --branch`, resolve `Version.PseudoCommit()` to a full commit with `git rev-parse --verify <prefix>^{commit}`, read the commit author timestamp in UTC, compare it to `Version.PseudoTimestamp()`, and check out the full commit.\n4. Reuse the existing `packaging.Pack` + archive/manifest readback flow after checkout so the `PackageSource` contract stays unchanged.\n5. Keep errors phase-specific enough that a future agent can distinguish clone, commit-resolution, timestamp, checkout, and packaging failures from test output alone.\n\n## Must-Haves\n\n- [ ] `registry` consumes `Version.IsPseudo()`, `PseudoTimestamp()`, and `PseudoCommit()` instead of re-parsing pseudo-version strings.\n- [ ] Tagged versions keep the shallow clone fast path from S06.\n- [ ] Pseudo versions resolve the requested commit, reject missing commit prefixes, and reject timestamp mismatches before packaging.\n- [ ] `GitSourceFallback.Fetch` still returns archive + manifest bytes through the unchanged `PackageSource` interface.\n- [ ] Existing `TestGitSource` tag-based subtests keep passing alongside the new pseudo-version coverage.\n\n## Done When\n\n- `TestGitSource` passes for both tagged and pseudo-version subtests, and the full `./registry/...` regression is green.",
       "estimate": "1h15m",
       "files": [
@@ -781,6 +787,18 @@
       "choice": "For pseudo versions, GitSourceFallback must full-clone, resolve the 12-character commit prefix to a full commit, and treat a mismatch between the pseudo-version timestamp and the commit author timestamp as a hard error before packaging.",
       "rationale": "The pseudo-version format is already parsed in tool.Version, and enforcing the timestamp match keeps pins meaningful, catches malformed-but-syntactically-valid versions early, and preserves the existing tagged fast path without widening PackageSource.",
       "revisable": "Yes — if interoperability evidence shows timestamp enforcement is too strict",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 11,
+      "id": "D011",
+      "when_context": "M001-zku9aj S07 T02",
+      "scope": "architecture",
+      "decision": "How GitSourceFallback should fetch tagged versus pseudo-version git references",
+      "choice": "Keep the existing shallow clone-by-tag path for tagged versions, and add a separate pseudo-version path that performs a full clone, rev-parse commit resolution, author-timestamp validation, and commit checkout before packaging.",
+      "rationale": "Tagged requests already have an efficient fast path, while pseudo-versions need full history access to resolve commit prefixes and validate the encoded timestamp before packaging. Splitting the paths preserves existing performance for tags and makes pseudo-version failure phases observable in tests.",
+      "revisable": "Yes",
       "made_by": "agent",
       "superseded_by": null
     }
@@ -983,6 +1001,28 @@
       "verdict": "✅ pass",
       "duration_ms": 5214,
       "created_at": "2026-03-28T01:02:58.046Z"
+    },
+    {
+      "id": 19,
+      "task_id": "T02",
+      "slice_id": "S07",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1793,
+      "created_at": "2026-03-28T08:26:27.008Z"
+    },
+    {
+      "id": 20,
+      "task_id": "T02",
+      "slice_id": "S07",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 5055,
+      "created_at": "2026-03-28T08:26:27.008Z"
     }
   ]
 }

@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const pseudoCommitTimeRFC3339 = "2026-03-27T11:22:33Z"
+const (
+	pseudoAuthorTimeRFC3339  = "2026-03-27T11:22:33Z"
+	pseudoCommitTimeRFC3339 = "2026-03-27T12:34:56Z"
+)
 
 // PseudoVersionRepo describes a repository whose HEAD is an untagged commit
 // addressable via a Go-style pseudo-version.
@@ -104,10 +107,14 @@ func CreatePseudoVersionRepoFromDir(t *testing.T, srcDir string) PseudoVersionRe
 	if err != nil {
 		t.Fatalf("gitfixture: parse pseudo commit time %q: %v", pseudoCommitTimeRFC3339, err)
 	}
+	authorTime, err := time.Parse(time.RFC3339, pseudoAuthorTimeRFC3339)
+	if err != nil {
+		t.Fatalf("gitfixture: parse pseudo author time %q: %v", pseudoAuthorTimeRFC3339, err)
+	}
 
 	runGit(t, repoDir, "add", ".")
 	runGitWithEnv(t, repoDir, []string{
-		"GIT_AUTHOR_DATE=" + commitTime.Format(time.RFC3339),
+		"GIT_AUTHOR_DATE=" + authorTime.Format(time.RFC3339),
 		"GIT_COMMITTER_DATE=" + commitTime.Format(time.RFC3339),
 	}, "-c", "user.name=test", "-c", "user.email=test@test.com", "commit", "-m", "pseudo commit")
 
@@ -117,12 +124,20 @@ func CreatePseudoVersionRepoFromDir(t *testing.T, srcDir string) PseudoVersionRe
 	}
 	shortCommit := commitSHA[:12]
 
+	commitDate := strings.TrimSpace(runGit(t, repoDir, "show", "-s", "--format=%cI", "HEAD"))
 	authorDate := strings.TrimSpace(runGit(t, repoDir, "show", "-s", "--format=%aI", "HEAD"))
-	authorTime, err := time.Parse(time.RFC3339, authorDate)
+	commitTimestamp, err := time.Parse(time.RFC3339, commitDate)
+	if err != nil {
+		t.Fatalf("gitfixture: parse HEAD commit date %q: %v", commitDate, err)
+	}
+	authorTimestamp, err := time.Parse(time.RFC3339, authorDate)
 	if err != nil {
 		t.Fatalf("gitfixture: parse HEAD author date %q: %v", authorDate, err)
 	}
-	pseudoTimestamp := authorTime.UTC().Format("20060102150405")
+	if commitTimestamp.UTC().Equal(authorTimestamp.UTC()) {
+		t.Fatalf("gitfixture: pseudo fixture author and commit timestamps unexpectedly match: %s", commitDate)
+	}
+	pseudoTimestamp := commitTimestamp.UTC().Format("20060102150405")
 
 	return PseudoVersionRepo{
 		RepoDir:         repoDir,

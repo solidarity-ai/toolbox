@@ -44,7 +44,7 @@
   - Files: registry/testutil/gitfixture/gitfixture.go, registry/testutil/gitfixture/gitfixture_test.go, testutil/fixtures/toolbox.pkgs/calc/toolbox.devpkg.json
   - Verify: - `GOWORK=$(pwd)/go.work go test ./registry/testutil/gitfixture -v -count=1 -run TestCreatePseudoVersionRepo -timeout 30s`
 - `GOWORK=$(pwd)/go.work go test ./registry/testutil/gitfixture -v -count=1 -timeout 30s`
-- [ ] **T02: Teach GitSourceFallback to resolve pseudo-version commits** — Close the slice by extending the real git fetch path for pseudo versions while preserving the S06 tagged fast path.
+- [x] **T02: Extended GitSourceFallback to resolve pseudo-version commits with timestamp validation while keeping tagged fetches on the existing shallow clone path.** — Close the slice by extending the real git fetch path for pseudo versions while preserving the S06 tagged fast path.
 
 ## Failure Modes
 

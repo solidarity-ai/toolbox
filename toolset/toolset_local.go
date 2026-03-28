@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -108,4 +109,20 @@ func (f *ToolsetLocalFile) ReplacementDir(module tooldef.ModulePath) (string, bo
 	}
 	dir, ok := f.parsedReplace[module]
 	return dir, ok
+}
+
+// ReplacementDirAbs returns the replacement directory for module resolved
+// against the overlay file location.
+func (f *ToolsetLocalFile) ReplacementDirAbs(module tooldef.ModulePath) (string, bool) {
+	dir, ok := f.ReplacementDir(module)
+	if !ok {
+		return "", false
+	}
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir), true
+	}
+	if f.filename == "" {
+		return filepath.Clean(dir), true
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(f.filename), dir)), true
 }

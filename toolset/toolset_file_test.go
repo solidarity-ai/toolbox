@@ -356,6 +356,254 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 	})
 
+	t.Run("ReplaceOverlayResolvesFromLocalDirPreservesExistingLockEntryAndSkipsRegistryFetch", func(t *testing.T) {
+		githubIssuesDir, err := filepath.Abs(filepath.Join("..", "testutil", "fixtures", "toolbox.pkgs", "github-issues"))
+		if err != nil {
+			t.Fatalf("filepath.Abs(github-issues fixture): %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/zeta/github-issues": "v2.0.0",
+				"example.com/acme/calc":          "v1.2.3",
+			},
+			"tools": []map[string]string{
+				{"tool": "example.com/zeta/github-issues@v2.0.0/github-issues.get"},
+				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+			},
+		})
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				"example.com/zeta/github-issues": githubIssuesDir,
+			},
+		})
+
+		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
+		cache := newTempCache(t)
+		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+		resolver := registry.NewResolver(cache, &recordingSource{err: fmt.Errorf("unexpected fetch for local replacement test")})
+
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/zeta/github-issues@v2.0.0": {
+				ArchiveSHA256: strings.Repeat("a", 64),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T12:05:00Z",
+			},
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: sha256HexForTest(archiveBytes),
+				GitSHA:        strings.Repeat("c", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitSource,
+				ResolvedAt:    "2026-03-28T12:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+
+		got, err := file.Resolve(ctx, resolver)
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+
+		gotIDs := resolvedToolIDs(got)
+		wantIDs := []string{"calc/calc.add", "calc/calc.sub", "calc/calc.asyncAdd", "github-issues/github-issues.get"}
+		if !reflect.DeepEqual(gotIDs, wantIDs) {
+			t.Fatalf("resolved tools = %#v, want %#v", gotIDs, wantIDs)
+		}
+		if orderedPackages := resolvedPackageNames(got); !reflect.DeepEqual(orderedPackages, []string{"calc", "calc", "calc", "github-issues"}) {
+			t.Fatalf("resolved package order = %#v, want %#v", orderedPackages, []string{"calc", "calc", "calc", "github-issues"})
+		}
+
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed during mixed local+registry resolve:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
+
+	t.Run("ReplaceOverlayDoesNotCreateNewLockEntryForReplacedOnlyPackage", func(t *testing.T) {
+		githubIssuesDir, err := filepath.Abs(filepath.Join("..", "testutil", "fixtures", "toolbox.pkgs", "github-issues"))
+		if err != nil {
+			t.Fatalf("filepath.Abs(github-issues fixture): %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/zeta/github-issues": "v2.0.0",
+			},
+			"tools": []map[string]string{{
+				"tool": "example.com/zeta/github-issues@v2.0.0/github-issues.get",
+			}},
+		})
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				"example.com/zeta/github-issues": githubIssuesDir,
+			},
+		})
+
+		got, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), &recordingSource{err: fmt.Errorf("unexpected fetch for replaced-only package")}))
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if len(got.Tools()) == 0 {
+			t.Fatal("Resolve() returned no tools")
+		}
+
+		lock, err := LoadLock(file.LockFilename())
+		if err != nil {
+			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
+		}
+		if len(lock.Packages) != 0 {
+			t.Fatalf("lock packages = %#v, want none for replaced-only package", lock.Packages)
+		}
+	})
+
+	t.Run("MalformedLocalOverlayAbortsBeforeAnyResolutionAndLeavesLockfileUntouched", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		if err := os.WriteFile(file.LocalFilename(), []byte(`{"replace":["bad"]}`), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", file.LocalFilename(), err)
+		}
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: strings.Repeat("a", 64),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{err: fmt.Errorf("should not fetch when local overlay is malformed")}
+
+		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want local overlay error")
+		}
+		assertErrorContains(t, err, "resolve toolset file")
+		assertErrorContains(t, err, "schema-validate toolset local file")
+		assertErrorContains(t, err, file.LocalFilename())
+		if len(src.calls) != 0 {
+			t.Fatalf("source calls = %#v, want none", src.calls)
+		}
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed on malformed local overlay:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
+
+	t.Run("BadReplacePathFailsBeforeLaterSortedPackagesAndLeavesLockfileUntouched", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"example.com/zeta/never-reached": "v9.9.9",
+				"example.com/acme/first":         "v1.0.0",
+			},
+			"tools": []map[string]string{},
+		})
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				"example.com/acme/first": "./missing-package-dir",
+			},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/first@v1.0.0": {
+				ArchiveSHA256: strings.Repeat("a", 64),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		src := &recordingSource{err: fmt.Errorf("should not fetch later sorted package")}
+
+		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want replace path error")
+		}
+		assertErrorContains(t, err, "resolve example.com/acme/first@v1.0.0 from local replace")
+		assertErrorContains(t, err, filepath.Clean(filepath.Join(filepath.Dir(file.LocalFilename()), "missing-package-dir")))
+		assertErrorContains(t, err, "toolbox.devpkg.json")
+		if len(src.calls) != 0 {
+			t.Fatalf("source calls = %#v, want none", src.calls)
+		}
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed on replace failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
+
+	t.Run("ReplacePathToNonPackageDirectoryFailsWithContextAndLeavesLockfileUntouched", func(t *testing.T) {
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"tools":    []map[string]string{},
+		})
+		nonPackageDir := filepath.Join(t.TempDir(), "not-a-package")
+		if err := os.MkdirAll(nonPackageDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q): %v", nonPackageDir, err)
+		}
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				"example.com/acme/calc": nonPackageDir,
+			},
+		})
+		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
+			"example.com/acme/calc@v1.2.3": {
+				ArchiveSHA256: strings.Repeat("a", 64),
+				GitSHA:        strings.Repeat("b", 40),
+				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-03-28T13:00:00Z",
+			},
+		}}
+		if err := locked.Write(file.LockFilename()); err != nil {
+			t.Fatalf("Write(%q): %v", file.LockFilename(), err)
+		}
+		before, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+
+		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t)))
+		if err == nil {
+			t.Fatal("Resolve() error = nil, want non-package directory error")
+		}
+		assertErrorContains(t, err, "resolve example.com/acme/calc@v1.2.3 from local replace")
+		assertErrorContains(t, err, nonPackageDir)
+		assertErrorContains(t, err, "toolbox.devpkg.json")
+		after, err := os.ReadFile(file.LockFilename())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("lockfile changed on non-package replace failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+		}
+	})
+
 	t.Run("ResolvesFromPrePopulatedCacheMatchesImperativeBuilderInSortedPackageOrder", func(t *testing.T) {
 		fixtures := []struct {
 			module  string
@@ -873,6 +1121,18 @@ func loadFixtureArchiveAndManifestBytes(t *testing.T, fixtureName string) ([]byt
 func writeToolsetJSON(t *testing.T, value any) string {
 	t.Helper()
 	return writeToolsetJSONNamed(t, "toolbox.toolset.json", value)
+}
+
+func writeToolsetLocalJSON(t *testing.T, filename string, value any) {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if err := os.WriteFile(filename, data, 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", filename, err)
+	}
 }
 
 func writeToolsetJSONNamed(t *testing.T, basename string, value any) string {

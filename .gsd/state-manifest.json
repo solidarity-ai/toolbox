@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T21:25:57.678Z",
+  "exported_at": "2026-03-28T21:34:26.661Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -1083,19 +1083,28 @@
       "milestone_id": "M001-zku9aj",
       "slice_id": "S11",
       "id": "T02",
-      "title": "Wire replace-aware resolve branching and lock-preservation tests",
-      "status": "pending",
-      "one_liner": "",
-      "narrative": "",
-      "verification_result": "",
+      "title": "Wired sibling local replace overlays into ToolsetFile.Resolve while preserving lock entries and stop-on-first-error behavior.",
+      "status": "complete",
+      "one_liner": "Wired sibling local replace overlays into ToolsetFile.Resolve while preserving lock entries and stop-on-first-error behavior.",
+      "narrative": "Updated ToolsetFile.Resolve() to load the optional sibling *.toolset.local.json overlay after existing lockfile validation and before package iteration. Resolution still walks modules in deterministic sorted order, but now branches per module: replaced modules load through Builder.AddFromDir using overlay-relative paths, while unreplaced modules continue through Builder.AddFromRegistryWithExpected with the existing lock metadata checks. The lock rewrite now starts from a copy of the validated existing lockfile so replaced packages preserve prior entries exactly as written, replaced-only packages do not synthesize new entries, and registry-backed packages still update their metadata after a successful resolve. Added focused resolve tests covering mixed replace + registry ordering, replaced-only lock omission, malformed overlays, bad replace paths, non-package directories, and overlay-relative path handling.",
+      "verification_result": "Passed the focused slice verification with `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`, passed the broader regression suite with `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`, and re-ran the focused suite after `gofmt` on the modified Go files.",
       "duration": "",
-      "completed_at": null,
+      "completed_at": "2026-03-28T21:34:26.649Z",
       "blocker_discovered": false,
-      "deviations": "",
-      "known_issues": "",
-      "key_files": [],
-      "key_decisions": [],
-      "full_summary_md": "",
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "toolset/toolset_file.go",
+        "toolset/toolset_local.go",
+        "toolset/toolset_file_test.go",
+        "toolset/toolset_local_test.go",
+        ".gsd/milestones/M001-zku9aj/slices/S11/tasks/T02-SUMMARY.md"
+      ],
+      "key_decisions": [
+        "Resolved replace directories relative to the sibling *.toolset.local.json file so local overlays behave consistently regardless of the caller's working directory.",
+        "Started lock rewrites from a copy of the validated existing lockfile so replaced packages preserve prior entries byte-for-byte and replaced-only packages never synthesize new entries."
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S11\nmilestone: M001-zku9aj\nkey_files:\n  - toolset/toolset_file.go\n  - toolset/toolset_local.go\n  - toolset/toolset_file_test.go\n  - toolset/toolset_local_test.go\n  - .gsd/milestones/M001-zku9aj/slices/S11/tasks/T02-SUMMARY.md\nkey_decisions:\n  - Resolved replace directories relative to the sibling *.toolset.local.json file so local overlays behave consistently regardless of the caller's working directory.\n  - Started lock rewrites from a copy of the validated existing lockfile so replaced packages preserve prior entries byte-for-byte and replaced-only packages never synthesize new entries.\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T21:34:26.649Z\nblocker_discovered: false\n---\n\n# T02: Wired sibling local replace overlays into ToolsetFile.Resolve while preserving lock entries and stop-on-first-error behavior.\n\n**Wired sibling local replace overlays into ToolsetFile.Resolve while preserving lock entries and stop-on-first-error behavior.**\n\n## What Happened\n\nUpdated ToolsetFile.Resolve() to load the optional sibling *.toolset.local.json overlay after existing lockfile validation and before package iteration. Resolution still walks modules in deterministic sorted order, but now branches per module: replaced modules load through Builder.AddFromDir using overlay-relative paths, while unreplaced modules continue through Builder.AddFromRegistryWithExpected with the existing lock metadata checks. The lock rewrite now starts from a copy of the validated existing lockfile so replaced packages preserve prior entries exactly as written, replaced-only packages do not synthesize new entries, and registry-backed packages still update their metadata after a successful resolve. Added focused resolve tests covering mixed replace + registry ordering, replaced-only lock omission, malformed overlays, bad replace paths, non-package directories, and overlay-relative path handling.\n\n## Verification\n\nPassed the focused slice verification with `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`, passed the broader regression suite with `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`, and re-ran the focused suite after `gofmt` on the modified Go files.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s` | 0 | ✅ pass | 1306ms |\n| 2 | `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s` | 0 | ✅ pass | 5167ms |\n| 3 | `gofmt -w toolset/toolset_file.go toolset/toolset_local.go toolset/toolset_file_test.go toolset/toolset_local_test.go && GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s` | 0 | ✅ pass | 1269ms |\n\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `toolset/toolset_file.go`\n- `toolset/toolset_local.go`\n- `toolset/toolset_file_test.go`\n- `toolset/toolset_local_test.go`\n- `.gsd/milestones/M001-zku9aj/slices/S11/tasks/T02-SUMMARY.md`\n",
       "description": "Consume the overlay contract from T01 inside `ToolsetFile.Resolve()` so declarative toolsets can mix local replacements and registry-backed packages without forking the builder path or regressing S10 lock guarantees. This task is the slice’s real integration point: load the optional overlay before resolution, keep sorted module ordering deterministic, call `Builder.AddFromDir` for replaced modules, preserve any pre-existing lock entries for those modules exactly as written, and prove with tests that bad replace paths fail early without rewriting the sibling lockfile.\n\n## Failure Modes\n\n| Dependency | On error | On timeout | On malformed response |\n|------------|----------|-----------|----------------------|\n| Overlay loader from T01 | Abort before package resolution starts and leave the existing lockfile untouched when the overlay is malformed. | N/A for local file I/O. | Reject invalid replace maps before any registry or local package load begins. |\n| `packaging.LoadDev` through `Builder.AddFromDir` | Return package-load or filesystem context for bad replace directories and stop before later sorted modules run. | N/A for local package loads. | Reject non-package directories or malformed dev package manifests without mutating the lockfile. |\n| Existing resolver/lock path for unreplaced modules | Preserve S09/S10 stop-on-first-error semantics and bubble resolver or integrity errors unchanged for unreplaced packages. | Respect caller cancellation across mixed local and registry resolution. | Do not let replace support hide cache or registry mismatches for unreplaced packages. |\n\n## Load Profile\n\n- **Shared resources**: Sibling overlay file, sibling lockfile, resolver cache, and local package directories.\n- **Per-operation cost**: One overlay lookup per resolve plus one local package load or one resolver call per declared package.\n- **10x breakpoint**: Linear package iteration remains fine; the important pressure point is preserving deterministic order and zero lock drift when local replacements are mixed with registry packages.\n\n## Negative Tests\n\n- **Malformed inputs**: malformed overlay file, invalid replace path, replace path pointing at a non-package directory, and existing lockfiles that are already malformed.\n- **Error paths**: bad replace paths fail before later sorted modules and leave the previous lockfile bytes untouched; unreplaced package failures still stop on the first sorted module.\n- **Boundary conditions**: a replaced package with an existing lock entry preserves it byte-for-byte, a replaced package with no lock entry does not create one, and mixed replace + registry resolution still produces deterministic package order.\n\n## Steps\n\n1. Update `ToolsetFile.Resolve()` to load the optional sibling local overlay before module iteration and keep the existing lockfile validation flow unchanged.\n2. During sorted package iteration, branch on `replace[module]`: call `Builder.AddFromDir` for replaced modules and preserve any existing lock entry unchanged; otherwise keep using `Builder.AddFromRegistryWithExpected` and accumulate updated lock metadata exactly as S10 does today.\n3. Extend resolve tests to prove mixed replace + registry ordering, untouched lock entries for replaced modules, no new lock entry creation for replaced-only packages, and no partial lock rewrite on replace failure.\n\n## Must-Haves\n\n- [ ] Replaced modules resolve from local directories through the existing builder/dev-package path, while unreplaced modules still use the registry resolver path.\n- [ ] Replace lookups honor deterministic sorted module iteration and do not reintroduce map-order nondeterminism.\n- [ ] Existing lock entries for replaced modules remain unchanged and replaced-only modules never synthesize new lock entries.\n- [ ] Any replace failure leaves the prior lockfile bytes untouched and surfaces file/path context that distinguishes overlay, directory, and package-load failures.\n\n## Verification\n\n- `GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s`\n- `GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s`",
       "estimate": "55m",
       "files": [
@@ -1779,6 +1788,39 @@
       "verdict": "✅ pass",
       "duration_ms": 4946,
       "created_at": "2026-03-28T21:25:57.663Z"
+    },
+    {
+      "id": 33,
+      "task_id": "T02",
+      "slice_id": "S11",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1306,
+      "created_at": "2026-03-28T21:34:26.649Z"
+    },
+    {
+      "id": 34,
+      "task_id": "T02",
+      "slice_id": "S11",
+      "milestone_id": "M001-zku9aj",
+      "command": "GOWORK=$(pwd)/go.work go test ./toolset/... ./registry/... -v -count=1 -timeout 60s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 5167,
+      "created_at": "2026-03-28T21:34:26.649Z"
+    },
+    {
+      "id": 35,
+      "task_id": "T02",
+      "slice_id": "S11",
+      "milestone_id": "M001-zku9aj",
+      "command": "gofmt -w toolset/toolset_file.go toolset/toolset_local.go toolset/toolset_file_test.go toolset/toolset_local_test.go && GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolset(Local|FileResolve)' -timeout 30s",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 1269,
+      "created_at": "2026-03-28T21:34:26.649Z"
     }
   ]
 }

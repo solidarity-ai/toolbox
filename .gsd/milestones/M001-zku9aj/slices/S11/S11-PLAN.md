@@ -46,7 +46,7 @@
   - Estimate: 40m
   - Files: toolset/toolset_local.go, toolset/toolset_local_test.go, toolset/toolbox.toolset.local.schema.json, toolset/toolset_file.go
   - Verify: GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run 'TestToolsetLocal|TestToolsetFileLoad' -timeout 30s
-- [ ] **T02: Wire replace-aware resolve branching and lock-preservation tests** — Consume the overlay contract from T01 inside `ToolsetFile.Resolve()` so declarative toolsets can mix local replacements and registry-backed packages without forking the builder path or regressing S10 lock guarantees. This task is the slice’s real integration point: load the optional overlay before resolution, keep sorted module ordering deterministic, call `Builder.AddFromDir` for replaced modules, preserve any pre-existing lock entries for those modules exactly as written, and prove with tests that bad replace paths fail early without rewriting the sibling lockfile.
+- [x] **T02: Wired sibling local replace overlays into ToolsetFile.Resolve while preserving lock entries and stop-on-first-error behavior.** — Consume the overlay contract from T01 inside `ToolsetFile.Resolve()` so declarative toolsets can mix local replacements and registry-backed packages without forking the builder path or regressing S10 lock guarantees. This task is the slice’s real integration point: load the optional overlay before resolution, keep sorted module ordering deterministic, call `Builder.AddFromDir` for replaced modules, preserve any pre-existing lock entries for those modules exactly as written, and prove with tests that bad replace paths fail early without rewriting the sibling lockfile.
 
 ## Failure Modes
 

@@ -226,5 +226,13 @@ func TestToolsetLocal(t *testing.T) {
 		if replaceDir != "../calc" {
 			t.Fatalf("ReplacementDir(%q) = %q, want %q", module, replaceDir, "../calc")
 		}
+		replaceDirAbs, ok := got.ReplacementDirAbs(module)
+		if !ok {
+			t.Fatalf("ReplacementDirAbs(%q) ok = false, want true", module)
+		}
+		wantAbs := filepath.Join(filepath.Dir(filename), "..", "calc")
+		if replaceDirAbs != filepath.Clean(wantAbs) {
+			t.Fatalf("ReplacementDirAbs(%q) = %q, want %q", module, replaceDirAbs, filepath.Clean(wantAbs))
+		}
 	})
 }

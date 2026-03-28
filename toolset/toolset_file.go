@@ -203,8 +203,16 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 		existingLock = &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{}}
 	}
 
+	local, err := f.LoadLocal()
+	if err != nil {
+		return ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+	}
+
 	builder := NewWithResolver(resolver)
-	updatedLock := &ToolsetLockFile{Packages: make(map[string]ToolsetLockEntry, len(f.parsedPackages))}
+	updatedLock := &ToolsetLockFile{Packages: make(map[string]ToolsetLockEntry, len(existingLock.Packages))}
+	for packageKey, entry := range existingLock.Packages {
+		updatedLock.Packages[packageKey] = entry
+	}
 	modules := make([]tooldef.ModulePath, 0, len(f.parsedPackages))
 	for module := range f.parsedPackages {
 		modules = append(modules, module)
@@ -216,6 +224,13 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 	for _, module := range modules {
 		version := f.parsedPackages[module]
 		packageKey := fmt.Sprintf("%s@%s", module, version)
+
+		if localDir, ok := local.ReplacementDirAbs(module); ok {
+			if err := builder.AddFromDir(localDir); err != nil {
+				return ResolvedToolset{}, fmt.Errorf("resolve %s from local replace %q: %w", packageKey, localDir, err)
+			}
+			continue
+		}
 
 		var expected *registry.ResolveMetadata
 		if existing, ok := existingLock.Packages[packageKey]; ok {

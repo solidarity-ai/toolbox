@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-28T08:26:27.017Z",
+  "exported_at": "2026-03-28T09:50:26.980Z",
   "milestones": [
     {
       "id": "M001-zku9aj",
@@ -147,7 +147,7 @@
       "milestone_id": "M001-zku9aj",
       "id": "S07",
       "title": "Pseudo-version resolution",
-      "status": "pending",
+      "status": "complete",
       "risk": "medium",
       "depends": [
         "S03",
@@ -155,9 +155,9 @@
       ],
       "demo": "After this: TBD",
       "created_at": "2026-03-28T00:39:27.198Z",
-      "completed_at": null,
-      "full_summary_md": "",
-      "full_uat_md": "",
+      "completed_at": "2026-03-28T09:17:02.649Z",
+      "full_summary_md": "---\nid: S07\nparent: M001-zku9aj\nmilestone: M001-zku9aj\nprovides:\n  - A reusable pseudo-version git fixture for local registry tests.\n  - GitSourceFallback support for pseudo-version pins that resolve a specific untagged commit and validate the encoded timestamp before packaging.\n  - A preserved tagged fast path, so later resolver orchestration can add pseudo-version support without regressing tagged package fetches.\nrequires:\n  - slice: S03\n    provides: Version.IsPseudo(), PseudoTimestamp(), and PseudoCommit() parsing semantics used by the new git resolver branch.\n  - slice: S06\n    provides: GitSourceFallback baseline implementation and tagged shallow-clone fetch path that S07 extended without regression.\naffects:\n  - S08\nkey_files:\n  - registry/git_source.go\n  - registry/git_source_test.go\n  - registry/testutil/gitfixture/gitfixture.go\n  - registry/testutil/gitfixture/gitfixture_test.go\n  - .gsd/PROJECT.md\n  - .gsd/KNOWLEDGE.md\nkey_decisions:\n  - Keep tagged git fetches on the existing shallow clone path and add a separate pseudo-version path that performs full clone, rev-parse resolution, UTC timestamp validation, and commit checkout before packaging.\n  - Derive pseudo-version fixture timestamps from the committed git author date in UTC so fixture metadata and resolver validation use the same semantics.\n  - Reuse the package-level mustVersion helper in registry tests instead of adding duplicate local parsing helpers in pseudo-version tests.\npatterns_established:\n  - When a version format encodes repository metadata, fixture builders should derive that metadata from git itself instead of hand-authoring strings.\n  - Preserve fast paths for the common case and split slower validation-heavy behavior into an explicit branch rather than widening a single clone path.\n  - Make resolver failures phase-specific in error text so downstream slices can distinguish clone, rev-parse, timestamp, checkout, and packaging failures from test output alone.\nobservability_surfaces:\n  - GitSourceFallback pseudo-version failures now surface git phase names directly in error text, including `git rev-parse`, `git show`, `timestamp mismatch`, `git checkout`, and `pack cloned repo`.\n  - `TestGitSource` now provides a focused regression surface for pseudo-version success and failure paths, which downstream slices can rerun when resolver orchestration changes.\ndrill_down_paths:\n  - .gsd/milestones/M001-zku9aj/slices/S07/tasks/T01-SUMMARY.md\n  - .gsd/milestones/M001-zku9aj/slices/S07/tasks/T02-SUMMARY.md\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-03-28T09:17:02.650Z\nblocker_discovered: false\n---\n\n# S07: Pseudo-version resolution\n\n**Extended GitSourceFallback so pseudo-version package pins resolve a specific untagged git commit with timestamp validation, while tagged versions keep the existing shallow clone fast path.**\n\n## What Happened\n\nS07 closed the gap between the FQN pseudo-version parsing from S03 and the git-source resolver from S06. T01 added a reusable gitfixture helper that creates a tagged repo from the calc fixture, appends a second untagged commit with an explicit author date, and returns deterministic pseudo-version metadata: repo path, pseudo-version string, UTC timestamp, 12-character short SHA, and full commit SHA. Its contract test proves the pseudo-version commit is untagged and that the short SHA resolves back to the intended full commit through the same file:// clone flow used elsewhere in registry tests.\n\nT02 then taught GitSourceFallback.Fetch to branch on Version.IsPseudo() instead of treating every version as a tag. Tagged versions still use the existing shallow `git clone --depth=1 --branch <tag>` path. Pseudo versions now take a separate full-clone path that resolves Version.PseudoCommit() with `git rev-parse --verify <prefix>^{commit}`, reads the commit author timestamp via `git show --format=%aI`, normalizes it to UTC, compares it to Version.PseudoTimestamp(), and only then checks out the resolved full commit before reusing the existing packaging.Pack and archive/manifest readback flow. The resulting PackageSource contract stays unchanged for S08.\n\nThe tests now cover pseudo-version happy-path behavior plus two important failure modes: an unknown commit prefix fails during `git rev-parse`, and a malformed pseudo-version timestamp fails before packaging runs. Existing tagged-path tests still pass, which proves S07 added pseudo-version support without regressing or slowing the tagged fast path.\n\n## Verification\n\nRan the two slice-plan verification commands with the required `GOWORK=$(pwd)/go.work` override and both passed.\n\n- `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s`\n  - Passed 8 subtests: tagged happy path, pseudo-version happy path, missing tag, missing pseudo commit prefix, pseudo timestamp mismatch, broken repo, and corrupt package.\n- `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s`\n  - Passed the full registry regression suite, including Cache, GitSource, GitHubReleaseSource, emulatetest, and gitfixture packages.\n\nI also confirmed the slice’s diagnostic surface through the test suite: pseudo-version failures now stay phase-specific in visible error text (`git rev-parse`, `timestamp mismatch`, `git checkout`, `pack cloned repo`) instead of collapsing into a generic packaging failure.\n\n## Requirements Advanced\n\n- R005 — GitSourceFallback now resolves pseudo-version package pins to a specific untagged git commit, validates the pseudo-version timestamp against the commit author time in UTC, and packages that checkout through the existing PackageSource contract.\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nR005 is advanced but not fully validated yet because cache population happens in S08 resolver orchestration, not inside GitSourceFallback. Private-repo auth is still deferred to later resolver/CLI slices.\n\n## Follow-ups\n\nS08 should compose GitHubReleaseSource and GitSourceFallback so pseudo-version requests can flow through the normal registry resolver path and populate the local cache after fetch.\n\n## Files Created/Modified\n\n- `registry/testutil/gitfixture/gitfixture.go` — Added PseudoVersionRepo metadata and CreatePseudoVersionRepoFromDir for deterministic pseudo-version fixture creation from the calc package fixture.\n- `registry/testutil/gitfixture/gitfixture_test.go` — Added a contract test proving the pseudo-version helper returns resolvable commit metadata for an untagged commit.\n- `registry/git_source.go` — Split tagged and pseudo-version fetch paths; added full-clone commit resolution, author timestamp validation, and checkout for pseudo versions while retaining shallow tag fetches.\n- `registry/git_source_test.go` — Extended TestGitSource with pseudo-version happy path, missing commit prefix, and timestamp mismatch coverage while keeping tagged-path tests intact.\n- `.gsd/PROJECT.md` — Updated current project state to reflect that registry now includes pseudo-version git resolution and that orchestration/lockfile/CLI slices remain pending.\n- `.gsd/KNOWLEDGE.md` — Recorded the pseudo-version timestamp rule: derive timestamps from `git show --format=%aI` and normalize to UTC for fixture and resolver tests.\n",
+      "full_uat_md": "# S07: Pseudo-version resolution — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28T09:17:02.650Z\n\n# S07: Pseudo-version resolution — UAT\n\n**Milestone:** M001-zku9aj\n**Written:** 2026-03-28T01:27:02+01:00\n\n# S07: Pseudo-version resolution — UAT\n\n**Milestone:** M001-zku9aj\n\n## UAT Type\n- UAT mode: artifact-driven\n- Why this mode is sufficient: Library code with no runtime behavior — validated entirely by unit tests against local git fixture repos.\n\n## Preconditions\n- Git available on PATH\n- Working directory: the M001-zku9aj worktree root\n- Run commands with `GOWORK=$(pwd)/go.work` so tests execute against the active worktree\n\n## Smoke Test\nRun `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s` — all 7 slice-relevant subtests pass, including the new pseudo-version cases.\n\n## Test Cases\n\n### 1. Pseudo-version fixture helper produces deterministic metadata for an untagged commit\n1. Run `GOWORK=$(pwd)/go.work go test ./registry/testutil/gitfixture -v -count=1 -run TestCreatePseudoVersionRepo -timeout 30s`\n2. **Expected:** Passes. The helper returns a non-empty pseudo-version string, UTC timestamp, 12-character short SHA, and full commit SHA. The short SHA resolves to the full commit in a clone, and the pseudo-version commit is untagged.\n\n### 2. Tagged fetch path still works unchanged\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource/happy_path -timeout 30s`\n2. **Expected:** Passes. Tagged versions still fetch via the existing shallow clone path and return non-empty archive and manifest bytes.\n\n### 3. Pseudo-version happy path resolves the requested untagged commit and packages it\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource/pseudo_version_happy_path -timeout 30s`\n2. **Expected:** Passes. GitSourceFallback resolves the pseudo-version commit, checks it out, packages it, and returns non-empty archive and manifest bytes. The manifest includes the calc package name.\n\n### 4. Unknown pseudo-version commit prefix fails during commit resolution\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource/pseudo_version_missing_commit_prefix -timeout 30s`\n2. **Expected:** Passes. Fetch returns a non-nil error and the error text includes `git rev-parse`, proving failure happened before checkout or packaging.\n\n### 5. Timestamp mismatch is rejected before packaging\n1. Run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource/pseudo_version_timestamp_mismatch -timeout 30s`\n2. **Expected:** Passes. Fetch returns a non-nil error containing `timestamp mismatch`. The error must not mention `pack cloned repo`, proving timestamp validation happens before packaging.\n\n## Edge Cases\n\n### 1. Full gitfixture regression\n1. Run `GOWORK=$(pwd)/go.work go test ./registry/testutil/gitfixture -v -count=1 -timeout 30s`\n2. **Expected:** Passes. Existing tagged, broken, missing-tag, and corrupt-package fixture helpers still work after adding pseudo-version support.\n\n### 2. Full registry regression\n1. Run `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s`\n2. **Expected:** Passes. Cache, GitHubReleaseSource, GitSourceFallback, emulate tests, and gitfixture tests all remain green with pseudo-version support in place.\n\n## Failure Signals\n- Any subtest in `GOWORK=$(pwd)/go.work go test ./registry -run TestGitSource` failing\n- `TestGitSource/pseudo_version_happy_path` failing to return archive or manifest bytes\n- `TestGitSource/pseudo_version_missing_commit_prefix` not surfacing a `git rev-parse` failure\n- `TestGitSource/pseudo_version_timestamp_mismatch` not surfacing `timestamp mismatch`, or surfacing a packaging error instead\n- `TestCreatePseudoVersionRepo` failing to prove the pseudo-version commit is untagged or that the short SHA resolves to the expected full commit\n\n## Not Proven By This UAT\n- Resolver orchestration that chooses between GitHubReleaseSource and GitSourceFallback (S08)\n- Cache population after pseudo-version fetches (S08)\n- Private-repo auth for git or GitHub sources (later slices)\n\n## Notes for Tester\nTests are local and require no network access. The tagged path should remain the fast shallow-clone path; only pseudo-version requests pay for a full clone plus commit-resolution and timestamp-validation steps.\n",
       "goal": "Extend GitSourceFallback so pseudo-version package pins resolve a specific untagged git commit, package that checkout locally, and preserve the existing tagged fast path.",
       "success_criteria": "## Demo\n\n- `GitSourceFallback.Fetch` accepts pseudo-version inputs in the form `v0.0.0-YYYYMMDDHHMMSS-<12-char sha>` and returns archive + manifest bytes built from the referenced untagged commit.\n\n## Must-Haves\n\n- R005 is advanced by resolving pseudo-version pins through the existing `PackageSource` seam so S08 can cache the returned bytes without interface changes.\n- Non-pseudo versions keep the current shallow tag checkout fast path unchanged.\n- Pseudo versions clone without shallow tag assumptions, resolve `Version.PseudoCommit()` to a full commit, verify the commit author timestamp matches `Version.PseudoTimestamp()` in UTC, check out that commit, then reuse the existing `packaging.Pack` + archive/manifest read-back flow.\n- `registry/testutil/gitfixture` exposes a deterministic helper that returns repo path plus pseudo-version metadata for a real untagged commit.\n- `registry/git_source_test.go` covers pseudo-version happy path, unknown pseudo commit prefix, and timestamp mismatch while existing tagged subtests keep passing.\n\n## Threat Surface\n\n- **Abuse**: Malformed pseudo-version strings and commit prefixes control git subprocess arguments; the implementation must route through typed `Version` helpers and explicit `git rev-parse` / `git checkout` calls instead of stringly fallback logic.\n- **Data exposure**: The slice operates on local temp clones and packaged bytes only; errors must not leak credentials or unrelated filesystem contents.\n- **Input trust**: `module` and `version` are untrusted inputs that reach git subprocesses and temp checkout paths.\n\n## Requirement Impact\n\n- **Requirements touched**: `R005` directly, `R004` indirectly because the tagged git-fetch behavior must remain intact.\n- **Re-verify**: Pseudo-version commit resolution, tagged checkout fast path, pack/readback behavior, and full `./registry/...` regression.\n- **Decisions revisited**: `D003` stays intact because `PackageSource` should not widen; `D005` remains the authoritative source for pseudo-version semantics.\n\n## Verification\n\n- `registry/testutil/gitfixture/gitfixture_test.go` via `GOWORK=$(pwd)/go.work go test ./registry/testutil/gitfixture -v -count=1 -run TestCreatePseudoVersionRepo -timeout 30s`\n- `registry/git_source_test.go` via `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s`\n- Full regression via `GOWORK=$(pwd)/go.work go test ./registry/... -v -count=1 -timeout 60s`",
       "proof_level": "- This slice proves: integration\n- Real runtime required: yes — local git subprocesses and `packaging.Pack` run against real temporary repositories\n- Human/UAT required: no",
@@ -181,11 +181,11 @@
       "completed_at": null,
       "full_summary_md": "",
       "full_uat_md": "",
-      "goal": "Build the Resolver that orchestrates sources (cache → GitHub Release → git-source) and wire it into Builder.AddFromRegistry.",
-      "success_criteria": "",
-      "proof_level": "",
-      "integration_closure": "",
-      "observability_impact": "",
+      "goal": "Wire `Cache`, `GitHubReleaseSource`, and `GitSourceFallback` into a `Resolver` that orchestrates cache-check → primary-source → fallback → cache-write → load, then expose it through `Builder.AddFromRegistry` so downstream code acquires registry packages the same way as local packages.",
+      "success_criteria": "- `registry.Resolver` returns cached packages without calling remote sources when the cache already contains the requested module+version.\n- Resolver source ordering is explicit: fallback occurs only when a source returns `ErrReleaseNotFound`; other source errors stop resolution immediately.\n- Resolver persists fetched archive+manifest bytes through `Cache.Put` and returns the package via `Cache.LoadArchive`, preserving the same integrity-verification path as archive loading elsewhere.\n- `toolset.Builder.AddFromRegistry(ctx, modulePath, version)` parses FQN strings, delegates to the resolver, appends the resulting loaded package, and reports a clear error when the builder has no resolver configured.\n- Tests prove the orchestration contract and builder integration with real archive fixtures, advancing requirement `R006`.",
+      "proof_level": "integration",
+      "integration_closure": "Consumes S04 cache layout plus the S05/S06 `PackageSource` implementations and closes the missing composition seam that downstream toolset parsing and CLI slices depend on. After this slice, registry-backed package loading exists behind the Builder API; remaining milestone work is declarative toolset parsing, lockfiles, replace directives, and CLI orchestration.",
+      "observability_impact": "Expose resolution failure phase through deterministic errors and tests so future agents can distinguish cache-hit behavior, release-not-found fallback, source failures, cache-write failures, and cache-load failures without tracing through multiple packages.",
       "sequence": 0,
       "replan_triggered_at": null
     },
@@ -667,6 +667,86 @@
       "observability_impact": "- Signals added/changed: git-phase errors for `clone`, `rev-parse`, `show`, `checkout`, and `pack` become distinct and test-visible.\n- How a future agent inspects this: run `GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestGitSource -timeout 30s`.\n- Failure state exposed: missing commit prefixes and timestamp mismatches produce explicit fetch errors instead of opaque downstream packaging failures.",
       "full_plan_md": "",
       "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S08",
+      "id": "T01",
+      "title": "Implement Resolver orchestration with cache-first source chaining and contract tests",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Add `registry/resolver.go` with a `Resolver` that owns a `*Cache` plus ordered `PackageSource` implementations. `Resolve(ctx, module, version)` should check `Cache.Has`/`LoadArchive` first, then try each source in order, continuing only when the current source returns `ErrReleaseNotFound`, otherwise failing immediately. On a successful fetch, it must write archive+manifest bytes through `Cache.Put` and return the package by calling `Cache.LoadArchive` so the same integrity path used by `AddFromArchive` is exercised. Cover this with focused tests in `registry/resolver_test.go` using mock `PackageSource` implementations plus real dist fixture bytes from `loadDistFixtureBytes` to prove cache-hit bypass, primary success with cache population, fallback on `ErrReleaseNotFound`, no fallback on non-404 source failure, and combined failure when all sources are exhausted.",
+      "estimate": "1h",
+      "files": [
+        "registry/resolver.go",
+        "registry/resolver_test.go",
+        "registry/cache_test.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./registry -v -count=1 -run TestResolver -timeout 30s",
+      "inputs": [
+        "registry/cache.go",
+        "registry/source.go",
+        "registry/git_source.go",
+        "registry/cache_test.go"
+      ],
+      "expected_output": [
+        "registry/resolver.go",
+        "registry/resolver_test.go"
+      ],
+      "observability_impact": "Makes resolver failure phases directly inspectable via error messages and test assertions, which matters because this slice crosses cache and source boundaries.",
+      "full_plan_md": "",
+      "sequence": 0
+    },
+    {
+      "milestone_id": "M001-zku9aj",
+      "slice_id": "S08",
+      "id": "T02",
+      "title": "Add Builder.AddFromRegistry with resolver injection and end-to-end builder tests",
+      "status": "pending",
+      "one_liner": "",
+      "narrative": "",
+      "verification_result": "",
+      "duration": "",
+      "completed_at": null,
+      "blocker_discovered": false,
+      "deviations": "",
+      "known_issues": "",
+      "key_files": [],
+      "key_decisions": [],
+      "full_summary_md": "",
+      "description": "Extend `toolset.Builder` to optionally hold a registry resolver while keeping existing `New()` behavior intact for local-only callers. Add a constructor or option such as `NewWithResolver(...)` and implement `AddFromRegistry(ctx, modulePath, version string) error` in `toolset/toolset.go`. The method must parse inputs with `tool.ParseModulePath` and `tool.ParseVersion`, return a clear error when no resolver is configured, call resolver resolution, and append the resulting `packaging.LoadedPackage` so `Packages()` and `Resolve()` behave the same as they do for `AddFromDir` and `AddFromArchive`. Add tests in `toolset/toolset_test.go` that use a pre-populated temp cache and a real dist fixture package to prove the builder can load from the registry path without network access, and that the nil-resolver path returns a specific error instead of panicking.",
+      "estimate": "45m",
+      "files": [
+        "toolset/toolset.go",
+        "toolset/toolset_test.go",
+        "registry/resolver.go",
+        "registry/cache.go"
+      ],
+      "verify": "GOWORK=$(pwd)/go.work go test ./toolset -v -count=1 -run TestBuilderAddFromRegistry -timeout 30s",
+      "inputs": [
+        "toolset/toolset.go",
+        "toolset/toolset_test.go",
+        "tool/fqn.go",
+        "registry/resolver.go",
+        "registry/cache.go"
+      ],
+      "expected_output": [
+        "toolset/toolset.go",
+        "toolset/toolset_test.go"
+      ],
+      "observability_impact": "Surfaces configuration errors at the public Builder boundary, making missing resolver wiring immediately diagnosable by callers.",
+      "full_plan_md": "",
+      "sequence": 0
     }
   ],
   "decisions": [
@@ -800,6 +880,30 @@
       "rationale": "Tagged requests already have an efficient fast path, while pseudo-versions need full history access to resolve commit prefixes and validate the encoded timestamp before packaging. Splitting the paths preserves existing performance for tags and makes pseudo-version failure phases observable in tests.",
       "revisable": "Yes",
       "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 12,
+      "id": "D012",
+      "when_context": "M001-zku9aj/S07",
+      "scope": "test-infrastructure",
+      "decision": "Pseudo-version fixture timestamp derivation",
+      "choice": "Derive pseudo-version timestamps from the committed git author date in UTC",
+      "rationale": "The S07 pseudo-version fixture and resolver both depend on the same timestamp semantics. Using git's recorded author timestamp in UTC keeps fixture output aligned with tool.Version pseudo-version parsing and prevents tests from passing with metadata that does not match the actual commit.",
+      "revisable": "Yes",
+      "made_by": "agent",
+      "superseded_by": null
+    },
+    {
+      "seq": 13,
+      "id": "D013",
+      "when_context": "M001-zku9aj/S07 follow-up",
+      "scope": "architecture",
+      "decision": "Pseudo-version timestamp semantics",
+      "choice": "Use git commit time (`%cI`), not author time (`%aI`), when deriving and validating pseudo-version timestamps",
+      "rationale": "The prior S07 implementation used author time, but Go pseudo-version semantics use commit time. The fixture now intentionally makes author and commit timestamps differ, and both the resolver and tests validate against commit time in UTC.",
+      "revisable": "No",
+      "made_by": "human",
       "superseded_by": null
     }
   ],

@@ -1,4 +1,4 @@
-# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
+# M001-zku9aj: M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download - Context
 
 ## Vision
 M001-zku9aj: M001-zku9aj: M001-zku9aj: Tool Registry, FQN, and Auto-Download — Context
@@ -383,7 +383,7 @@ Run `go test ./registry -v -count=1 -run TestGitSource -timeout 30s` — all 4 s
 Tests run in ~0.13s total. No network access required — all tests clone local file:// repos created by gitfixture helpers. No Node.js/npx dependency (unlike S05's emulate tests).
 
  |
-| S07 | Pseudo-version resolution | medium | S03, S06 | ⬜ | After this: TBD |
+| S07 | Pseudo-version resolution | medium | S03, S06 | ✅ | After this: TBD |
 | S08 | Resolver orchestration + Builder.AddFromRegistry | medium | S05, S06 | ⬜ | After this: TBD |
 | S09 | Toolset file parsing | medium | S08 | ⬜ | After this: TBD |
 | S10 | Lockfile generation and verification | medium | S09 | ⬜ | After this: TBD |

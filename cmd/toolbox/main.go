@@ -5,10 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 
+	mcpgoserver "github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
@@ -17,13 +20,17 @@ import (
 const defaultToolsetFilename = "toolbox.toolset.json"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := runWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	return runWithIO(args, os.Stdin, stdout, stderr)
+}
+
+func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		printUsage(stderr)
 		return fmt.Errorf("missing subcommand")
@@ -34,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runResolve(args[1:], stdout)
 	case "versions":
 		return runVersions(args[1:], stdout)
+	case "mcp":
+		return runMCP(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -146,6 +155,54 @@ func runVersions(args []string, stdout io.Writer) error {
 	return nil
 }
 
+func runMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		printUsage(stderr)
+		return fmt.Errorf("mcp: missing subcommand")
+	}
+
+	switch args[0] {
+	case "serve":
+		return runMCPServe(args[1:], stdin, stdout, stderr)
+	default:
+		printUsage(stderr)
+		return fmt.Errorf("mcp: unknown subcommand %q", args[0])
+	}
+}
+
+func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	file := fs.String("file", defaultToolsetFilename, "toolset file")
+	fileShort := fs.String("f", "", "toolset file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *fileShort != "" {
+		file = fileShort
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("mcp serve: unexpected args: %s", strings.Join(fs.Args(), " "))
+	}
+
+	resolver, err := newResolver()
+	if err != nil {
+		return err
+	}
+	ts, err := toolsetfile.Load(*file)
+	if err != nil {
+		return err
+	}
+	resolved, err := ts.Resolve(context.Background(), resolver)
+	if err != nil {
+		return err
+	}
+
+	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(resolved))
+	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
+	return stdioServer.Listen(context.Background(), stdin, stdout)
+}
+
 func newResolver() (*registry.Resolver, error) {
 	cache, err := registry.NewCache("")
 	if err != nil {
@@ -187,4 +244,5 @@ func printUsage(f io.Writer) {
 	fmt.Fprintln(f, "usage:")
 	fmt.Fprintln(f, "  toolbox resolve [--file FILE] [--upgrade MODULE]")
 	fmt.Fprintln(f, "  toolbox versions [--file FILE] <module>")
+	fmt.Fprintln(f, "  toolbox mcp serve [--file FILE]")
 }

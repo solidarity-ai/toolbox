@@ -4,14 +4,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/packaging/internal/manifest"
 	"github.com/solidarity-ai/toolbox/packaging/internal/source"
+	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
 )
 
 func TestPack(t *testing.T) {
@@ -324,6 +328,54 @@ func TestPackBundlesExecutables(t *testing.T) {
 	}
 }
 
+func TestPackSameCommittedPackageTwiceProducesIdenticalArchive(t *testing.T) {
+	t.Parallel()
+
+	srcDir := setupTestPackage(t)
+	repoDir := gitfixture.CreateTaggedRepoFromDir(t, "v1.0.0", srcDir)
+
+	clone1 := filepath.Join(t.TempDir(), "clone1")
+	runGitClone(t, repoDir, clone1)
+	time.Sleep(2 * time.Second)
+	clone2 := filepath.Join(t.TempDir(), "clone2")
+	runGitClone(t, repoDir, clone2)
+
+	loaded1, err := source.LoadDir(clone1)
+	if err != nil {
+		t.Fatalf("LoadDir(clone1): %v", err)
+	}
+	loaded2, err := source.LoadDir(clone2)
+	if err != nil {
+		t.Fatalf("LoadDir(clone2): %v", err)
+	}
+
+	out1 := t.TempDir()
+	result1, err := Pack(loaded1, out1)
+	if err != nil {
+		t.Fatalf("Pack(clone1): %v", err)
+	}
+	out2 := t.TempDir()
+	result2, err := Pack(loaded2, out2)
+	if err != nil {
+		t.Fatalf("Pack(clone2): %v", err)
+	}
+
+	archive1, err := os.ReadFile(result1.ArchivePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", result1.ArchivePath, err)
+	}
+	archive2, err := os.ReadFile(result2.ArchivePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", result2.ArchivePath, err)
+	}
+
+	hash1 := sha256.Sum256(archive1)
+	hash2 := sha256.Sum256(archive2)
+	if hash1 != hash2 {
+		t.Fatalf("same committed package produced different archive hashes: clone1=%s clone2=%s", hex.EncodeToString(hash1[:]), hex.EncodeToString(hash2[:]))
+	}
+}
+
 func setupTestPackage(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -350,6 +402,15 @@ func setupTestPackageWithoutIdempotent(t *testing.T) string {
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
 	return dir
+}
+
+func runGitClone(t *testing.T, repoDir string, cloneDir string) {
+	t.Helper()
+	cmd := exec.Command("git", "clone", fmt.Sprintf("file://%s", repoDir), cloneDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git clone %s %s failed: %v\n%s", repoDir, cloneDir, err, strings.TrimSpace(string(output)))
+	}
 }
 
 func writePkgManifest(t *testing.T, path string, pkg any) {

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +15,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/mark3labs/mcp-go/client"
+	clienttransport "github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
@@ -341,6 +347,110 @@ func TestRunResolveSiblingLocalOverlayPreservesLockfile(t *testing.T) {
 	}
 }
 
+func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	packageDir := filepath.Join(workspace, "package-repo")
+	consumerDir := filepath.Join(workspace, "consumer-repo")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", packageDir, err)
+	}
+	if err := os.MkdirAll(consumerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", consumerDir, err)
+	}
+
+	copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), packageDir)
+
+	toolsetPath := filepath.Join(consumerDir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+		"tools": []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+	})
+	writeJSONFile(t, filepath.Join(consumerDir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]string{"example.com/acme/calc": "../package-repo"},
+	})
+
+	serverRead, clientWrite := io.Pipe()
+	clientRead, serverWrite := io.Pipe()
+	defer clientRead.Close()
+	defer clientWrite.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- runWithIO(
+			[]string{"mcp", "serve", "--file", toolsetPath},
+			serverRead,
+			serverWrite,
+			io.Discard,
+		)
+	}()
+
+	stdio := clienttransport.NewIO(clientRead, clientWrite, io.NopCloser(strings.NewReader("")))
+	if err := stdio.Start(context.Background()); err != nil {
+		t.Fatalf("stdio.Start(): %v", err)
+	}
+	defer stdio.Close()
+
+	c := client.NewClient(stdio)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "toolbox-cli-test", Version: "1.0.0"}
+	initReq.Params.Capabilities = mcp.ClientCapabilities{}
+	initRes, err := c.Initialize(ctx, initReq)
+	if err != nil {
+		t.Fatalf("Initialize(): %v", err)
+	}
+	if initRes.ServerInfo.Name != "toolbox-mcp-server" {
+		t.Fatalf("server name = %q, want toolbox-mcp-server", initRes.ServerInfo.Name)
+	}
+
+	tools, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools(): %v", err)
+	}
+	if len(tools.Tools) != 3 {
+		t.Fatalf("len(tools) = %d, want 3", len(tools.Tools))
+	}
+	if !hasToolNamed(tools.Tools, "calc.add") {
+		t.Fatalf("tools = %#v, want calc.add", tools.Tools)
+	}
+
+	callReq := mcp.CallToolRequest{}
+	callReq.Params.Name = "calc.add"
+	callReq.Params.Arguments = map[string]any{"a": 2.0, "b": 3.0}
+	result, err := c.CallTool(ctx, callReq)
+	if err != nil {
+		t.Fatalf("CallTool(): %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool() returned MCP error: %#v", result)
+	}
+	if len(result.Content) == 0 {
+		t.Fatalf("CallTool() content = %#v, want at least one content item", result.Content)
+	}
+
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("first content item = %#v, want text content", result.Content[0])
+	}
+	if text.Text != "5" {
+		t.Fatalf("text content = %q, want 5", text.Text)
+	}
+
+	_ = stdio.Close()
+	_ = clientWrite.Close()
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("mcp serve exited with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mcp serve to exit")
+	}
+}
+
 func TestRunResolveRejectsInvalidUpgradeModuleArgument(t *testing.T) {
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
@@ -451,6 +561,41 @@ func TestRunResolveUpgradeRewritesToolsetAndLockfile(t *testing.T) {
 	}
 	if _, ok := lock.Packages["github.com/admin/stub@v1.2.0"]; !ok {
 		t.Fatalf("lock packages = %#v, want github.com/admin/stub@v1.2.0", lock.Packages)
+	}
+}
+
+func hasToolNamed(tools []mcp.Tool, want string) bool {
+	for _, tool := range tools {
+		if tool.Name == want {
+			return true
+		}
+	}
+	return false
+}
+
+func copyFixtureDir(t *testing.T, src, dst string) {
+	t.Helper()
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", src, err)
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := os.MkdirAll(dstPath, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%q): %v", dstPath, err)
+			}
+			copyFixtureDir(t, srcPath, dstPath)
+			continue
+		}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", srcPath, err)
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", dstPath, err)
+		}
 	}
 }
 

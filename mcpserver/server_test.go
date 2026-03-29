@@ -26,6 +26,45 @@ func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
 	assertContains(t, names, "calc.asyncAdd")
 }
 
+func TestMCPServerExposesResolvedParamSchema(t *testing.T) {
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	tools := h.ListTools()
+
+	var calcAdd *mcp.Tool
+	for i := range tools.Tools {
+		if tools.Tools[i].Name == "calc.add" {
+			calcAdd = &tools.Tools[i]
+			break
+		}
+	}
+	if calcAdd == nil {
+		t.Fatal("expected calc.add in MCP tool list")
+	}
+
+	if calcAdd.InputSchema.Type != "object" {
+		t.Fatalf("input schema type = %q, want object", calcAdd.InputSchema.Type)
+	}
+	if len(calcAdd.InputSchema.Properties) == 0 {
+		t.Fatalf("input schema properties = %#v, want non-empty schema", calcAdd.InputSchema.Properties)
+	}
+
+	aSchema, ok := calcAdd.InputSchema.Properties["a"].(map[string]any)
+	if !ok {
+		t.Fatalf("property a = %#v, want schema object", calcAdd.InputSchema.Properties["a"])
+	}
+	if aSchema["type"] != "number" {
+		t.Fatalf("property a type = %#v, want number", aSchema["type"])
+	}
+
+	bSchema, ok := calcAdd.InputSchema.Properties["b"].(map[string]any)
+	if !ok {
+		t.Fatalf("property b = %#v, want schema object", calcAdd.InputSchema.Properties["b"])
+	}
+	if bSchema["type"] != "number" {
+		t.Fatalf("property b type = %#v, want number", bSchema["type"])
+	}
+}
+
 func TestMCPServerCallsInvokeForTool(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
 
@@ -36,16 +75,15 @@ func TestMCPServerCallsInvokeForTool(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["tool"]; got != "calc.add" {
-		t.Fatalf("expected tool calc.add, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
 	}
-	if got := structured["result"]; got != "10" {
-		t.Fatalf("expected result 10, got %#v", got)
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
 	}
-	if got := structured["status"]; got != "stub-invoked" {
-		t.Fatalf("expected status stub-invoked, got %#v", got)
+	if text.Text != "10" {
+		t.Fatalf("expected result 10, got %#v", text.Text)
 	}
 }
 
@@ -59,10 +97,15 @@ func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["result"]; got != "11" {
-		t.Fatalf("expected result 11, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
+	}
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "11" {
+		t.Fatalf("expected result 11, got %#v", text.Text)
 	}
 }
 
@@ -107,13 +150,15 @@ func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {
 		}
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["tool"]; got != "calc.add" {
-		t.Fatalf("expected tool calc.add, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
 	}
-	if got := structured["result"]; got != "10" {
-		t.Fatalf("expected result 10, got %#v", got)
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "10" {
+		t.Fatalf("expected result 10, got %#v", text.Text)
 	}
 }
 
@@ -130,13 +175,15 @@ func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["tool"]; got != "users.list" {
-		t.Fatalf("expected tool users.list, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
 	}
-	if got := structured["result"]; got != "wasm-ada@example.com" {
-		t.Fatalf("expected parsed tool result, got %#v", got)
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "wasm-ada@example.com" {
+		t.Fatalf("expected parsed tool result, got %#v", text.Text)
 	}
 }
 
@@ -188,10 +235,15 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["result"]; got != "wasm-ada@example.com" {
-		t.Fatalf("expected parsed tool result, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
+	}
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "wasm-ada@example.com" {
+		t.Fatalf("expected parsed tool result, got %#v", text.Text)
 	}
 }
 
@@ -342,15 +394,14 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["tool"]; got != "http-client.fetch" {
-		t.Fatalf("expected tool http-client.fetch, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
 	}
-	resultStr, ok := structured["result"].(string)
+	text, ok := mcp.AsTextContent(result.Content[0])
 	if !ok {
-		t.Fatalf("expected string result, got %#v", structured["result"])
+		t.Fatalf("expected text content, got %#v", result.Content[0])
 	}
+	resultStr := text.Text
 	if !strings.Contains(resultStr, "Status: 200 OK") {
 		t.Fatalf("expected result to contain 'Status: 200 OK', got:\n%s", resultStr)
 	}
@@ -405,12 +456,14 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 		}
 		t.Fatalf("expected non-error result")
 	}
-
-	structured := mcptest.StructuredMap(t, result)
-	resultStr, ok := structured["result"].(string)
-	if !ok {
-		t.Fatalf("expected string result, got %#v", structured["result"])
+	if len(result.Content) == 0 {
+		t.Fatalf("expected text content")
 	}
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	resultStr := text.Text
 
 	// The tool returns JSON with status and body.
 	var fetchResult struct {

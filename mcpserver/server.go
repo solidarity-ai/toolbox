@@ -2,11 +2,12 @@ package mcpserver
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/invoke"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -19,15 +20,30 @@ func New(resolved toolset.ResolvedToolset) *server.MCPServer {
 	)
 
 	for _, tool := range resolved.Tools() {
-		mcpTool := mcp.NewTool(
-			tool.Name,
-			mcp.WithDescription(tool.Description),
-		)
-
+		mcpTool := newMCPTool(tool)
 		mcpServer.AddTool(mcpTool, handleToolCall(resolved, tool.Name))
 	}
 
 	return mcpServer
+}
+
+func newMCPTool(tool tooldef.ResolvedTool) mcp.Tool {
+	if len(tool.ParamsSchema) == 0 {
+		return mcp.NewTool(
+			tool.Name,
+			mcp.WithDescription(tool.Description),
+		)
+	}
+
+	rawSchema, err := json.Marshal(tool.ParamsSchema)
+	if err != nil {
+		return mcp.NewTool(
+			tool.Name,
+			mcp.WithDescription(tool.Description),
+		)
+	}
+
+	return mcp.NewToolWithRawSchema(tool.Name, tool.Description, rawSchema)
 }
 
 func handleToolCall(resolved toolset.ResolvedToolset, toolName string) server.ToolHandlerFunc {
@@ -37,16 +53,7 @@ func handleToolCall(resolved toolset.ResolvedToolset, toolName string) server.To
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		structured := map[string]any{
-			"tool":   toolName,
-			"result": ran,
-			"status": "stub-invoked",
-		}
-
-		return mcp.NewToolResultStructured(
-			structured,
-			fmt.Sprintf("invoked %s", toolName),
-		), nil
+		return mcp.NewToolResultText(ran), nil
 	}
 }
 

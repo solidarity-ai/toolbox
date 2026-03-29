@@ -179,6 +179,7 @@ func addFSToTar(tw *tar.Writer, fsys fs.FS) error {
 			return err
 		}
 		header.Name = path
+		normalizeTarHeader(header)
 
 		if err := tw.WriteHeader(header); err != nil {
 			return err
@@ -207,11 +208,22 @@ func addBytesToTar(tw *tar.Writer, name string, data []byte) error {
 		Mode: 0o644,
 		Size: int64(len(data)),
 	}
+	normalizeTarHeader(header)
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
 	_, err := tw.Write(data)
 	return err
+}
+
+func normalizeTarHeader(header *tar.Header) {
+	header.ModTime = time.Unix(0, 0)
+	header.AccessTime = time.Unix(0, 0)
+	header.ChangeTime = time.Unix(0, 0)
+	header.Uid = 0
+	header.Gid = 0
+	header.Uname = ""
+	header.Gname = ""
 }
 
 // archiveMemFS is an in-memory fs.FS built from a tar archive.

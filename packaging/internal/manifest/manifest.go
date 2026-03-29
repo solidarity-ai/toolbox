@@ -181,9 +181,9 @@ func InferAccessMode(entryTS string) tooldef.AccessMode {
 	switch verb {
 	case "list", "get", "read", "fetch", "search", "find", "describe":
 		return tooldef.AccessModeReadOnly
-	case "create", "add", "send", "post", "clone", "new":
+	case "create", "add", "clone", "new":
 		return tooldef.AccessModeReversible
-	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit":
+	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit", "send", "post":
 		return tooldef.AccessModeIrreversible
 	default:
 		return tooldef.AccessModeIrreversible

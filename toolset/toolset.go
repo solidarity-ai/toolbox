@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/cel-go/cel"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -14,11 +15,13 @@ import (
 // without a registry resolver.
 var ErrNoResolver = errors.New("no registry resolver configured")
 
-// ResolvedToolset is a stubbed resolved toolset for the first outside-in tests.
-//
-// For now it only carries the visible tools for one request.
+// ResolvedToolset carries the visible tools and their compiled bindings.
 type ResolvedToolset struct {
-	tools []tooldef.ResolvedTool
+	tools        []tooldef.ResolvedTool
+	bindings     map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
+	hiddenParams map[string]map[string]bool            // tool name -> set of hidden param names
+	context      map[string]any
+	celEnv       *cel.Env
 }
 
 // Builder incrementally assembles a toolset from source package directories.
@@ -104,16 +107,96 @@ func (b *Builder) Packages() []tooldef.Package {
 	return out
 }
 
-// Resolve materializes one visible tool per loaded package tool.
-func (b *Builder) Resolve() ResolvedToolset {
+// Resolve materializes visible tools from loaded packages, compiling any
+// bindings from cfg. An empty Config{} produces the same result as before
+// bindings existed — all tools visible, no bindings applied.
+func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
 	var tools []tooldef.ResolvedTool
 	for _, loaded := range b.packages {
 		tools = append(tools, loaded.ResolvedTools()...)
 	}
-	return NewResolvedToolset(tools)
+	return b.resolveTools(tools, cfg)
 }
 
-// NewResolvedToolset creates a resolved toolset from a visible tool list.
+func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
+	// Build binding lookup: tool ref -> param name -> Binding
+	toolBindings := make(map[string]map[string]Binding, len(cfg.Tools))
+	for _, bt := range cfg.Tools {
+		toolBindings[bt.ToolRef] = bt.Bindings
+	}
+
+	env, err := newCELEnv()
+	if err != nil {
+		return ResolvedToolset{}, fmt.Errorf("create CEL env: %w", err)
+	}
+
+	allCompiled := make(map[string]map[string]compiledBinding, len(toolBindings))
+	allHidden := make(map[string]map[string]bool)
+
+	for _, tool := range tools {
+		// Start with explicit per-tool bindings
+		bindings := make(map[string]Binding)
+		if tb, ok := toolBindings[tool.Name]; ok {
+			for k, v := range tb {
+				bindings[k] = v
+			}
+		}
+
+		// Merge resource-level bindings from the two-tier model:
+		// ResolvedTool.ResourceParams maps param name -> canonical binding name
+		// Config.ResourceBindings maps canonical name -> Binding
+		for _, rp := range tool.ResourceParams {
+			// Skip if explicit per-tool binding already set
+			if _, exists := bindings[rp.Name]; exists {
+				continue
+			}
+			if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
+				bindings[rp.Name] = rb
+			}
+		}
+
+		if len(bindings) == 0 {
+			continue
+		}
+
+		compiled, err := compileBindings(env, bindings)
+		if err != nil {
+			return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
+		}
+		allCompiled[tool.Name] = compiled
+
+		hidden := make(map[string]bool)
+		for paramName, binding := range bindings {
+			if binding.Hidden {
+				hidden[paramName] = true
+			}
+		}
+		if len(hidden) > 0 {
+			allHidden[tool.Name] = hidden
+		}
+	}
+
+	out := make([]tooldef.ResolvedTool, len(tools))
+	copy(out, tools)
+	return ResolvedToolset{
+		tools:        out,
+		bindings:     allCompiled,
+		hiddenParams: allHidden,
+		context:      cfg.Context,
+		celEnv:       env,
+	}, nil
+}
+
+// ResolveTools resolves a pre-built list of tools with the given config.
+// This is useful for testing with synthetic tool definitions.
+func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
+	b := &Builder{}
+	// Inject pre-resolved tools directly into the resolve flow.
+	return b.resolveTools(tools, cfg)
+}
+
+// NewResolvedToolset creates a resolved toolset from a visible tool list
+// with no bindings. This is a convenience for callers that don't use bindings.
 func NewResolvedToolset(tools []tooldef.ResolvedTool) ResolvedToolset {
 	out := make([]tooldef.ResolvedTool, len(tools))
 	copy(out, tools)

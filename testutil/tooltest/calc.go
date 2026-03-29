@@ -35,7 +35,11 @@ func CalcToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromDir(calcFixtureDir()); err != nil {
 		t.Fatalf("add calc package dir: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+	return resolved
 }
 
 // CalcDistToolset loads the calc-dist golden fixture (archive) into a resolved toolset.
@@ -49,7 +53,11 @@ func CalcDistToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
 		t.Fatalf("add calc-dist archive: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+	return resolved
 }
 
 func calcDistFixtureDir() string {
@@ -57,7 +65,7 @@ func calcDistFixtureDir() string {
 	if !ok {
 		panic("tooltest: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc-dist")
+	return filepath.Join(filepath.Dir(file), "..", "testdata", "goldens", "distpkgs", "calc-dist")
 }
 
 // VFSTestDistToolset loads the vfs-test-dist golden fixture (archive) into a resolved toolset.
@@ -71,7 +79,11 @@ func VFSTestDistToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromArchive(archivePath, manifestPath); err != nil {
 		t.Fatalf("add vfs-test-dist archive: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+	return resolved
 }
 
 func vfsTestDistFixtureDir() string {
@@ -79,10 +91,11 @@ func vfsTestDistFixtureDir() string {
 	if !ok {
 		panic("tooltest: runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "vfs-test-dist")
+	return filepath.Join(filepath.Dir(file), "..", "testdata", "goldens", "distpkgs", "vfs-test-dist")
 }
 
-func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
+// CalcResolvedTool returns the full ResolvedTool (with Sig) for a calc tool.
+func CalcResolvedTool(t testing.TB, name string) tooldef.ResolvedTool {
 	t.Helper()
 
 	pkg, err := packaging.LoadDev(calcFixtureDir())
@@ -91,14 +104,21 @@ func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
 	}
 	for _, tool := range pkg.ResolvedTools() {
 		if tool.Name == name {
-			if tool.TS == nil {
-				t.Fatalf("tool %s has no TS definition", name)
-			}
-			return *tool.TS
+			return tool
 		}
 	}
 	t.Fatalf("expected tool %s", name)
-	return tooldef.TSToolDef{}
+	return tooldef.ResolvedTool{}
+}
+
+func mustCalcTool(t testing.TB, name string) tooldef.TSToolDef {
+	t.Helper()
+
+	tool := CalcResolvedTool(t, name)
+	if tool.TS == nil {
+		t.Fatalf("tool %s has no TS definition", name)
+	}
+	return *tool.TS
 }
 
 func calcFixtureDir() string {
@@ -107,4 +127,16 @@ func calcFixtureDir() string {
 		panic("tooltest: runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "..", "fixtures", "toolbox.pkgs", "calc")
+}
+
+// CalcBuilder returns a *toolset.Builder loaded with the calc fixture package.
+// The caller can then call builder.Resolve(cfg) with any desired Config.
+func CalcBuilder(t testing.TB) *toolset.Builder {
+	t.Helper()
+
+	builder := toolset.New()
+	if err := builder.AddFromDir(calcFixtureDir()); err != nil {
+		t.Fatalf("add calc package dir: %v", err)
+	}
+	return builder
 }

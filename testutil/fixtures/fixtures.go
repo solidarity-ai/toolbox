@@ -30,20 +30,20 @@ func SourceDirs() []string {
 	return dirs
 }
 
-// DistDirs returns the absolute paths of all dist package fixture directories
+// DistDirs returns the absolute paths of all dist package golden directories
 // (those ending in -dist and containing a toolbox.pkg.json).
 func DistDirs() []string {
-	pkgsDir := filepath.Join(fixturesDir(), "toolbox.pkgs")
-	entries, err := os.ReadDir(pkgsDir)
+	distpkgsDir := filepath.Join(fixturesDir(), "..", "testdata", "goldens", "distpkgs")
+	entries, err := os.ReadDir(distpkgsDir)
 	if err != nil {
-		panic("fixtures: read toolbox.pkgs dir: " + err.Error())
+		panic("fixtures: read testdata/goldens/distpkgs dir: " + err.Error())
 	}
 	var dirs []string
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-dist") {
 			continue
 		}
-		dir := filepath.Join(pkgsDir, entry.Name())
+		dir := filepath.Join(distpkgsDir, entry.Name())
 		if _, err := os.Stat(filepath.Join(dir, packaging.PkgManifestFilename)); err == nil {
 			dirs = append(dirs, dir)
 		}

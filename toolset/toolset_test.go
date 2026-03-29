@@ -108,7 +108,10 @@ func TestBuilderAddFromRegistry(t *testing.T) {
 			t.Fatalf("AddFromRegistry() error: %v", err)
 		}
 
-		resolved := b.Resolve()
+		resolved, err := b.Resolve(Config{})
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
 		tools := resolved.Tools()
 		if len(tools) == 0 {
 			t.Fatal("expected at least one resolved tool, got none")

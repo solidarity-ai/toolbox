@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/jinzhu/inflection"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -50,10 +52,17 @@ type DevManifest struct {
 	Tools                     []DevManifestTool   `json:"tools"`
 }
 
+// DevManifestToolResource groups resource-related overrides for a tool.
+type DevManifestToolResource struct {
+	Bindings map[string]string `json:"bindings,omitempty"`
+	Mode     string            `json:"mode,omitempty"` // "collection" or "member", empty means infer
+}
+
 type DevManifestTool struct {
-	EntryTS    string              `json:"entry_ts"`
-	Idempotent *bool               `json:"idempotent"`
-	AccessMode *tooldef.AccessMode `json:"accessMode"`
+	EntryTS    string                   `json:"entry_ts"`
+	Idempotent *bool                    `json:"idempotent"`
+	AccessMode *tooldef.AccessMode      `json:"accessMode"`
+	Resource   *DevManifestToolResource `json:"resource,omitempty"`
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -82,6 +91,11 @@ func ParseDev(data []byte) (DevManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
 	}
+	for _, tool := range manifest.Tools {
+		if err := validateEntryName(tool.EntryTS); err != nil {
+			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
+		}
+	}
 	return manifest, nil
 }
 
@@ -109,10 +123,26 @@ func Compile(dev DevManifest) tooldef.Package {
 		if tool.AccessMode != nil {
 			accessMode = *tool.AccessMode
 		}
+
+		var resourceMode string
+		var resourceBindings map[string]string
+		if tool.Resource != nil {
+			resourceMode = tool.Resource.Mode
+			resourceBindings = tool.Resource.Bindings
+		}
+		resourceParams := InferResourceParamsWithMode(tool.EntryTS, resourceMode)
+		// Apply manifest overrides for binding names
+		for j := range resourceParams {
+			if override, ok := resourceBindings[resourceParams[j].Name]; ok {
+				resourceParams[j].BindingName = override
+			}
+		}
+
 		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:    tool.EntryTS,
-			Idempotent: tool.Idempotent,
-			AccessMode: accessMode,
+			EntryTS:        tool.EntryTS,
+			Idempotent:     tool.Idempotent,
+			AccessMode:     accessMode,
+			ResourceParams: resourceParams,
 		}
 	}
 	return pkg
@@ -152,18 +182,133 @@ func InferAccessMode(entryTS string) tooldef.AccessMode {
 	case "list", "get", "read", "fetch", "search", "find", "describe":
 		return tooldef.AccessModeReadOnly
 	case "create", "add", "send", "post", "clone", "new":
-		return tooldef.AccessModeAppendOnly
+		return tooldef.AccessModeReversible
 	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit":
-		return tooldef.AccessModeCanDestruct
+		return tooldef.AccessModeIrreversible
 	default:
-		return tooldef.AccessModeCanDestruct
+		return tooldef.AccessModeIrreversible
 	}
 }
 
 // InferToolName derives the tool name from the entry filename.
 func InferToolName(entryTS string) string {
 	base := filepath.Base(entryTS)
-	return strings.TrimSuffix(base, filepath.Ext(base))
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	// Convert kebab-case segments to camelCase: "async-complex" → "asyncComplex"
+	parts := strings.Split(name, ".")
+	for i, part := range parts {
+		parts[i] = kebabToCamel(part)
+	}
+	return strings.Join(parts, ".")
+}
+
+// kebabToCamel converts a kebab-case string to camelCase.
+func kebabToCamel(s string) string {
+	segments := strings.Split(s, "-")
+	for i := 1; i < len(segments); i++ {
+		if len(segments[i]) > 0 {
+			segments[i] = strings.ToUpper(segments[i][:1]) + segments[i][1:]
+		}
+	}
+	return strings.Join(segments, "")
+}
+
+// kebabSegmentRe matches a valid kebab-case segment: lowercase letters, digits, and hyphens.
+// Must start with a letter, must not start or end with a hyphen, no consecutive hyphens.
+var kebabSegmentRe = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+// validateEntryName checks that a tool entry path uses kebab-case naming.
+// Expected format: "tools/<package>.<method>.ts" where each dot-separated
+// segment of the name is kebab-case (e.g. "tools/edge-cases.async-complex.ts").
+func validateEntryName(entryTS string) error {
+	base := filepath.Base(entryTS)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	segments := strings.Split(name, ".")
+	for _, seg := range segments {
+		if !kebabSegmentRe.MatchString(seg) {
+			return fmt.Errorf("segment %q is not valid kebab-case (expected lowercase letters, digits, and hyphens)", seg)
+		}
+	}
+	return nil
+}
+
+// ResourceParam describes one inferred resource parameter.
+type ResourceParam = tooldef.ResourceParam
+
+// InferResourceParams derives resource parameters from the tool entry filename.
+//
+// Convention: "users.calendars.events.list.ts" -> user_id, calendar_id.
+// The verb (last segment) is stripped. For "list" the deepest resource ID is
+// excluded; for "get"/"update"/"delete" it is included.
+// Only applies when there are 3+ segments (resource.subresource.verb).
+func InferResourceParams(entryTS string) []ResourceParam {
+	return InferResourceParamsWithMode(entryTS, "")
+}
+
+// InferResourceParamsWithMode is like InferResourceParams but accepts an
+// optional mode override. When mode is "collection", the deepest resource ID
+// is always excluded. When mode is "member", it is always included. When mode
+// is empty, the current isCollectionMethod inference is used.
+func InferResourceParamsWithMode(entryTS string, mode string) []ResourceParam {
+	base := filepath.Base(entryTS)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	parts := strings.Split(base, ".")
+
+	// Need at least 3 parts: resource.subresource.verb
+	if len(parts) < 3 {
+		return nil
+	}
+
+	verb := parts[len(parts)-1]
+	resources := parts[:len(parts)-1] // all segments except verb
+
+	// Determine whether to treat as collection (exclude deepest ID) or member
+	// (include deepest ID), based on mode override or verb inference.
+	var collection bool
+	switch mode {
+	case "collection":
+		collection = true
+	case "member":
+		collection = false
+	default:
+		collection = isCollectionMethod(verb)
+	}
+
+	count := len(resources)
+	if collection {
+		count = len(resources) - 1
+	}
+
+	if count <= 0 {
+		return nil
+	}
+
+	params := make([]ResourceParam, 0, count)
+	for i := 0; i < count; i++ {
+		name := singularize(resources[i]) + "_id"
+		params = append(params, ResourceParam{
+			Name:        name,
+			BindingName: name,
+		})
+	}
+	return params
+}
+
+// isCollectionMethod returns true for verbs that operate on a collection
+// (and therefore don't need the deepest resource ID).
+func isCollectionMethod(verb string) bool {
+	switch verb {
+	case "list", "create", "add", "append", "search", "find", "new", "send", "post":
+		return true
+	default:
+		return false
+	}
+}
+
+// singularize converts a plural resource name to its singular form
+// using jinzhu/inflection for Rails-style irregular handling.
+func singularize(s string) string {
+	return inflection.Singular(s)
 }
 
 func inferVerb(entryTS string) string {

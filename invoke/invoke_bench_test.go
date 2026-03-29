@@ -262,7 +262,7 @@ func benchFullRoundTrip(b *testing.B, fixtureDir string) {
 			b.Fatalf("pre-populate: %v", err)
 		}
 
-		result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
+		result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{}, memFS)
 		if err != nil {
 			b.Fatalf("RunWithVFS: %v", err)
 		}
@@ -290,7 +290,7 @@ func BenchmarkWasip2CLIVFSRoundTrip(b *testing.B) {
 		if err := memFS.WriteFile("/input.txt", []byte("hello from bench")); err != nil {
 			b.Fatalf("pre-populate: %v", err)
 		}
-		result, err := invoke.RunWithVFS(resolved, "vfs-wasip2.run", map[string]any{}, memFS)
+		result, err := invoke.RunWithVFS(resolved, "vfsWasip2.run", map[string]any{}, memFS)
 		if err != nil {
 			b.Fatalf("invoke.RunWithVFS: %v", err)
 		}

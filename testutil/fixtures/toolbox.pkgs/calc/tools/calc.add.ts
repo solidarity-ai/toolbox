@@ -1,3 +1,7 @@
-export default function tool(params: { a: number; b: number }, ctx: unknown) {
-  return String(params.a + params.b);
+/**
+ * @accessMode readOnly
+ * @idempotent
+ */
+export default function tool(a: number, b: number): number {
+  return a + b;
 }

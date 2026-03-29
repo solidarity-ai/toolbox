@@ -1,0 +1,60 @@
+{
+  "name": "edge-cases",
+  "runtime": "typescript-sandbox",
+  "sha256": "be67065143e111a46a42421c1d9d53cade9900751384acea745fcb39c3bf162a",
+  "tools": [
+    {
+      "entry_ts": "tools/edge-cases.complex.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.params-object.ts",
+      "idempotent": true,
+      "accessMode": "irreversible"
+    },
+    {
+      "entry_ts": "tools/edge-cases.minimal.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-description.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-param.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.irreversible.ts",
+      "accessMode": "irreversible",
+      "description": "Permanently delete all records matching the filter."
+    },
+    {
+      "entry_ts": "tools/edge-cases.reversible.ts",
+      "idempotent": true,
+      "accessMode": "reversible"
+    },
+    {
+      "entry_ts": "tools/edge-cases.named-export.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.async-complex.ts",
+      "accessMode": "irreversible"
+    },
+    {
+      "entry_ts": "tools/edge-cases.no-params.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    },
+    {
+      "entry_ts": "tools/edge-cases.multiline-return.ts",
+      "accessMode": "readOnly"
+    }
+  ]
+}

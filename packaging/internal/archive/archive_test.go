@@ -220,7 +220,7 @@ func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 	}
 }
 
-func TestLoadArchiveValidatesDistManifest(t *testing.T) {
+func TestLoadArchiveAcceptsMissingIdempotent(t *testing.T) {
 	t.Parallel()
 
 	dir := setupTestPackageWithoutIdempotent(t)
@@ -236,11 +236,8 @@ func TestLoadArchiveValidatesDistManifest(t *testing.T) {
 	}
 
 	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
-	if err == nil {
-		t.Fatalf("expected dist validation error")
-	}
-	if !strings.Contains(err.Error(), "idempotent") {
-		t.Fatalf("expected dist validation error mentioning idempotent, got: %v", err)
+	if err != nil {
+		t.Fatalf("expected no dist validation error for missing idempotent, got: %v", err)
 	}
 }
 
@@ -288,7 +285,7 @@ func TestPackBundlesExecutables(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "guest": "dist/guest.wasm" },
   "tools": [
-    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "canDestruct" }
+    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "irreversible" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "run.ts"), `export default function tool() { return "ok"; }`)

@@ -1,0 +1,24 @@
+{
+  "githubIssues.get": {
+    "properties": {
+      "number": {
+        "type": "number"
+      },
+      "owner": {
+        "type": "string"
+      },
+      "repo": {
+        "type": "string"
+      },
+      "token": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "owner",
+      "repo",
+      "number"
+    ],
+    "type": "object"
+  }
+}

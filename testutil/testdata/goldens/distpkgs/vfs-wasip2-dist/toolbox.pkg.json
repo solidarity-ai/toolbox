@@ -1,0 +1,16 @@
+{
+  "name": "vfs-wasip2",
+  "runtime": "typescript+wasip2-sandbox",
+  "sha256": "a93cca946a31595e7fbfeeb265a9756edae0d0afe952bd17022cffbf3e2d3600",
+  "executables": {
+    "vfs-guest": "dist/vfs-guest.wasm"
+  },
+  "tools": [
+    {
+      "entry_ts": "tools/vfs-wasip2.run.ts",
+      "idempotent": true,
+      "accessMode": "irreversible",
+      "description": "Run a wasip2 WASM guest that reads /input.txt and writes /output.txt, then read the output via fs."
+    }
+  ]
+}

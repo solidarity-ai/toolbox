@@ -171,7 +171,7 @@ func TestCompile(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeAppendOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReversible},
 				},
 			},
 		},
@@ -242,7 +242,7 @@ func TestValidateCompiled(t *testing.T) {
 			mode: ValidationModeDist,
 		},
 		{
-			name: "missing idempotent warns in dev",
+			name: "missing idempotent valid in dev",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -250,20 +250,18 @@ func TestValidateCompiled(t *testing.T) {
 					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReadOnly},
 				},
 			},
-			mode:         ValidationModeDev,
-			wantWarnings: 1,
+			mode: ValidationModeDev,
 		},
 		{
-			name: "missing idempotent errors in dist",
+			name: "missing idempotent valid in dist",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeAppendOnly},
+					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReversible},
 				},
 			},
-			mode:    ValidationModeDist,
-			wantErr: `"idempotent"`,
+			mode: ValidationModeDist,
 		},
 		{
 			name: "missing accessMode warns in dev",
@@ -331,22 +329,22 @@ func TestInferAccessMode(t *testing.T) {
 		{"tools/data.search.ts", tooldef.AccessModeReadOnly},
 		{"tools/data.find.ts", tooldef.AccessModeReadOnly},
 		{"tools/data.describe.ts", tooldef.AccessModeReadOnly},
-		{"tools/users.create.ts", tooldef.AccessModeAppendOnly},
-		{"tools/users.add.ts", tooldef.AccessModeAppendOnly},
-		{"tools/msg.send.ts", tooldef.AccessModeAppendOnly},
-		{"tools/msg.post.ts", tooldef.AccessModeAppendOnly},
-		{"tools/repo.clone.ts", tooldef.AccessModeAppendOnly},
-		{"tools/item.new.ts", tooldef.AccessModeAppendOnly},
-		{"tools/users.update.ts", tooldef.AccessModeCanDestruct},
-		{"tools/users.delete.ts", tooldef.AccessModeCanDestruct},
-		{"tools/users.remove.ts", tooldef.AccessModeCanDestruct},
-		{"tools/config.set.ts", tooldef.AccessModeCanDestruct},
-		{"tools/data.put.ts", tooldef.AccessModeCanDestruct},
-		{"tools/data.patch.ts", tooldef.AccessModeCanDestruct},
-		{"tools/data.replace.ts", tooldef.AccessModeCanDestruct},
-		{"tools/data.edit.ts", tooldef.AccessModeCanDestruct},
-		// unknown verb defaults to canDestruct
-		{"tools/data.sync.ts", tooldef.AccessModeCanDestruct},
+		{"tools/users.create.ts", tooldef.AccessModeReversible},
+		{"tools/users.add.ts", tooldef.AccessModeReversible},
+		{"tools/msg.send.ts", tooldef.AccessModeReversible},
+		{"tools/msg.post.ts", tooldef.AccessModeReversible},
+		{"tools/repo.clone.ts", tooldef.AccessModeReversible},
+		{"tools/item.new.ts", tooldef.AccessModeReversible},
+		{"tools/users.update.ts", tooldef.AccessModeIrreversible},
+		{"tools/users.delete.ts", tooldef.AccessModeIrreversible},
+		{"tools/users.remove.ts", tooldef.AccessModeIrreversible},
+		{"tools/config.set.ts", tooldef.AccessModeIrreversible},
+		{"tools/data.put.ts", tooldef.AccessModeIrreversible},
+		{"tools/data.patch.ts", tooldef.AccessModeIrreversible},
+		{"tools/data.replace.ts", tooldef.AccessModeIrreversible},
+		{"tools/data.edit.ts", tooldef.AccessModeIrreversible},
+		// unknown verb defaults to irreversible
+		{"tools/data.sync.ts", tooldef.AccessModeIrreversible},
 	}
 
 	for _, tt := range tests {
@@ -460,6 +458,160 @@ func TestParsePkg(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Fatalf("ParsePkg() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestInferResourceParams(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		entryTS string
+		want    []ResourceParam
+	}{
+		// Single resource: account.tickets.list -> account_id (list doesn't need ticket_id)
+		{"tools/account.tickets.list.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+		}},
+		// Single resource: account.tickets.get -> account_id, ticket_id (get needs deepest)
+		{"tools/account.tickets.get.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+			{Name: "ticket_id", BindingName: "ticket_id"},
+		}},
+		// Deep nesting: users.calendars.events.list -> user_id, calendar_id
+		{"tools/users.calendars.events.list.ts", []ResourceParam{
+			{Name: "user_id", BindingName: "user_id"},
+			{Name: "calendar_id", BindingName: "calendar_id"},
+		}},
+		// Deep nesting with get: users.calendars.events.get -> user_id, calendar_id, event_id
+		{"tools/users.calendars.events.get.ts", []ResourceParam{
+			{Name: "user_id", BindingName: "user_id"},
+			{Name: "calendar_id", BindingName: "calendar_id"},
+			{Name: "event_id", BindingName: "event_id"},
+		}},
+		// Unknown verb defaults to member (includes deepest ID)
+		{"tools/account.tickets.archive.ts", []ResourceParam{
+			{Name: "account_id", BindingName: "account_id"},
+			{Name: "ticket_id", BindingName: "ticket_id"},
+		}},
+		// Flat tool: calc.add -> no resource params
+		{"tools/calc.add.ts", nil},
+		// Simple tool: users.list -> no parent resources (list at top level)
+		{"tools/users.list.ts", nil},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.entryTS, func(t *testing.T) {
+			t.Parallel()
+
+			got := InferResourceParams(tt.entryTS)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("InferResourceParams(%q) mismatch (-want +got):\n%s", tt.entryTS, diff)
+			}
+		})
+	}
+}
+
+func TestCompileWithResourceBindingsOverride(t *testing.T) {
+	t.Parallel()
+
+	dev := DevManifest{
+		Name:    "zendesk",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Tools: []DevManifestTool{
+			{
+				EntryTS:    "tools/account.tickets.list.ts",
+				Idempotent: boolPtr(true),
+				AccessMode: accessModePtr(tooldef.AccessModeReadOnly),
+				Resource: &DevManifestToolResource{
+					Bindings: map[string]string{"account_id": "zendesk_account"},
+				},
+			},
+		},
+	}
+
+	pkg := Compile(dev)
+
+	if len(pkg.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
+	}
+
+	tool := pkg.Tools[0]
+	if len(tool.ResourceParams) != 1 {
+		t.Fatalf("expected 1 resource param, got %d", len(tool.ResourceParams))
+	}
+
+	rp := tool.ResourceParams[0]
+	if rp.Name != "account_id" {
+		t.Fatalf("expected resource param name 'account_id', got %q", rp.Name)
+	}
+	if rp.BindingName != "zendesk_account" {
+		t.Fatalf("expected binding name 'zendesk_account', got %q", rp.BindingName)
+	}
+}
+
+func TestCompileWithResourceModeOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		entryTS        string
+		mode           string
+		wantParamNames []string
+	}{
+		{
+			// "archive" is normally a member verb (includes deepest ID: ticket_id).
+			// Forcing "collection" mode should exclude the deepest ID.
+			name:           "archive forced collection excludes deepest ID",
+			entryTS:        "tools/account.tickets.archive.ts",
+			mode:           "collection",
+			wantParamNames: []string{"account_id"},
+		},
+		{
+			// "list" is normally a collection verb (excludes deepest ID).
+			// Forcing "member" mode should include the deepest ID.
+			name:           "list forced member includes deepest ID",
+			entryTS:        "tools/account.tickets.list.ts",
+			mode:           "member",
+			wantParamNames: []string{"account_id", "ticket_id"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dev := DevManifest{
+				Name:    "test",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{
+						EntryTS: tt.entryTS,
+						Resource: &DevManifestToolResource{
+							Mode: tt.mode,
+						},
+					},
+				},
+			}
+
+			pkg := Compile(dev)
+
+			if len(pkg.Tools) != 1 {
+				t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
+			}
+
+			tool := pkg.Tools[0]
+			if len(tool.ResourceParams) != len(tt.wantParamNames) {
+				t.Fatalf("expected %d resource params, got %d: %v", len(tt.wantParamNames), len(tool.ResourceParams), tool.ResourceParams)
+			}
+
+			for i, wantName := range tt.wantParamNames {
+				if tool.ResourceParams[i].Name != wantName {
+					t.Fatalf("param[%d]: expected name %q, got %q", i, wantName, tool.ResourceParams[i].Name)
+				}
 			}
 		})
 	}

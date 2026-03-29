@@ -11,10 +11,40 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
 	"github.com/microsoft/typescript-go/toolbox"
-	"github.com/solidarity-ai/toolbox/fsoverlay"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
+
+// sortedTools returns the tools from the view sorted by name.
+func sortedTools(view toolset.AgentView) []toolset.AgentTool {
+	tools := make([]toolset.AgentTool, len(view.Tools))
+	copy(tools, view.Tools)
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name < tools[j].Name
+	})
+	return tools
+}
+
+// groupToolsByNamespace groups tools by their dotted namespace prefix and
+// returns the groups along with sorted namespace names. Tools without a
+// dotted name (no namespace) are skipped.
+func groupToolsByNamespace(tools []toolset.AgentTool) (map[string][]toolset.AgentTool, []string) {
+	namespaces := map[string][]toolset.AgentTool{}
+	for _, tool := range tools {
+		parts := strings.Split(tool.Name, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		ns := parts[0]
+		namespaces[ns] = append(namespaces[ns], tool)
+	}
+	var nsNames []string
+	for ns := range namespaces {
+		nsNames = append(nsNames, ns)
+	}
+	sort.Strings(nsNames)
+	return namespaces, nsNames
+}
 
 // Run is the smallest useful codemode seam for outside-in tests.
 //
@@ -24,6 +54,8 @@ import (
 // - a stubbed SDK injected as global `tools`
 // - tool calls delegated to invoke
 func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
+	view := resolved.AgentView()
+
 	files, err := typecheckFiles(resolved, code)
 	if err != nil {
 		return "", err
@@ -57,7 +89,7 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 	defer jsInvoke.Free()
 	ctx.Global().SetPropertyStr("__invokeTool", jsInvoke)
 
-	if _, err := rt.Eval("__codemode_tools.js", qjs.Code(preludeForTools(resolved))); err != nil {
+	if _, err := rt.Eval("__codemode_tools.js", qjs.Code(preludeForTools(view))); err != nil {
 		return "", fmt.Errorf("load codemode tools: %w", err)
 	}
 
@@ -82,32 +114,22 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 }
 
 func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error) {
-	layers := []fs.FS{
-		fstest.MapFS{
-			"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
-			"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
-		},
-	}
-	for _, tool := range resolved.Tools() {
-		if tool.TS == nil {
-			continue
-		}
-		layers = append(layers, tool.TS.Files)
-	}
-	return fsoverlay.New(layers...), nil
+	return fstest.MapFS{
+		"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
+		"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
+	}, nil
 }
 
-func preludeForTools(resolved toolset.ResolvedToolset) string {
+func preludeForTools(view toolset.AgentView) string {
 	var b strings.Builder
+	// Capture the injected invoke function, remove it from globalThis to prevent
+	// direct access, and initialize the tools namespace object.
 	b.WriteString("const __toolboxInvoke = globalThis.__invokeTool;\n")
 	b.WriteString("delete globalThis.__invokeTool;\n")
 	b.WriteString("globalThis.tools = {};\n")
 
 	seen := map[string]bool{}
-	tools := resolved.Tools()
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name < tools[j].Name
-	})
+	tools := sortedTools(view)
 
 	for _, tool := range tools {
 		parts := strings.Split(tool.Name, ".")
@@ -135,38 +157,37 @@ func preludeForTools(resolved toolset.ResolvedToolset) string {
 func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
 	var b strings.Builder
 	b.WriteString("declare function __invokeTool<T>(toolName: string, args: unknown): T;\n")
-	b.WriteString("type ToolResult<T> = T extends Promise<infer U> ? U : T;\n")
 
-	tools := resolved.Tools()
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name < tools[j].Name
-	})
+	view := resolved.AgentView()
+	tools := sortedTools(view)
 
-	for i, tool := range tools {
-		if tool.TS == nil {
-			continue
+	// Collect unique type declarations from all tools' param types.
+	declLines := collectUniqueDeclarations(tools)
+	if len(declLines) > 0 {
+		for _, line := range declLines {
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "import toolmod%d from \"./%s\";\n", i, tool.TS.Entry)
+		b.WriteString("\n")
 	}
 
 	namespaces := map[string][]string{}
 	b.WriteString("export const tools = {\n")
-	for i, tool := range tools {
-		if tool.TS == nil {
-			continue
-		}
-
+	for _, tool := range tools {
 		parts := strings.Split(tool.Name, ".")
 		if len(parts) != 2 {
 			continue
 		}
 
+		paramType := "Record<string, unknown>"
+		if pt := tool.ParamsType(); pt != nil {
+			paramType = pt.ToTS()
+		}
+
 		namespaces[parts[0]] = append(namespaces[parts[0]], fmt.Sprintf(
-			"    %s(args: Parameters<typeof toolmod%d>[0]): ToolResult<ReturnType<typeof toolmod%d>> { return __invokeTool<ToolResult<ReturnType<typeof toolmod%d>>>(%q, args); },",
+			"    %s(args: %s): string { return __invokeTool<string>(%q, args); },",
 			parts[1],
-			i,
-			i,
-			i,
+			paramType,
 			tool.Name,
 		))
 	}

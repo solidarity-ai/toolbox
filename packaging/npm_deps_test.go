@@ -64,7 +64,7 @@ func TestNpmDepsDistMode(t *testing.T) {
 
 	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
 
-	_, err = invoke.Run(resolved, "github-issues.get", map[string]any{
+	_, err = invoke.Run(resolved, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "hello-world",
 		"number": 1,
@@ -196,7 +196,7 @@ func TestNpmDepsE2E(t *testing.T) {
 	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
 
 	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
-	result, err := invoke.Run(resolved, "github-issues.get", map[string]any{
+	result, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "Hello-World",
 		"number": 1,

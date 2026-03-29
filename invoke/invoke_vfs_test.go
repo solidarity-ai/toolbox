@@ -26,7 +26,7 @@ func TestVFSRoundTripThroughInvoke(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
+	result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestVFSRoundTripThroughInvokeFromDistArchive(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{}, memFS)
+	result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestVFSDeleteThroughInvokeWasix(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{"action": "delete"}, memFS)
+	result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{"action": "delete"}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestVFSRenameThroughInvokeWasix(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	result, err := invoke.RunWithVFS(resolved, "vfs-test.run", map[string]any{"action": "rename"}, memFS)
+	result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{"action": "rename"}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestVFSRoundTripThroughInvokeWasip2(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	result, err := invoke.RunWithVFS(resolved, "vfs-wasip2.run", map[string]any{}, memFS)
+	result, err := invoke.RunWithVFS(resolved, "vfsWasip2.run", map[string]any{}, memFS)
 	if err != nil {
 		t.Fatalf("invoke.RunWithVFS: %v", err)
 	}

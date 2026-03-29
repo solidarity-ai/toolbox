@@ -1,0 +1,290 @@
+{
+  "edgeCases.asyncComplex": {
+    "properties": {
+      "concurrency": {
+        "type": "number"
+      },
+      "ids": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "ids"
+    ],
+    "type": "object"
+  },
+  "edgeCases.complex": {
+    "definitions": {
+      "OutputConfig": {
+        "description": "Nested config with deeply nested objects",
+        "properties": {
+          "columns": {
+            "description": "Column configuration",
+            "properties": {
+              "exclude": {
+                "description": "Which fields to exclude",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "include": {
+                "description": "Which fields to include",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "format": {
+            "description": "Output format",
+            "enum": [
+              "csv",
+              "json",
+              "table"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PageInfo": {
+        "description": "A paginated item in results",
+        "properties": {
+          "page": {
+            "description": "Current page number (1-indexed)",
+            "type": "number"
+          },
+          "pageSize": {
+            "description": "Maximum items per page",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "SearchFilter": {
+        "description": "Filter criteria for searching",
+        "properties": {
+          "field": {
+            "description": "Field name to filter on",
+            "type": "string"
+          },
+          "op": {
+            "default": "eq",
+            "description": "Comparison operator",
+            "enum": [
+              "contains",
+              "eq",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "neq"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "The value to compare against",
+            "type": [
+              "boolean",
+              "number",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "properties": {
+      "dryRun": {
+        "type": "boolean"
+      },
+      "filters": {
+        "items": {
+          "$ref": "#/definitions/SearchFilter"
+        },
+        "type": "array"
+      },
+      "output": {
+        "$ref": "#/definitions/OutputConfig"
+      },
+      "pagination": {
+        "$ref": "#/definitions/PageInfo"
+      },
+      "query": {
+        "type": "string"
+      },
+      "tags": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "query",
+      "filters"
+    ],
+    "type": "object"
+  },
+  "edgeCases.irreversible": {
+    "description": "Permanently delete all records matching the filter.",
+    "properties": {
+      "confirm": {
+        "description": "Must be true to execute deletion",
+        "type": "boolean"
+      },
+      "filter": {
+        "description": "SQL-like filter expression",
+        "type": "string"
+      }
+    },
+    "required": [
+      "filter",
+      "confirm"
+    ],
+    "type": "object"
+  },
+  "edgeCases.minimal": {},
+  "edgeCases.multilineParam": {
+    "properties": {
+      "input": {
+        "description": "The raw input string to transform",
+        "type": "string"
+      },
+      "options": {
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "verbose": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "pipeline": {
+        "description": "A sequence of transformation steps to apply.\nEach step is executed in order, and the output of one step\nbecomes the input of the next.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "input",
+      "pipeline"
+    ],
+    "type": "object"
+  },
+  "edgeCases.multilineReturn": {
+    "properties": {
+      "input": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "input"
+    ],
+    "type": "object"
+  },
+  "edgeCases.namedExport": {
+    "properties": {
+      "algorithm": {
+        "enum": [
+          "md5",
+          "sha256",
+          "sha512"
+        ],
+        "type": "string"
+      },
+      "data": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "data",
+      "algorithm"
+    ],
+    "type": "object"
+  },
+  "edgeCases.noDescription": {
+    "properties": {
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "x",
+      "y"
+    ],
+    "type": "object"
+  },
+  "edgeCases.noParams": {},
+  "edgeCases.paramsObject": {
+    "properties": {
+      "params": {
+        "properties": {
+          "action": {
+            "description": "Action to take on each item",
+            "enum": [
+              "archive",
+              "delete",
+              "restore"
+            ],
+            "type": "string"
+          },
+          "callbackUrl": {
+            "description": "Optional callback URL for completion notification",
+            "type": "string"
+          },
+          "continueOnError": {
+            "description": "Whether to continue on individual item failures",
+            "type": "boolean"
+          },
+          "ids": {
+            "description": "List of item IDs to process",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "params"
+    ],
+    "type": "object"
+  },
+  "edgeCases.reversible": {
+    "properties": {
+      "content": {
+        "type": "string"
+      },
+      "tags": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "content"
+    ],
+    "type": "object"
+  }
+}

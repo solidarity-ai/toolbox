@@ -48,13 +48,13 @@ func LoadDirWithMode(dir string, mode manifest.ValidationMode) (LoadDirResult, e
 
 	pkg := manifest.Compile(dev)
 
+	files := NewSourceFS(os.DirFS(dir), dir, pkg)
+	EnrichToolMetadata(files, &pkg)
+
 	warnings, err := manifest.ValidateCompiled(pkg, mode)
 	if err != nil {
 		return LoadDirResult{}, err
 	}
-
-	files := NewSourceFS(os.DirFS(dir), dir, pkg)
-	enrichToolMetadata(files, &pkg)
 
 	loaded := LoadedPackage{
 		Package: pkg,
@@ -77,11 +77,15 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			description = manifest.InferToolName(pkgTool.EntryTS)
 		}
 		resolved := tooldef.ResolvedTool{
-			Name:         manifest.InferToolName(pkgTool.EntryTS),
-			Description:  description,
-			ParamsSchema: pkgTool.ParamsSchema,
-			Package:      &p.Package,
+			Name:           manifest.InferToolName(pkgTool.EntryTS),
+			Description:    description,
+			Sig:            pkgTool.Sig,
+			AccessMode:     pkgTool.AccessMode,
+			Idempotent:     pkgTool.Idempotent,
+			ResourceParams: pkgTool.ResourceParams,
+			Package:        &p.Package,
 		}
+		resolved.SetParamsSchema(pkgTool.ParamsSchema)
 
 		baseDef := tooldef.TSToolDef{
 			Entry:       pkgTool.EntryTS,
@@ -128,9 +132,12 @@ func LoadBuiltDirWithMode(dir string, mode manifest.ValidationMode) (LoadedPacka
 	}
 	_ = warnings
 
+	files := NewSourceFS(os.DirFS(dir), dir, pkg)
+	EnrichToolMetadata(files, &pkg)
+
 	return LoadedPackage{
 		Package: pkg,
-		Files:   NewSourceFS(os.DirFS(dir), dir, pkg),
+		Files:   files,
 		Dir:     dir,
 	}, nil
 }
@@ -147,7 +154,9 @@ func NewSourceFS(base fs.FS, dir string, pkg tooldef.Package) fs.FS {
 	}
 }
 
-func enrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
+// EnrichToolMetadata extracts type signatures and JSDoc metadata from the
+// tool source files and populates the package's tool definitions.
+func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 	for i := range pkg.Tools {
 		tool := &pkg.Tools[i]
 		meta, err := toolbox.ExtractToolMetadata(context.Background(), toolbox.ExtractInput{
@@ -160,8 +169,23 @@ func enrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 		if meta.Description != "" {
 			tool.Description = meta.Description
 		}
-		if meta.ParamsSchema != nil {
+		tool.Sig = meta.Sig
+		if meta.Sig == nil && meta.ParamsSchema != nil {
 			tool.ParamsSchema = meta.ParamsSchema
+		}
+		// Extract tool metadata from JSDoc tags (overrides manifest values).
+		if meta.Sig != nil {
+			for _, tag := range meta.Sig.Tags() {
+				switch tag.Name {
+				case "accessMode":
+					if am := tooldef.AccessMode(tag.Text); am != "" {
+						tool.AccessMode = am
+					}
+				case "idempotent":
+					v := true
+					tool.Idempotent = &v
+				}
+			}
 		}
 	}
 }

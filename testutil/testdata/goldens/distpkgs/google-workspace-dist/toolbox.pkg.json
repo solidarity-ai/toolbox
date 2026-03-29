@@ -1,0 +1,15 @@
+{
+  "name": "google-workspace",
+  "runtime": "typescript+wasix-sandbox",
+  "sha256": "7b805ca5f22c830812809c47a70cefee4cc76f64c600324af82aaa2a8fca3c1a",
+  "executables": {
+    "gwc": "dist/gwc.wasm"
+  },
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "idempotent": true,
+      "accessMode": "readOnly"
+    }
+  ]
+}

@@ -16,7 +16,11 @@ func FetchTestToolset(t testing.TB) toolset.ResolvedToolset {
 	if err := builder.AddFromDir(fetchTestFixtureDir()); err != nil {
 		t.Fatalf("add fetch-test package dir: %v", err)
 	}
-	return builder.Resolve()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve fetch-test toolset: %v", err)
+	}
+	return resolved
 }
 
 func fetchTestFixtureDir() string {

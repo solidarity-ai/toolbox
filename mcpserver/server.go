@@ -28,14 +28,14 @@ func New(resolved toolset.ResolvedToolset) *server.MCPServer {
 }
 
 func newMCPTool(tool tooldef.ResolvedTool) mcp.Tool {
-	if len(tool.ParamsSchema) == 0 {
+	if len(tool.ParamsSchema()) == 0 {
 		return mcp.NewTool(
 			tool.Name,
 			mcp.WithDescription(tool.Description),
 		)
 	}
 
-	rawSchema, err := json.Marshal(tool.ParamsSchema)
+	rawSchema, err := json.Marshal(tool.ParamsSchema())
 	if err != nil {
 		return mcp.NewTool(
 			tool.Name,

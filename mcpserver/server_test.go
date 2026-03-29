@@ -170,7 +170,7 @@ func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 		t.Fatalf("add external package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -230,7 +230,7 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 		t.Fatalf("add copied package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -389,13 +389,14 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 		t.Fatalf("add http-client package dir: %v", err)
 	}
 
-	h := mcptest.NewHarness(t, mcpserver.New(builder.Resolve()))
-	result := h.CallTool("http-client.fetch", map[string]any{})
+	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
+	result := h.CallTool("httpClient.fetch", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
+
 	if len(result.Content) == 0 {
-		t.Fatalf("expected text content")
+		t.Fatalf("expected content in result")
 	}
 	text, ok := mcp.AsTextContent(result.Content[0])
 	if !ok {
@@ -446,7 +447,7 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(tooltest.FetchTestToolset(t)))
 
 	// Invoke the fetch-test.get tool with the test server URL.
-	result := h.CallTool("fetch-test.get", map[string]any{
+	result := h.CallTool("fetchTest.get", map[string]any{
 		"url": srv.URL,
 	})
 	if result.IsError {
@@ -479,6 +480,15 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	if !strings.Contains(fetchResult.Body, "hello from test server") {
 		t.Fatalf("expected body to contain greeting, got: %s", fetchResult.Body)
 	}
+}
+
+func mustResolve(t testing.TB, builder *toolset.Builder) toolset.ResolvedToolset {
+	t.Helper()
+	resolved, err := builder.Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("resolve toolset: %v", err)
+	}
+	return resolved
 }
 
 func assertContains(t *testing.T, values []string, want string) {

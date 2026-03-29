@@ -10,7 +10,7 @@
 3. order parameters based on resource heirarchy.
 4. when considering a function description, understand that a param might be
    hidden, and thus the description might be wrong.
-5. always add a @accessMode to a function
+5. always add a @effect to a function
 6. If the tool call is truly idempotent, that is it's pure or it uses an
    idempotency key, then it should be marked as idempotent. This enables agents
 & harnesses to quickly a decision on retrying failed tool calls.
@@ -29,7 +29,7 @@ BAD:
 
 /**
  * Add two numbers.
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  * @param a - The first number
  * @param b - The second number
@@ -48,7 +48,7 @@ GOOD:
 // calc.add.ts
 
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  */
 export default function add(a: number, b: number): string {
@@ -56,12 +56,12 @@ export default function add(a: number, b: number): string {
 }
 ```
 
-## Example 2: Choosing accessMode
+## Example 2: Choosing effect
 
 - readOnly means there is no side effect.
 - reversible means that it would be trivial to undo the consequences at a later time.
 - irreversible means that it would be hard or impossible to undo the consequences at a later time.
-//TODO: format this into a table with func, access mode, and explanation of why it's read-only/reversible/irreversible
+//TODO: format this into a table with func, effect, and explanation of why it's read-only/reversible/irreversible
 - e.g. sending an email is irreversible. creating a draft email is reversible. deleting an email is irreversible.
 - . sending a tweet is irreversible, even if is deletable (it is made public and therefore cannot be undone).
 - It should be readOnly, reversible, or irreversible.

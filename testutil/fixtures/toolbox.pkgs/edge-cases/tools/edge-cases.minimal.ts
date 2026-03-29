@@ -1,5 +1,5 @@
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  */
 export default function(): string {

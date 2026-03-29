@@ -41,7 +41,7 @@ func TestParseDev(t *testing.T) {
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["lib/**/*.ts"],
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: DevManifest{
@@ -49,7 +49,7 @@ func TestParseDev(t *testing.T) {
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
 				Tools: []DevManifestTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: accessModePtr(tooldef.AccessModeReadOnly)},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 		},
@@ -60,7 +60,7 @@ func TestParseDev(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
   "tools": [
-    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: DevManifest{
@@ -68,7 +68,7 @@ func TestParseDev(t *testing.T) {
 				Runtime:     tooldef.RuntimeTypeScriptWasixSandbox,
 				Executables: map[string]string{"gwc": "dist/gwc.wasm"},
 				Tools: []DevManifestTool{
-					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), AccessMode: accessModePtr(tooldef.AccessModeReadOnly)},
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 		},
@@ -79,7 +79,7 @@ func TestParseDev(t *testing.T) {
   "runtime": "typescript-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			wantErr: "not:",
@@ -147,19 +147,19 @@ func TestCompile(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []DevManifestTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: accessModePtr(tooldef.AccessModeReadOnly)},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 			want: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
 		{
-			name: "infers accessMode from verb add",
+			name: "infers effect from verb add",
 			dev: DevManifest{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -171,7 +171,7 @@ func TestCompile(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReversible},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReversible},
 				},
 			},
 		},
@@ -182,7 +182,7 @@ func TestCompile(t *testing.T) {
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
 				Tools: []DevManifestTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: accessModePtr(tooldef.AccessModeReadOnly)},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 			want: tooldef.Package{
@@ -190,7 +190,7 @@ func TestCompile(t *testing.T) {
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -225,7 +225,7 @@ func TestValidateCompiled(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 			mode: ValidationModeDev,
@@ -236,7 +236,7 @@ func TestValidateCompiled(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 			mode: ValidationModeDist,
@@ -247,7 +247,7 @@ func TestValidateCompiled(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Effect: tooldef.EffectReadOnly},
 				},
 			},
 			mode: ValidationModeDev,
@@ -258,13 +258,13 @@ func TestValidateCompiled(t *testing.T) {
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", AccessMode: tooldef.AccessModeReversible},
+					{EntryTS: "tools/calc.add.ts", Effect: tooldef.EffectReversible},
 				},
 			},
 			mode: ValidationModeDist,
 		},
 		{
-			name: "missing accessMode warns in dev",
+			name: "missing effect warns in dev",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -276,7 +276,7 @@ func TestValidateCompiled(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			name: "missing accessMode errors in dist",
+			name: "missing effect errors in dist",
 			pkg: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -285,7 +285,7 @@ func TestValidateCompiled(t *testing.T) {
 				},
 			},
 			mode:    ValidationModeDist,
-			wantErr: `"accessMode"`,
+			wantErr: `"effect"`,
 		},
 	}
 
@@ -315,36 +315,36 @@ func TestValidateCompiled(t *testing.T) {
 	}
 }
 
-func TestInferAccessMode(t *testing.T) {
+func TestInferEffect(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		entryTS  string
-		wantMode tooldef.AccessMode
+		wantEffect tooldef.Effect
 	}{
-		{"tools/users.list.ts", tooldef.AccessModeReadOnly},
-		{"tools/users.get.ts", tooldef.AccessModeReadOnly},
-		{"tools/data.read.ts", tooldef.AccessModeReadOnly},
-		{"tools/data.fetch.ts", tooldef.AccessModeReadOnly},
-		{"tools/data.search.ts", tooldef.AccessModeReadOnly},
-		{"tools/data.find.ts", tooldef.AccessModeReadOnly},
-		{"tools/data.describe.ts", tooldef.AccessModeReadOnly},
-		{"tools/users.create.ts", tooldef.AccessModeReversible},
-		{"tools/users.add.ts", tooldef.AccessModeReversible},
-		{"tools/msg.send.ts", tooldef.AccessModeIrreversible},
-		{"tools/msg.post.ts", tooldef.AccessModeIrreversible},
-		{"tools/repo.clone.ts", tooldef.AccessModeReversible},
-		{"tools/item.new.ts", tooldef.AccessModeReversible},
-		{"tools/users.update.ts", tooldef.AccessModeIrreversible},
-		{"tools/users.delete.ts", tooldef.AccessModeIrreversible},
-		{"tools/users.remove.ts", tooldef.AccessModeIrreversible},
-		{"tools/config.set.ts", tooldef.AccessModeIrreversible},
-		{"tools/data.put.ts", tooldef.AccessModeIrreversible},
-		{"tools/data.patch.ts", tooldef.AccessModeIrreversible},
-		{"tools/data.replace.ts", tooldef.AccessModeIrreversible},
-		{"tools/data.edit.ts", tooldef.AccessModeIrreversible},
+		{"tools/users.list.ts", tooldef.EffectReadOnly},
+		{"tools/users.get.ts", tooldef.EffectReadOnly},
+		{"tools/data.read.ts", tooldef.EffectReadOnly},
+		{"tools/data.fetch.ts", tooldef.EffectReadOnly},
+		{"tools/data.search.ts", tooldef.EffectReadOnly},
+		{"tools/data.find.ts", tooldef.EffectReadOnly},
+		{"tools/data.describe.ts", tooldef.EffectReadOnly},
+		{"tools/users.create.ts", tooldef.EffectReversible},
+		{"tools/users.add.ts", tooldef.EffectReversible},
+		{"tools/msg.send.ts", tooldef.EffectIrreversible},
+		{"tools/msg.post.ts", tooldef.EffectIrreversible},
+		{"tools/repo.clone.ts", tooldef.EffectReversible},
+		{"tools/item.new.ts", tooldef.EffectReversible},
+		{"tools/users.update.ts", tooldef.EffectIrreversible},
+		{"tools/users.delete.ts", tooldef.EffectIrreversible},
+		{"tools/users.remove.ts", tooldef.EffectIrreversible},
+		{"tools/config.set.ts", tooldef.EffectIrreversible},
+		{"tools/data.put.ts", tooldef.EffectIrreversible},
+		{"tools/data.patch.ts", tooldef.EffectIrreversible},
+		{"tools/data.replace.ts", tooldef.EffectIrreversible},
+		{"tools/data.edit.ts", tooldef.EffectIrreversible},
 		// unknown verb defaults to irreversible
-		{"tools/data.sync.ts", tooldef.AccessModeIrreversible},
+		{"tools/data.sync.ts", tooldef.EffectIrreversible},
 	}
 
 	for _, tt := range tests {
@@ -352,9 +352,9 @@ func TestInferAccessMode(t *testing.T) {
 		t.Run(tt.entryTS, func(t *testing.T) {
 			t.Parallel()
 
-			got := InferAccessMode(tt.entryTS)
-			if got != tt.wantMode {
-				t.Fatalf("InferAccessMode(%q) = %q, want %q", tt.entryTS, got, tt.wantMode)
+			got := InferEffect(tt.entryTS)
+			if got != tt.wantEffect {
+				t.Fatalf("InferEffect(%q) = %q, want %q", tt.entryTS, got, tt.wantEffect)
 			}
 		})
 	}
@@ -400,14 +400,14 @@ func TestParsePkg(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -418,7 +418,7 @@ func TestParsePkg(t *testing.T) {
   "runtime": "typescript-sandbox",
   "sha256": "abc123",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: tooldef.Package{
@@ -426,7 +426,7 @@ func TestParsePkg(t *testing.T) {
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				SHA256:  "abc123",
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -524,7 +524,7 @@ func TestCompileWithResourceBindingsOverride(t *testing.T) {
 			{
 				EntryTS:    "tools/account.tickets.list.ts",
 				Idempotent: boolPtr(true),
-				AccessMode: accessModePtr(tooldef.AccessModeReadOnly),
+				Effect: effectPtr(tooldef.EffectReadOnly),
 				Resource: &DevManifestToolResource{
 					Bindings: map[string]string{"account_id": "zendesk_account"},
 				},
@@ -621,6 +621,6 @@ func boolPtr(v bool) *bool {
 	return &v
 }
 
-func accessModePtr(v tooldef.AccessMode) *tooldef.AccessMode {
+func effectPtr(v tooldef.Effect) *tooldef.Effect {
 	return &v
 }

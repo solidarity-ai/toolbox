@@ -14,7 +14,7 @@ packaging/
 │       └── pkgtype.go             # LoadedPackage type (shared by source, archive, top-level)
 ├── manifest/
 │   ├── manifest.go                # types, parse, validate, compile
-│   ├── infer.go                   # inferAccessMode, inferVerb, inferToolName, inferToolDescription
+│   ├── infer.go                   # inferEffect, inferVerb, inferToolName, inferToolDescription
 │   ├── infer_test.go
 │   ├── manifest_test.go
 │   ├── toolbox_devpkg.schema.json # dev schema (renamed from toolbox_pkg.dev.schema.json)
@@ -44,7 +44,7 @@ package manifest
 import tooldef "github.com/solidarity-ai/toolbox/tool"
 
 // DevManifest is the shape of toolbox.devpkg.json — the authoring format.
-// Fields like Idempotent and AccessMode may be omitted and will be inferred.
+// Fields like Idempotent and Effect may be omitted and will be inferred.
 type DevManifest struct {
     Name                      string         `json:"name"`
     Runtime                   tooldef.ToolRuntime `json:"runtime"`
@@ -54,11 +54,11 @@ type DevManifest struct {
 }
 
 // DevTool is a single tool entry in the dev manifest.
-// AccessMode and Idempotent are optional — they get inferred during compilation.
+// Effect and Idempotent are optional — they get inferred during compilation.
 type DevTool struct {
     EntryTS    string              `json:"entry_ts"`
     Idempotent *bool               `json:"idempotent,omitempty"`
-    AccessMode *tooldef.AccessMode `json:"accessMode,omitempty"`
+    Effect *tooldef.Effect `json:"effect,omitempty"`
 }
 
 // PkgManifest is the shape of toolbox.pkg.json — the compiled/published format.
@@ -77,7 +77,7 @@ type PkgManifest struct {
 type PkgTool struct {
     EntryTS    string            `json:"entry_ts"`
     Idempotent bool              `json:"idempotent"`
-    AccessMode tooldef.AccessMode `json:"accessMode"`
+    Effect tooldef.Effect `json:"effect"`
 }
 ```
 
@@ -134,7 +134,7 @@ func ValidateDev(data []byte) error
 func ValidatePkg(data []byte) error
 
 // Compile converts a DevManifest into a tooldef.Package.
-// Infers accessMode and other fields where omitted.
+// Infers effect and other fields where omitted.
 func Compile(dev DevManifest) tooldef.Package
 
 // ValidateCompiled validates a compiled tooldef.Package against both schemas,
@@ -142,7 +142,7 @@ func Compile(dev DevManifest) tooldef.Package
 func ValidateCompiled(pkg tooldef.Package, mode ValidationMode, label string) ([]Warning, error)
 
 // Inference helpers (exported so archive and source can use them if needed)
-func InferAccessMode(entryTS string) tooldef.AccessMode
+func InferEffect(entryTS string) tooldef.Effect
 func InferVerb(entryTS string) string
 func InferToolName(entryTS string) string
 func InferToolDescription(entryTS string) string
@@ -249,7 +249,7 @@ A standalone `toolbox.pkg.json` file is written alongside the archive:
     {
       "entry_ts": "tools/users.list.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ],
   "sha256": "a1b2c3d4e5f6..."
@@ -291,7 +291,7 @@ source dir + toolbox.devpkg.json
 | `packaging/packaging.go` — `compilePackage` | `packaging/manifest/manifest.go` — `Compile` | Exported |
 | `packaging/packaging.go` — `validateCompiledPackage` | `packaging/manifest/manifest.go` — `ValidateCompiled` | Exported |
 | `packaging/packaging.go` — `mustResolveSchema` | `packaging/manifest/manifest.go` — `mustResolveSchema` | Stays unexported |
-| `packaging/packaging.go` — `inferAccessMode`, `inferVerb`, etc. | `packaging/manifest/infer.go` | Exported |
+| `packaging/packaging.go` — `inferEffect`, `inferVerb`, etc. | `packaging/manifest/infer.go` | Exported |
 | `packaging/packaging.go` — `ValidationMode`, `Warning`, `LoadResult` | `packaging/manifest/manifest.go` | Shared validation types |
 | `packaging/packaging.go` — `LoadedPackage`, `ResolvedTools()` | `packaging/packaging.go` | Stays in top-level; `ResolvedTools` uses `manifest.InferToolName` etc. |
 | `packaging/packaging.go` — `LoadSourceDir*`, `LoadSourcePackage*` | `packaging/source/source.go` | |
@@ -301,7 +301,7 @@ source dir + toolbox.devpkg.json
 | `packaging/sourcefs.go` — entire file | `packaging/source/sourcefs.go` | Package changes to `source` |
 | `packaging/toolbox_pkg.dev.schema.json` | `packaging/manifest/toolbox_devpkg.schema.json` | Renamed to match `toolbox.devpkg.json` |
 | `packaging/toolbox_pkg.dist.schema.json` | `packaging/manifest/toolbox_pkg.schema.json` | Renamed to match `toolbox.pkg.json` |
-| `packaging/access_mode_test.go` | `packaging/manifest/infer_test.go` | |
+| `packaging/effect_test.go` | `packaging/manifest/infer_test.go` | |
 | `packaging/packaging_test.go` — source tests | `packaging/source/source_test.go` | |
 | `packaging/packaging_test.go` — built tests | `packaging/archive/archive_test.go` | Rewritten for archive format |
 
@@ -451,7 +451,7 @@ Does not import packaging. **No changes needed.**
 - **Parse tests**: valid/invalid dev and pkg JSON → correct structs or errors
 - **Validation tests**: dev schema allows optional fields, pkg schema requires all fields
 - **Compile tests**: DevManifest with missing fields → Package with inferred values
-- **Inference tests**: move existing `access_mode_test.go` cases, add `InferToolName`/`InferVerb` tests
+- **Inference tests**: move existing `effect_test.go` cases, add `InferToolName`/`InferVerb` tests
 - **Round-trip tests**: Compile(dev) → marshal → ParsePkg → same values
 
 ### 9.2 `packaging/archive`

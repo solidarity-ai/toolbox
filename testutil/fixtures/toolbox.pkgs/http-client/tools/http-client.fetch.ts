@@ -4,7 +4,7 @@ declare function exec(
 ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  */
 export default async function tool(): Promise<string> {

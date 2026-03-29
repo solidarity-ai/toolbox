@@ -1,5 +1,5 @@
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  * @param input - The raw input string to transform
  * @param pipeline - A sequence of transformation steps to apply.

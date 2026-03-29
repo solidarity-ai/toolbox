@@ -315,8 +315,8 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 			hidden := tool.HiddenParams()
 			literals := tool.BoundLiterals()
 
-			// Build the access mode label suffix for the JSDoc description.
-			modeLabel := accessModeLabel(tool.AccessMode, tool.Idempotent)
+			// Build the effect label suffix for the JSDoc description.
+			modeLabel := effectLabel(tool.Effect, tool.Idempotent)
 
 			// Collect multi-line param descriptions for @param tags.
 			var multiLineParams []struct {
@@ -401,7 +401,7 @@ func DeclarationSource(resolved toolset.ResolvedToolset) string {
 				}
 			}
 
-			// Trailing access mode comment.
+			// Trailing effect comment.
 			modeTrail := ""
 			if modeLabel != "" {
 				// Strip parens from modeLabel: "(readonly)" -> "readonly"
@@ -474,19 +474,19 @@ func hasDescriptions(props []toolbox.PropertyInfo) bool {
 	return false
 }
 
-// accessModeLabel returns the parenthesized label for the access mode and
-// idempotent flag, or "" if no access mode is set.
-func accessModeLabel(mode tooldef.AccessMode, idempotent *bool) string {
+// effectLabel returns the parenthesized label for the effect and
+// idempotent flag, or "" if no effect is set.
+func effectLabel(effect tooldef.Effect, idempotent *bool) string {
 	isIdempotent := idempotent != nil && *idempotent
-	switch mode {
-	case tooldef.AccessModeReadOnly:
+	switch effect {
+	case tooldef.EffectReadOnly:
 		return "(readonly)"
-	case tooldef.AccessModeReversible:
+	case tooldef.EffectReversible:
 		if isIdempotent {
 			return "(reversible, idempotent)"
 		}
 		return "(reversible)"
-	case tooldef.AccessModeIrreversible:
+	case tooldef.EffectIrreversible:
 		if isIdempotent {
 			return "(irreversible, idempotent)"
 		}

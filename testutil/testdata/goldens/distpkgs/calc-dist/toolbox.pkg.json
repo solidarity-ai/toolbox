@@ -1,22 +1,22 @@
 {
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "7d8117e080521b8a4455d4db89fdf1f8eab5c97a7fd4c9742532dea38260c8f6",
+  "sha256": "be4213ddcc979b448b09669c19ccd8c0b11e8930307e9c37bee3a9d56e8f56e1",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     },
     {
       "entry_ts": "tools/calc.sub.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     },
     {
       "entry_ts": "tools/calc.async-add.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }

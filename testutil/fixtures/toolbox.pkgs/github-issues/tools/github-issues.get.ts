@@ -24,7 +24,7 @@ const IssueSchema = z.object({
 });
 
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  */
 export default async function tool(

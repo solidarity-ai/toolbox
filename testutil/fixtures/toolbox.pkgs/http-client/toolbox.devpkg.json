@@ -8,7 +8,7 @@
     {
       "entry_ts": "tools/http-client.fetch.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }

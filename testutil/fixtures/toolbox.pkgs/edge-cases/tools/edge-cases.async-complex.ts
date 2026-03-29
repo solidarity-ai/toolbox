@@ -9,7 +9,7 @@ interface BatchResult {
 }
 
 /**
- * @accessMode irreversible
+ * @effect irreversible
  */
 export default async function(ids: string[], concurrency?: number): Promise<BatchResult> {
   return { succeeded: 0, failed: 0, errors: [] };

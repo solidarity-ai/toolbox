@@ -1,25 +1,25 @@
 {
   "name": "shared-types",
   "runtime": "typescript-sandbox",
-  "sha256": "7f1e6ce668d7011b443da47f8277467ff1cccaace7f346fa1098b1b0c1fe3518",
+  "sha256": "385d539c2a9181a0ef632ffadebe20373265e454838c4e80afd91eeeed082fed",
   "tools": [
     {
       "entry_ts": "tools/tickets.get.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     },
     {
       "entry_ts": "tools/tickets.create.ts",
-      "accessMode": "irreversible"
+      "effect": "irreversible"
     },
     {
       "entry_ts": "tools/tickets.update.ts",
-      "accessMode": "reversible"
+      "effect": "reversible"
     },
     {
       "entry_ts": "tools/tickets.list.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }

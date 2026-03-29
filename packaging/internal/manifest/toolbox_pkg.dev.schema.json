@@ -46,7 +46,7 @@
             "minLength": 1,
             "description": "Path to the tool's TypeScript entry file, relative to the package root."
           },
-          "accessMode": {
+          "effect": {
             "type": "string",
             "enum": ["readOnly", "reversible", "irreversible"],
             "description": "Data access level. readOnly: no side effects (e.g. list, get, search). reversible: creates data that can be undone (e.g. create draft, add tag). irreversible: may edit or delete data, or cause irreversible side effects (e.g. send message, update record, delete)."

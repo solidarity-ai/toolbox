@@ -23,7 +23,7 @@ interface Ticket {
 }
 
 /**
- * @accessMode reversible
+ * @effect reversible
  */
 export default function(id: string, fields: TicketFields): Ticket {
   return { id, title: fields.title, status: "open" };

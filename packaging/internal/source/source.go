@@ -80,7 +80,7 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			Name:           manifest.InferToolName(pkgTool.EntryTS),
 			Description:    description,
 			Sig:            pkgTool.Sig,
-			AccessMode:     pkgTool.AccessMode,
+			Effect:         pkgTool.Effect,
 			Idempotent:     pkgTool.Idempotent,
 			ResourceParams: pkgTool.ResourceParams,
 			Package:        &p.Package,
@@ -177,9 +177,9 @@ func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 		if meta.Sig != nil {
 			for _, tag := range meta.Sig.Tags() {
 				switch tag.Name {
-				case "accessMode":
-					if am := tooldef.AccessMode(tag.Text); am != "" {
-						tool.AccessMode = am
+				case "effect":
+					if e := tooldef.Effect(tag.Text); e != "" {
+						tool.Effect = e
 					}
 				case "idempotent":
 					v := true

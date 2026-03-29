@@ -19,7 +19,7 @@ type AgentTool struct {
 	Sig           *toolbox.FuncSignature
 	hiddenParams  map[string]bool
 	boundLiterals map[string]any // param name -> constant value for non-hidden bindings
-	AccessMode    tooldef.AccessMode
+	Effect        tooldef.Effect
 	Idempotent    *bool
 }
 
@@ -90,7 +90,7 @@ func (r ResolvedToolset) AgentView() AgentView {
 			Sig:           rt.Sig,
 			hiddenParams:  hidden,
 			boundLiterals: literals,
-			AccessMode:    rt.AccessMode,
+			Effect:        rt.Effect,
 			Idempotent:    rt.Idempotent,
 		}
 

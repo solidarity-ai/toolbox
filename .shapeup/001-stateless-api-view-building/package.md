@@ -93,7 +93,7 @@ type Config struct {
 ### Element: Resource Param Inference + Package-Level Binding Names
 
 **What**: Convention-based resource param inference from tool entry filenames. Package manifest can override with explicit binding name mapping when conventions don't fit across packages.
-**Where**: `packaging/internal/manifest/manifest.go` (near existing `InferAccessMode`/`InferToolName`)
+**Where**: `packaging/internal/manifest/manifest.go` (near existing `InferEffect`/`InferToolName`)
 **Wiring**: `InferResourceParams(entryTS)` called during `Compile()` to populate new fields on `PackageTool`. Toolset reads these during `Resolve()` to know which params are bindable at resource level.
 **Affected code**: `packaging/internal/manifest/manifest.go`, `tool/tool.go` (new fields on `PackageTool`)
 
@@ -376,7 +376,7 @@ Every R row has at least one check. Every element column has at least one check.
 - `toolset/toolset.go` — Builder, ResolvedToolset, Resolve() (lines 1-81)
 - `tool/tool.go` — Package, PackageTool, ResolvedTool types (lines 1-62)
 - `packaging/internal/source/source.go` — LoadedPackage, ResolvedTools(), enrichToolMetadata()
-- `packaging/internal/manifest/manifest.go` — DevManifest, Compile(), InferAccessMode, InferToolName
+- `packaging/internal/manifest/manifest.go` — DevManifest, Compile(), InferEffect, InferToolName
 - `codemode/codemode.go` — Run(), preludeForTools(), typecheckSDKSource() (lines 1-202)
 - `invoke/invoke.go` — Run(), RunWithVFS(), session caching (lines 1-172)
 - `service/service.go` — Stub APIs (lines 1-69)

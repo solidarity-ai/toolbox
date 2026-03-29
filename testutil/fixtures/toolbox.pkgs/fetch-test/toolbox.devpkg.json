@@ -5,7 +5,7 @@
     {
       "entry_ts": "tools/fetch-test.get.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }

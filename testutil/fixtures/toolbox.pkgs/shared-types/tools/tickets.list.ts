@@ -11,7 +11,7 @@ interface Ticket {
 }
 
 /**
- * @accessMode readOnly
+ * @effect readOnly
  * @idempotent
  */
 export default function(status?: "open" | "in_progress" | "resolved" | "closed"): Ticket[] {

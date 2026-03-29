@@ -16,7 +16,7 @@ interface AnalysisResult {
 }
 
 /**
- * @accessMode readOnly
+ * @effect readOnly
  */
 export default function(input: string): AnalysisResult {
   return { score: 100, summary: "ok", recommendations: [] };

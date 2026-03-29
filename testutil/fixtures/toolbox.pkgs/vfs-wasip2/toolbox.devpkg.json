@@ -8,7 +8,7 @@
     {
       "entry_ts": "tools/vfs-wasip2.run.ts",
       "idempotent": true,
-      "accessMode": "irreversible"
+      "effect": "irreversible"
     }
   ]
 }

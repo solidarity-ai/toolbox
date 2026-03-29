@@ -27,14 +27,14 @@ func TestLoadDir(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			wantPackage: tooldef.Package{
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -45,7 +45,7 @@ func TestLoadDir(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
   "tools": [
-    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			wantPackage: tooldef.Package{
@@ -53,7 +53,7 @@ func TestLoadDir(t *testing.T) {
 				Runtime:     tooldef.RuntimeTypeScriptWasixSandbox,
 				Executables: map[string]string{"gwc": "dist/gwc.wasm"},
 				Tools: []tooldef.PackageTool{
-					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), AccessMode: tooldef.AccessModeReadOnly},
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -110,7 +110,7 @@ func TestLoadDirWithMode(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "effect": "readOnly" }
   ]
 }`)
 		result, err := LoadDirWithMode(dir, manifest.ValidationModeDev)
@@ -129,7 +129,7 @@ func TestLoadDirWithMode(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "accessMode": "reversible" }
+    { "entry_ts": "tools/calc.add.ts", "effect": "reversible" }
   ]
 }`)
 		_, err := LoadDirWithMode(dir, manifest.ValidationModeDist)
@@ -148,7 +148,7 @@ func TestLoadDirExecutables(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
   "tools": [
-    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 
@@ -178,7 +178,7 @@ func TestSourceFSFiltersTypeScript(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			wantHelperOK: false,
@@ -190,7 +190,7 @@ func TestSourceFSFiltersTypeScript(t *testing.T) {
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["lib/**/*.ts"],
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			wantHelperOK: true,
@@ -242,8 +242,8 @@ func TestResolvedTools(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" },
-    { "entry_ts": "tools/calc.sub.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" },
+    { "entry_ts": "tools/calc.sub.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 		mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function() {}")
@@ -278,7 +278,7 @@ func TestResolvedTools(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
   "tools": [
-    { "entry_ts": "tools/users.list.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 		mustWriteFile(t, filepath.Join(dir, "tools", "users.list.ts"), "export default function() {}")

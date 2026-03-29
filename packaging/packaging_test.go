@@ -20,7 +20,7 @@ func TestLoadDev(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function() {}")
@@ -45,7 +45,7 @@ func TestPackAndLoadArchive(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
@@ -73,7 +73,7 @@ func TestPackAcceptsMissingIdempotent(t *testing.T) {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
@@ -139,7 +139,7 @@ func TestLoadDevWasip2Runtime(t *testing.T) {
   "runtime": "typescript+wasip2-sandbox",
   "executables": { "http-client": "dist/http-client.wasm" },
   "tools": [
-    { "entry_ts": "tools/http-client.fetch.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/http-client.fetch.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "http-client.fetch.ts"), "export default function() {}")

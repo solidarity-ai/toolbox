@@ -10,7 +10,7 @@ declare const fs: {
 
 /**
  * Run a WASM guest that can round-trip, delete, or rename files through the shared VFS.
- * @accessMode irreversible
+ * @effect irreversible
  */
 export default async function tool(action?: "roundtrip" | "delete" | "rename"): Promise<string> {
   const resolvedAction = action ?? "roundtrip";

@@ -61,7 +61,7 @@ type DevManifestToolResource struct {
 type DevManifestTool struct {
 	EntryTS    string                   `json:"entry_ts"`
 	Idempotent *bool                    `json:"idempotent"`
-	AccessMode *tooldef.AccessMode      `json:"accessMode"`
+	Effect     *tooldef.Effect           `json:"effect"`
 	Resource   *DevManifestToolResource `json:"resource,omitempty"`
 }
 
@@ -119,9 +119,9 @@ func Compile(dev DevManifest) tooldef.Package {
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
 	}
 	for i, tool := range dev.Tools {
-		accessMode := InferAccessMode(tool.EntryTS)
-		if tool.AccessMode != nil {
-			accessMode = *tool.AccessMode
+		effect := InferEffect(tool.EntryTS)
+		if tool.Effect != nil {
+			effect = *tool.Effect
 		}
 
 		var resourceMode string
@@ -141,7 +141,7 @@ func Compile(dev DevManifest) tooldef.Package {
 		pkg.Tools[i] = tooldef.PackageTool{
 			EntryTS:        tool.EntryTS,
 			Idempotent:     tool.Idempotent,
-			AccessMode:     accessMode,
+			Effect:         effect,
 			ResourceParams: resourceParams,
 		}
 	}
@@ -175,18 +175,18 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 	return warnings, nil
 }
 
-// InferAccessMode derives an access mode from the tool entry filename verb.
-func InferAccessMode(entryTS string) tooldef.AccessMode {
+// InferEffect derives an effect from the tool entry filename verb.
+func InferEffect(entryTS string) tooldef.Effect {
 	verb := inferVerb(entryTS)
 	switch verb {
 	case "list", "get", "read", "fetch", "search", "find", "describe":
-		return tooldef.AccessModeReadOnly
+		return tooldef.EffectReadOnly
 	case "create", "add", "clone", "new":
-		return tooldef.AccessModeReversible
+		return tooldef.EffectReversible
 	case "update", "delete", "remove", "set", "put", "patch", "replace", "edit", "send", "post":
-		return tooldef.AccessModeIrreversible
+		return tooldef.EffectIrreversible
 	default:
-		return tooldef.AccessModeIrreversible
+		return tooldef.EffectIrreversible
 	}
 }
 

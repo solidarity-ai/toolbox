@@ -83,7 +83,7 @@ Per-tool descriptions and some defaults may come from tool source during local d
     {
       "entry_ts": "tools/users.list.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }
@@ -159,7 +159,7 @@ export async function execute(params, ctx) {
 
 Note: `params.user_id` and `params.calendar_id` are available in `execute` because they're inferred from the resource path. They don't need to be declared in `params` — they're always present.
 
-Tool metadata is not only for static safety labeling. Fields such as `readOnly`, `idempotent`, and `accessMode` are also expected to inform recovery guidance later, for example helping an LLM decide whether to retry, re-read state, or choose a safer follow-up tool after a failed call.
+Tool metadata is not only for static safety labeling. Fields such as `readOnly`, `idempotent`, and `effect` are also expected to inform recovery guidance later, for example helping an LLM decide whether to retry, re-read state, or choose a safer follow-up tool after a failed call.
 
 ### Pure TS Tool (no WASM asset)
 

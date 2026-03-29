@@ -1,12 +1,12 @@
 {
   "name": "fetch-test",
   "runtime": "typescript-sandbox",
-  "sha256": "dac5c0a0580fda5e0c46b09ee6a300f1869d192033598319014b794dd4b34b5e",
+  "sha256": "8d2b2a0a5ccdc662d1766d8db0f9c52b0dbe3635de148af74b214ce0b4bbab8a",
   "tools": [
     {
       "entry_ts": "tools/fetch-test.get.ts",
       "idempotent": true,
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     }
   ]
 }

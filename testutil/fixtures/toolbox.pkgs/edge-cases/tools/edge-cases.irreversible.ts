@@ -1,6 +1,6 @@
 /**
  * Permanently delete all records matching the filter.
- * @accessMode irreversible
+ * @effect irreversible
  * @param filter - SQL-like filter expression
  * @param confirm - Must be true to execute deletion
  */

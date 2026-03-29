@@ -133,15 +133,15 @@ func TestResolveInvalidCELExpressionErrors(t *testing.T) {
 	}
 }
 
-func TestAgentViewAccessModeAndIdempotent(t *testing.T) {
+func TestAgentViewEffectAndIdempotent(t *testing.T) {
 	t.Parallel()
 
 	resolved := calcToolset(t, toolset.Config{})
 	view := resolved.AgentView()
 
 	addTool := findAgentTool(t, view, "calc.add")
-	if addTool.AccessMode != tooldef.AccessModeReadOnly {
-		t.Fatalf("expected calc.add accessMode=readOnly, got %q", addTool.AccessMode)
+	if addTool.Effect != tooldef.EffectReadOnly {
+		t.Fatalf("expected calc.add effect=readOnly, got %q", addTool.Effect)
 	}
 	if addTool.Idempotent == nil || !*addTool.Idempotent {
 		t.Fatal("expected calc.add idempotent=true")
@@ -192,7 +192,7 @@ func TestAgentViewResourceBindingHidesParam(t *testing.T) {
 		Tools: []tooldef.PackageTool{
 			{
 				EntryTS:    "tools/account.tickets.list.ts",
-				AccessMode: tooldef.AccessModeReadOnly,
+				Effect: tooldef.EffectReadOnly,
 				Idempotent: boolPtr(true),
 				ParamsSchema: map[string]any{
 					"type": "object",

@@ -285,7 +285,7 @@ func TestPackBundlesExecutables(t *testing.T) {
   "runtime": "typescript+wasix-sandbox",
   "executables": { "guest": "dist/guest.wasm" },
   "tools": [
-    { "entry_ts": "tools/run.ts", "idempotent": true, "accessMode": "irreversible" }
+    { "entry_ts": "tools/run.ts", "idempotent": true, "effect": "irreversible" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "run.ts"), `export default function tool() { return "ok"; }`)
@@ -380,7 +380,7 @@ func setupTestPackage(t *testing.T) string {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
@@ -394,7 +394,7 @@ func setupTestPackageWithoutIdempotent(t *testing.T) string {
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
-    { "entry_ts": "tools/calc.add.ts", "accessMode": "readOnly" }
+    { "entry_ts": "tools/calc.add.ts", "effect": "readOnly" }
   ]
 }`)
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)

@@ -24,12 +24,12 @@ const RuntimeTypeScriptWasixSandbox ToolRuntime = "typescript+wasix-sandbox"
 
 const RuntimeTypeScriptWasip2Sandbox ToolRuntime = "typescript+wasip2-sandbox"
 
-type AccessMode string
+type Effect string
 
 const (
-	AccessModeReadOnly     AccessMode = "readOnly"
-	AccessModeReversible   AccessMode = "reversible"
-	AccessModeIrreversible AccessMode = "irreversible"
+	EffectReadOnly     Effect = "readOnly"
+	EffectReversible   Effect = "reversible"
+	EffectIrreversible Effect = "irreversible"
 )
 
 // ResourceParam describes one inferred resource parameter and its canonical binding name.
@@ -41,7 +41,7 @@ type ResourceParam struct {
 type PackageTool struct {
 	EntryTS        string                 `json:"entry_ts"`
 	Idempotent     *bool                  `json:"idempotent,omitempty"`
-	AccessMode     AccessMode             `json:"accessMode,omitempty"`
+	Effect         Effect                 `json:"effect,omitempty"`
 	Description    string                 `json:"description,omitempty"`
 	ParamsSchema   map[string]any         `json:"paramsSchema,omitempty"`
 	Sig            *toolbox.FuncSignature `json:"-"`
@@ -55,7 +55,7 @@ type ResolvedTool struct {
 	Name           string
 	Description    string
 	Sig            *toolbox.FuncSignature
-	AccessMode     AccessMode
+	Effect         Effect
 	Idempotent     *bool
 	ResourceParams []ResourceParam
 	Package        *Package

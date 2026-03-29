@@ -13,7 +13,7 @@ interface BatchParams {
 }
 
 /**
- * @accessMode irreversible
+ * @effect irreversible
  * @idempotent
  */
 export default function(params: BatchParams): string {

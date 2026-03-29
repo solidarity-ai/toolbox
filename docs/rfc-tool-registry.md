@@ -245,12 +245,12 @@ Each package version serves this metadata (from the proxy's `.info` endpoint, or
     {
       "path": "account.tickets.list",
       "description": "List tickets for an account",
-      "accessMode": "readOnly"
+      "effect": "readOnly"
     },
     {
       "path": "account.tickets.comments.add",
       "description": "Add a comment to a ticket",
-      "accessMode": "appendOnly"
+      "effect": "reversible"
     }
   ],
   "published": "2026-03-15T10:30:00Z",

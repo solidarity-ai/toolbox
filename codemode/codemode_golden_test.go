@@ -47,9 +47,6 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 		},
 	}
 
-	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
-	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
-
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
 			resolved, err := builder.Resolve(v.cfg)
@@ -57,72 +54,10 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 				t.Fatalf("resolve toolset: %v", err)
 			}
 
-			// --- SDK source golden ---
-			sdkSource := typecheckSDKSource(resolved)
-			sdkFile := filepath.Join(testdataDir, "calc-"+v.name+".sdk.ts")
-
-			if generateGoldens {
-				if err := os.MkdirAll(testdataDir, 0o755); err != nil {
-					t.Fatalf("create testdata dir: %v", err)
-				}
-				if err := os.WriteFile(sdkFile, []byte(sdkSource), 0o644); err != nil {
-					t.Fatalf("write sdk golden: %v", err)
-				}
-				t.Logf("wrote %s", sdkFile)
-			} else {
-				want, err := os.ReadFile(sdkFile)
-				if err != nil {
-					t.Fatalf("read sdk golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-				}
-				if diff := cmp.Diff(string(want), sdkSource); diff != "" {
-					t.Errorf("sdk golden mismatch (-want +got):\n%s", diff)
-				}
-			}
-
-			// --- Declaration (.d.ts) golden ---
-			declSource := DeclarationSource(resolved)
-			declFile := filepath.Join(testdataDir, "calc-"+v.name+".d.ts")
-
-			if generateGoldens {
-				if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
-					t.Fatalf("write declaration golden: %v", err)
-				}
-				t.Logf("wrote %s", declFile)
-			} else {
-				want, err := os.ReadFile(declFile)
-				if err != nil {
-					t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-				}
-				if diff := cmp.Diff(string(want), declSource); diff != "" {
-					t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
-				}
-			}
-
-			// --- MCP schema golden ---
-			view := resolved.AgentView()
-			schemaMap := buildSchemaMap(view)
-			schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
-			if err != nil {
-				t.Fatalf("marshal schema: %v", err)
-			}
-			schemaJSON = append(schemaJSON, '\n')
-
-			schemaFile := filepath.Join(testdataDir, "calc-"+v.name+".schema.json")
-
-			if generateGoldens {
-				if err := os.WriteFile(schemaFile, schemaJSON, 0o644); err != nil {
-					t.Fatalf("write schema golden: %v", err)
-				}
-				t.Logf("wrote %s", schemaFile)
-			} else {
-				want, err := os.ReadFile(schemaFile)
-				if err != nil {
-					t.Fatalf("read schema golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-				}
-				if diff := cmp.Diff(string(want), string(schemaJSON)); diff != "" {
-					t.Errorf("schema golden mismatch (-want +got):\n%s", diff)
-				}
-			}
+			prefix := "calc-" + v.name
+			checkGolden(t, goldenPath(prefix+".sdk.ts"), typecheckSDKSource(resolved))
+			checkGolden(t, goldenPath(prefix+".d.ts"), DeclarationSource(resolved))
+			checkGolden(t, goldenPath(prefix+".schema.json"), schemaGoldenSource(t, resolved))
 		})
 	}
 }
@@ -135,56 +70,8 @@ func TestEdgeCaseGoldens(t *testing.T) {
 		t.Fatalf("resolve toolset: %v", err)
 	}
 
-	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
-	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
-
-	// --- Declaration (.d.ts) golden ---
-	declSource := DeclarationSource(resolved)
-	declFile := filepath.Join(testdataDir, "edge-cases-passthrough.d.ts")
-
-	if generateGoldens {
-		if err := os.MkdirAll(testdataDir, 0o755); err != nil {
-			t.Fatalf("create testdata dir: %v", err)
-		}
-		if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
-			t.Fatalf("write declaration golden: %v", err)
-		}
-		t.Logf("wrote %s", declFile)
-	} else {
-		want, err := os.ReadFile(declFile)
-		if err != nil {
-			t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-		}
-		if diff := cmp.Diff(string(want), declSource); diff != "" {
-			t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
-		}
-	}
-
-	// --- MCP schema golden ---
-	view := resolved.AgentView()
-	schemaMap := buildSchemaMap(view)
-	schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal schema: %v", err)
-	}
-	schemaJSON = append(schemaJSON, '\n')
-
-	schemaFile := filepath.Join(testdataDir, "edge-cases-passthrough.schema.json")
-
-	if generateGoldens {
-		if err := os.WriteFile(schemaFile, schemaJSON, 0o644); err != nil {
-			t.Fatalf("write schema golden: %v", err)
-		}
-		t.Logf("wrote %s", schemaFile)
-	} else {
-		want, err := os.ReadFile(schemaFile)
-		if err != nil {
-			t.Fatalf("read schema golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-		}
-		if diff := cmp.Diff(string(want), string(schemaJSON)); diff != "" {
-			t.Errorf("schema golden mismatch (-want +got):\n%s", diff)
-		}
-	}
+	checkGolden(t, goldenPath("edge-cases-passthrough.d.ts"), DeclarationSource(resolved))
+	checkGolden(t, goldenPath("edge-cases-passthrough.schema.json"), schemaGoldenSource(t, resolved))
 }
 
 func TestSharedTypesGoldens(t *testing.T) {
@@ -195,56 +82,8 @@ func TestSharedTypesGoldens(t *testing.T) {
 		t.Fatalf("resolve toolset: %v", err)
 	}
 
-	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
-	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
-
-	// --- Declaration (.d.ts) golden ---
-	declSource := DeclarationSource(resolved)
-	declFile := filepath.Join(testdataDir, "shared-types-passthrough.d.ts")
-
-	if generateGoldens {
-		if err := os.MkdirAll(testdataDir, 0o755); err != nil {
-			t.Fatalf("create testdata dir: %v", err)
-		}
-		if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
-			t.Fatalf("write declaration golden: %v", err)
-		}
-		t.Logf("wrote %s", declFile)
-	} else {
-		want, err := os.ReadFile(declFile)
-		if err != nil {
-			t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-		}
-		if diff := cmp.Diff(string(want), declSource); diff != "" {
-			t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
-		}
-	}
-
-	// --- MCP schema golden ---
-	view := resolved.AgentView()
-	schemaMap := buildSchemaMap(view)
-	schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal schema: %v", err)
-	}
-	schemaJSON = append(schemaJSON, '\n')
-
-	schemaFile := filepath.Join(testdataDir, "shared-types-passthrough.schema.json")
-
-	if generateGoldens {
-		if err := os.WriteFile(schemaFile, schemaJSON, 0o644); err != nil {
-			t.Fatalf("write schema golden: %v", err)
-		}
-		t.Logf("wrote %s", schemaFile)
-	} else {
-		want, err := os.ReadFile(schemaFile)
-		if err != nil {
-			t.Fatalf("read schema golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-		}
-		if diff := cmp.Diff(string(want), string(schemaJSON)); diff != "" {
-			t.Errorf("schema golden mismatch (-want +got):\n%s", diff)
-		}
-	}
+	checkGolden(t, goldenPath("shared-types-passthrough.d.ts"), DeclarationSource(resolved))
+	checkGolden(t, goldenPath("shared-types-passthrough.schema.json"), schemaGoldenSource(t, resolved))
 }
 
 func TestGithubIssuesGoldens(t *testing.T) {
@@ -255,53 +94,43 @@ func TestGithubIssuesGoldens(t *testing.T) {
 		t.Fatalf("resolve toolset: %v", err)
 	}
 
-	testdataDir := filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode")
-	generateGoldens := os.Getenv("GENERATE_GOLDENS") == "1"
+	checkGolden(t, goldenPath("github-issues-passthrough.d.ts"), DeclarationSource(resolved))
+	checkGolden(t, goldenPath("github-issues-passthrough.schema.json"), schemaGoldenSource(t, resolved))
+}
 
-	declSource := DeclarationSource(resolved)
-	declFile := filepath.Join(testdataDir, "github-issues-passthrough.d.ts")
+func goldenPath(name string) string {
+	return filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode", name)
+}
 
-	if generateGoldens {
-		if err := os.MkdirAll(testdataDir, 0o755); err != nil {
-			t.Fatalf("create testdata dir: %v", err)
-		}
-		if err := os.WriteFile(declFile, []byte(declSource), 0o644); err != nil {
-			t.Fatalf("write declaration golden: %v", err)
-		}
-		t.Logf("wrote %s", declFile)
-	} else {
-		want, err := os.ReadFile(declFile)
-		if err != nil {
-			t.Fatalf("read declaration golden (run with GENERATE_GOLDENS=1 to create): %v", err)
-		}
-		if diff := cmp.Diff(string(want), declSource); diff != "" {
-			t.Errorf("declaration golden mismatch (-want +got):\n%s", diff)
-		}
-	}
-
+func schemaGoldenSource(t *testing.T, resolved toolset.ResolvedToolset) string {
+	t.Helper()
 	view := resolved.AgentView()
 	schemaMap := buildSchemaMap(view)
 	schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal schema: %v", err)
 	}
-	schemaJSON = append(schemaJSON, '\n')
+	return string(schemaJSON) + "\n"
+}
 
-	schemaFile := filepath.Join(testdataDir, "github-issues-passthrough.schema.json")
-
-	if generateGoldens {
-		if err := os.WriteFile(schemaFile, schemaJSON, 0o644); err != nil {
-			t.Fatalf("write schema golden: %v", err)
+func checkGolden(t *testing.T, path string, got string) {
+	t.Helper()
+	if os.Getenv("GENERATE_GOLDENS") == "1" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create golden dir: %v", err)
 		}
-		t.Logf("wrote %s", schemaFile)
-	} else {
-		want, err := os.ReadFile(schemaFile)
-		if err != nil {
-			t.Fatalf("read schema golden (run with GENERATE_GOLDENS=1 to create): %v", err)
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
 		}
-		if diff := cmp.Diff(string(want), string(schemaJSON)); diff != "" {
-			t.Errorf("schema golden mismatch (-want +got):\n%s", diff)
-		}
+		t.Logf("wrote %s", path)
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden (run with GENERATE_GOLDENS=1 to create): %v", err)
+	}
+	if diff := cmp.Diff(string(want), got); diff != "" {
+		t.Errorf("golden mismatch (-want +got):\n%s", diff)
 	}
 }
 

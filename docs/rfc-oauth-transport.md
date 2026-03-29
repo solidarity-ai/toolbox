@@ -70,10 +70,12 @@ Throughout this RFC, we use Google Workspace as the concrete example. The OAuth2
 
 | Credential | Stored in | Visible to tool? |
 |---|---|---|
-| `client_id` | `secrets` store, key `google_workspace/client_id` | No |
-| `client_secret` | `secrets` store, key `google_workspace/client_secret` | No |
-| `refresh_token` | `secrets` store, key `google_workspace/refresh_token` | No |
+| `client_id` | `secrets` store, key `acme.dev/google-workspace/client_id` | No |
+| `client_secret` | `secrets` store, key `acme.dev/google-workspace/client_secret` | No |
+| `refresh_token` | `secrets` store, key `acme.dev/google-workspace/refresh_token` | No |
 | `access_token` | In-memory token cache (transport layer) | No |
+
+Secret keys are prefixed by the package's fully qualified module name (`acme.dev/google-workspace`), with the credential `name` as a suffix. This means each package gets its own isolated secret namespace by default — two packages that both declare a credential named `google_workspace` will NOT share secrets.
 
 The tool code should look like this and nothing more:
 
@@ -150,8 +152,15 @@ type InjectionRule struct {
     // starts with this prefix. Empty means all paths on matched hosts.
     PathPrefix string
 
-    // CredentialName is the key prefix in the secret store.
-    // e.g. "google_workspace" -> looks up google_workspace/client_id, etc.
+    // ModuleName is the fully qualified module name of the package that
+    // declares this credential. Used as the secret store key prefix.
+    // e.g. "acme.dev/google-workspace"
+    ModuleName string
+
+    // CredentialName is the key suffix in the secret store.
+    // Combined with ModuleName to form the full key:
+    // e.g. ModuleName "acme.dev/google-workspace" + CredentialName "client_id"
+    //      -> looks up "acme.dev/google-workspace/client_id", etc.
     CredentialName string
 
     // Type determines how the credential is injected.
@@ -234,7 +243,7 @@ The strategy's `fetch()` is NOT the same as the tool's `fetch()`. It is a separa
 
 For pure computation strategies (HMAC signing, SigV4) that don't need HTTP calls, `auth_hosts` can be omitted and `fetch` will not be available, keeping the sandbox minimal.
 
-**Secret scoping for custom strategies:** Because a custom strategy has `fetch()` (and can also manipulate the outbound URL), it has the theoretical ability to exfiltrate any secret it can read. This means secrets exposed to custom strategies must always be **package-scoped**. The `secrets.get()` function in the strategy sandbox is restricted to the credential's own secret store prefix (e.g. `google_workspace/*`). It cannot read secrets belonging to other credentials or packages. Combined with tenant scoping (e.g. `tenant/acme/google_workspace/*`), this ensures a compromised strategy can only leak secrets that belong to its own credential set — not cross-credential or cross-tenant secrets. The `auth_hosts` restriction on `fetch()` further limits where exfiltrated data could be sent, though it is not a complete exfiltration defense on its own (the strategy could also encode data in the URL of the request it's authenticating). Package trust is the primary boundary: custom strategies ship with the package, and the package author is trusted for the secrets they declare.
+**Secret scoping for custom strategies:** Because a custom strategy has `fetch()` (and can also manipulate the outbound URL), it has the theoretical ability to exfiltrate any secret it can read. This means secrets exposed to custom strategies must always be **package-scoped**. The `secrets.get()` function in the strategy sandbox is restricted to the package's own module-name-prefixed namespace (e.g. `acme.dev/google-workspace/*`). It cannot read secrets belonging to other packages — this falls out naturally from the module-name prefix scheme described above. Combined with tenant scoping (e.g. `acme.dev/google-workspace/tenant/acme/*`), this ensures a compromised strategy can only leak secrets that belong to its own package — not cross-package or cross-tenant secrets. The `auth_hosts` restriction on `fetch()` further limits where exfiltrated data could be sent, though it is not a complete exfiltration defense on its own (the strategy could also encode data in the URL of the request it's authenticating). Package trust is the primary boundary: custom strategies ship with the package, and the package author is trusted for the secrets they declare.
 
 **Setup mode** (runs during `toolbox auth`, interactive):
 - Same `fetch()` capability as injection mode, for token exchange calls.
@@ -396,16 +405,16 @@ type CachedToken struct {
 
 **Token refresh flow (inside `Inject`):**
 
-1. Check `TokenCache` for a valid (non-expired) access token for this credential name.
+1. Check `TokenCache` for a valid (non-expired) access token for this module+credential pair.
 2. If valid: inject it as `Authorization: Bearer <token>`. Done.
 3. If expired or missing: perform a token refresh:
-   a. Read `{credential_name}/client_id`, `{credential_name}/client_secret`, and `{credential_name}/refresh_token` from the `SecretStore`.
+   a. Read `{module_name}/{credential_suffix}` keys from the `SecretStore` — e.g. `acme.dev/google-workspace/client_id`, `acme.dev/google-workspace/client_secret`, `acme.dev/google-workspace/refresh_token`.
    b. POST to the provider's token endpoint (e.g. `https://oauth2.googleapis.com/token`) with `grant_type=refresh_token`.
    c. Store the new access token and expiry in `TokenCache`.
    d. Inject the new token.
-4. If refresh fails (e.g. refresh token revoked): return an error. The tool invocation fails with a clear message: "credential google_workspace: token refresh failed (401 Unauthorized). Re-run `toolbox auth google-workspace` to re-authorize."
+4. If refresh fails (e.g. refresh token revoked): return an error. The tool invocation fails with a clear message: "credential acme.dev/google-workspace: token refresh failed (401 Unauthorized). Re-run `toolbox auth google-workspace` to re-authorize."
 
-**Concurrency:** Multiple tool invocations may be in-flight. The `TokenCache` uses `singleflight` to ensure only one refresh request is in flight per credential name. Other callers wait for the in-flight refresh to complete.
+**Concurrency:** Multiple tool invocations may be in-flight. The `TokenCache` uses `singleflight` to ensure only one refresh request is in flight per module+credential pair. Other callers wait for the in-flight refresh to complete.
 
 **Token expiry buffer:** Tokens are considered expired 60 seconds before their actual expiry. This avoids race conditions where a token is valid when checked but expires before the API call completes.
 
@@ -458,25 +467,26 @@ The package does NOT contain actual credentials. It declares what it needs and w
 
 #### Step 2: Toolset Resolution Binds Credentials
 
-When a harness assembles a toolset, it provides actual credential values by referencing the secret store. The `CredentialSet` in the toolset maps the credential name declared by the package to keys in the `SecretStore`:
+When a harness assembles a toolset, the secret store keys are derived automatically from the package's fully qualified module name. No explicit mapping is needed — the module name IS the secret namespace prefix:
 
 ```yaml
-# Conceptual toolset assembly (harness config)
-toolset:
-  credentials:
-    google_workspace:
-      store_prefix: "tenant/acme/google_workspace"
-      # This means:
-      #   client_id     = secrets.Get("tenant/acme/google_workspace/client_id")
-      #   client_secret = secrets.Get("tenant/acme/google_workspace/client_secret")
-      #   refresh_token = secrets.Get("tenant/acme/google_workspace/refresh_token")
+# Derived automatically from package module name "acme.dev/google-workspace"
+# and credential name "google_workspace":
+#   client_id     = secrets.Get("acme.dev/google-workspace/client_id")
+#   client_secret = secrets.Get("acme.dev/google-workspace/client_secret")
+#   refresh_token = secrets.Get("acme.dev/google-workspace/refresh_token")
+#
+# For multi-tenant, tenant is scoped under the module prefix:
+#   client_id     = secrets.Get("acme.dev/google-workspace/tenant/acme/client_id")
 ```
 
 At resolve time, the toolset:
-1. Reads the package's `credentials` declarations.
-2. For each credential, looks up the harness-provided mapping to determine which secret store keys to use.
-3. Builds `InjectionRule` objects from the `inject` config in the package manifest.
+1. Reads the package's `credentials` declarations and its fully qualified module name.
+2. For each credential, derives the secret store key prefix from the module name. The credential `name` field is a suffix within that namespace.
+3. Builds `InjectionRule` objects from the `inject` config in the package manifest, with the module name as the key prefix.
 4. Passes the rules and the `SecretStore` reference to the `CredentialInjector`.
+
+**Default isolation:** Because the module name is the prefix, two different packages cannot access each other's secrets even if they declare credentials with the same `name`. A package `acme.dev/google-workspace` and a package `acme.dev/google-calendar` each get their own secret namespace. This is the desired default — packages are isolated. A future toolset-level override will allow explicit secret sharing across packages when intended.
 
 The injector lazily reads secrets on first use (first token refresh). It never exposes raw secret values to the toolset or the tool.
 
@@ -623,9 +633,9 @@ A toolset with Google, Slack, and Zendesk tools:
 }]
 ```
 
-Each package declares its own credential needs and host rules. The harness maps each credential name to a secret store prefix. The `CredentialInjector` holds all rules and matches each outbound request against them independently.
+Each package declares its own credential needs and host rules. The secret store keys are derived from each package's fully qualified module name (prefix) and credential name (suffix). The `CredentialInjector` holds all rules and matches each outbound request against them independently.
 
-**No collision risk** — different providers use different API hosts. A request to `slack.com` gets the Slack token; a request to `googleapis.com` gets the Google token. They never interfere.
+**No collision risk** — different providers use different API hosts, and different packages are isolated by module name. A request to `slack.com` gets the Slack token; a request to `googleapis.com` gets the Google token. They never interfere. Even if two packages both target `*.googleapis.com`, their credentials are stored under separate module-name prefixes and injected based on which package's tool is executing.
 
 The `CredentialInjector` is constructed once per toolset resolution and holds all rules for all packages in the toolset. This is clean because a toolset is already the unit of composition — it's where packages are assembled for one request or flow.
 
@@ -722,25 +732,25 @@ $ toolbox auth google-workspace
 
 This command:
 
-1. Reads the `google-workspace` package manifest to find its credential declaration (provider: google, scopes: [...]).
-2. Checks if `google_workspace/client_id` and `google_workspace/client_secret` already exist in the secret store.
+1. Reads the `google-workspace` package manifest to find its credential declaration (provider: google, scopes: [...]) and its fully qualified module name.
+2. Checks if `acme.dev/google-workspace/client_id` and `acme.dev/google-workspace/client_secret` already exist in the secret store (using the module name as the key prefix).
    - If not: prompts the user to enter their Google Cloud OAuth2 client ID and secret. Stores them.
 3. Starts a local HTTP server on a random port for the OAuth redirect.
 4. Opens the browser to Google's authorization URL with the declared scopes and `redirect_uri=http://localhost:PORT/callback`.
 5. User consents. Google redirects with an auth code.
 6. Exchanges the auth code for `access_token` + `refresh_token` using the stored client_id and client_secret.
-7. Stores `refresh_token` in the secret store under `google_workspace/refresh_token`.
+7. Stores `refresh_token` in the secret store under `acme.dev/google-workspace/refresh_token`.
 8. Prints "Authorized. Credentials stored in secret store."
 
 The `access_token` is NOT stored — it's short-lived and will be obtained on demand by the `CredentialInjector` via token refresh.
 
 **Re-authorization:** If a refresh token is revoked or scopes change, `toolbox auth google-workspace` can be re-run. It overwrites the stored refresh token.
 
-**Multiple tenants:** For multi-tenant setups, the secret store prefix is tenant-scoped:
+**Multiple tenants:** For multi-tenant setups, the tenant is scoped under the module prefix:
 
 ```bash
 $ toolbox auth google-workspace --tenant acme
-# Stores under tenant/acme/google_workspace/...
+# Stores under acme.dev/google-workspace/tenant/acme/...
 ```
 
 ### Injection Methods
@@ -826,4 +836,6 @@ At package publish time, should we validate that credential declarations are con
 
 ### 7. Shared Credentials Across Packages
 
-Two packages in the same toolset might both need Google credentials (e.g., `google-workspace` and `google-calendar`). Should they share a single credential, or each have their own? The current design uses the credential `name` as the joining key — if both packages declare `"name": "google_workspace"`, they share the same secret store keys and token cache entry. This is intentional but should be documented clearly to avoid accidental sharing.
+Two packages in the same toolset might both need Google credentials (e.g., `google-workspace` and `google-calendar`). Under the current design they are **isolated by default** — each package's secrets are prefixed by its own fully qualified module name, so even identical credential `name` values resolve to different secret store keys. `acme.dev/google-workspace/client_id` and `acme.dev/google-calendar/client_id` are separate entries. This prevents accidental secret leakage between packages.
+
+For cases where sharing IS desired (e.g., a single Google OAuth credential used by multiple packages), a future **toolset-level override** will allow explicit cross-package secret aliasing. This is deferred — the isolated-by-default posture is the right starting point.

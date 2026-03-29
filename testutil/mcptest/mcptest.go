@@ -2,7 +2,6 @@ package mcptest
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/client"
@@ -87,29 +86,3 @@ func (h *Harness) CallTool(name string, args map[string]any) *mcp.CallToolResult
 	return result
 }
 
-func StructuredMap(t testing.TB, result *mcp.CallToolResult) map[string]any {
-	t.Helper()
-
-	if result == nil {
-		t.Fatalf("result is nil")
-	}
-	if result.StructuredContent == nil {
-		t.Fatalf("structured content is nil")
-	}
-
-	if m, ok := result.StructuredContent.(map[string]any); ok {
-		return m
-	}
-
-	data, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal structured content: %v", err)
-	}
-
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal structured content: %v", err)
-	}
-
-	return out
-}

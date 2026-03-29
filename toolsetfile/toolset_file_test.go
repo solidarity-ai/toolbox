@@ -413,7 +413,7 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 
 		gotIDs := resolvedToolIDs(got)
-		wantIDs := []string{"calc/calc.add", "calc/calc.sub", "calc/calc.asyncAdd", "github-issues/github-issues.get"}
+		wantIDs := []string{"calc/calc.add", "calc/calc.sub", "calc/calc.asyncAdd", "github-issues/githubIssues.get"}
 		if !reflect.DeepEqual(gotIDs, wantIDs) {
 			t.Fatalf("resolved tools = %#v, want %#v", gotIDs, wantIDs)
 		}
@@ -665,7 +665,10 @@ func TestToolsetFileResolve(t *testing.T) {
 		if err := wantBuilder.AddFromRegistry(ctx, fixtures[0].module, fixtures[0].version); err != nil {
 			t.Fatalf("imperative AddFromRegistry(%s): %v", fixtures[0].module, err)
 		}
-		want := wantBuilder.Resolve()
+		want, err := wantBuilder.Resolve(toolset.Config{})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
 
 		gotIDs := resolvedToolIDs(got)
 		wantIDs := resolvedToolIDs(want)

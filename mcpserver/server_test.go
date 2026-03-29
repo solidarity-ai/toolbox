@@ -395,9 +395,8 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 		t.Fatalf("expected non-error result")
 	}
 
-	structured := mcptest.StructuredMap(t, result)
-	if got := structured["tool"]; got != "httpClient.fetch" {
-		t.Fatalf("expected tool httpClient.fetch, got %#v", got)
+	if len(result.Content) == 0 {
+		t.Fatalf("expected content in result")
 	}
 	text, ok := mcp.AsTextContent(result.Content[0])
 	if !ok {

@@ -398,5 +398,5 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 		}
 	}
 
-	return builder.Resolve(), nil
+	return builder.Resolve(toolset.Config{})
 }

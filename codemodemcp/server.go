@@ -2,21 +2,19 @@ package codemodemcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/solidarity-ai/toolbox/service"
 )
 
 const (
-	ToolDiscoveryExecute = service.ToolDiscoveryExecute
-	ToolActionExecute    = service.ToolActionExecute
+	ToolDiscoveryExecute = "tool_discovery_execute"
+	ToolActionExecute    = "tool_action_execute"
 )
 
 // New creates an MCP server with the initial Toolbox MCP surface.
-//
-// The server currently delegates to stub service-layer implementations so the
-// outside-in caller contracts can be validated before real codemode wiring is added.
 func New() *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		"toolbox-codemode-mcp-server",
@@ -47,30 +45,49 @@ func newActionTool() mcp.Tool {
 	)
 }
 
-func handleDiscoveryExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleDiscoveryExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	code, err := request.RequireString("code")
 	if err != nil {
 		return nil, err
 	}
 
-	return service.ExecuteToolDiscovery(ctx, service.ToolDiscoveryExecuteRequest{
-		Code: code,
-	})
+	// Stub: return a fake discovery result.
+	result := map[string]any{
+		"mode":      "discovery",
+		"toolboxID": "tbx_stub",
+		"receivedCode": code,
+	}
+	return toToolResult(result)
 }
 
-func handleActionExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleActionExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	toolboxID, err := request.RequireString("toolboxID")
 	if err != nil {
 		return nil, err
 	}
-
 	code, err := request.RequireString("code")
 	if err != nil {
 		return nil, err
 	}
 
-	return service.ExecuteToolAction(ctx, service.ToolActionExecuteRequest{
-		ToolboxID: toolboxID,
-		Code:      code,
-	})
+	// Stub: return a fake action result.
+	result := map[string]any{
+		"mode":         "action",
+		"toolboxID":    toolboxID,
+		"receivedCode": code,
+	}
+	return toToolResult(result)
+}
+
+// toToolResult wraps any value into an MCP text result.
+// Strings pass through; everything else is JSON-serialized.
+func toToolResult(v any) (*mcp.CallToolResult, error) {
+	if s, ok := v.(string); ok {
+		return mcp.NewToolResultText(s), nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool result: %w", err)
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }

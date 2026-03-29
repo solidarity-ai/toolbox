@@ -85,4 +85,3 @@ func (h *Harness) CallTool(name string, args map[string]any) *mcp.CallToolResult
 
 	return result
 }
-

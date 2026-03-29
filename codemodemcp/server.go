@@ -53,8 +53,8 @@ func handleDiscoveryExecute(_ context.Context, request mcp.CallToolRequest) (*mc
 
 	// Stub: return a fake discovery result.
 	result := map[string]any{
-		"mode":      "discovery",
-		"toolboxID": "tbx_stub",
+		"mode":         "discovery",
+		"toolboxID":    "tbx_stub",
 		"receivedCode": code,
 	}
 	return toToolResult(result)

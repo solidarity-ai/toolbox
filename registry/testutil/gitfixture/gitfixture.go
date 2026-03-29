@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	pseudoAuthorTimeRFC3339  = "2026-03-27T11:22:33Z"
+	pseudoAuthorTimeRFC3339 = "2026-03-27T11:22:33Z"
 	pseudoCommitTimeRFC3339 = "2026-03-27T12:34:56Z"
 )
 

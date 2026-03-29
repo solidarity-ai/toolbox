@@ -363,7 +363,7 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	toolsetPath := filepath.Join(consumerDir, "toolbox.toolset.json")
 	writeJSONFile(t, toolsetPath, map[string]any{
 		"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
-		"tools": []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+		"tools":    []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
 	})
 	writeJSONFile(t, filepath.Join(consumerDir, "toolbox.toolset.local.json"), map[string]any{
 		"replace": map[string]string{"example.com/acme/calc": "../package-repo"},

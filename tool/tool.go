@@ -39,13 +39,13 @@ type ResourceParam struct {
 }
 
 type PackageTool struct {
-	EntryTS        string           `json:"entry_ts"`
-	Idempotent     *bool            `json:"idempotent,omitempty"`
-	AccessMode     AccessMode       `json:"accessMode,omitempty"`
-	Description    string           `json:"description,omitempty"`
-	ParamsSchema   map[string]any   `json:"paramsSchema,omitempty"`
+	EntryTS        string                 `json:"entry_ts"`
+	Idempotent     *bool                  `json:"idempotent,omitempty"`
+	AccessMode     AccessMode             `json:"accessMode,omitempty"`
+	Description    string                 `json:"description,omitempty"`
+	ParamsSchema   map[string]any         `json:"paramsSchema,omitempty"`
 	Sig            *toolbox.FuncSignature `json:"-"`
-	ResourceParams []ResourceParam  `json:"resourceParams,omitempty"`
+	ResourceParams []ResourceParam        `json:"resourceParams,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current

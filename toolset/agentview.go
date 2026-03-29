@@ -13,14 +13,14 @@ type AgentView struct {
 
 // AgentTool is a single tool visible to the agent.
 type AgentTool struct {
-	Name           string
-	Description    string
-	ParamsSchema   map[string]any
-	Sig            *toolbox.FuncSignature
-	hiddenParams   map[string]bool
-	boundLiterals  map[string]any // param name -> constant value for non-hidden bindings
-	AccessMode     tooldef.AccessMode
-	Idempotent     *bool
+	Name          string
+	Description   string
+	ParamsSchema  map[string]any
+	Sig           *toolbox.FuncSignature
+	hiddenParams  map[string]bool
+	boundLiterals map[string]any // param name -> constant value for non-hidden bindings
+	AccessMode    tooldef.AccessMode
+	Idempotent    *bool
 }
 
 // HiddenParams returns the set of hidden param names for this tool.

@@ -44,7 +44,8 @@ mod conn_tests {
         let req = rmp_serde::to_vec_named(&serde_json::json!({
             "op": 6,  // OP_METADATA
             "path": "/test.txt"
-        })).unwrap();
+        }))
+        .unwrap();
         let len_bytes = (req.len() as u32).to_be_bytes();
         stream.write_all(&len_bytes).unwrap();
         stream.write_all(&req).unwrap();
@@ -69,7 +70,8 @@ mod conn_tests {
 
         let req = rmp_serde::to_vec_named(&serde_json::json!({
             "op": 6, "path": "/nonexistent"
-        })).unwrap();
+        }))
+        .unwrap();
         stream.write_all(&(req.len() as u32).to_be_bytes()).unwrap();
         stream.write_all(&req).unwrap();
 
@@ -95,7 +97,9 @@ mod error_mapping_tests {
 
     fn call(stream: &mut UnixStream, op: i32, path: &str) -> i32 {
         let extra: serde_json::Value = match op {
-            9 => serde_json::json!({"op": op, "path": path, "open_opts": {"read": true, "write": false, "create": false, "create_new": false, "append": false, "truncate": false}}),
+            9 => {
+                serde_json::json!({"op": op, "path": path, "open_opts": {"read": true, "write": false, "create": false, "create_new": false, "append": false, "truncate": false}})
+            }
             _ => serde_json::json!({"op": op, "path": path}),
         };
         let req = rmp_serde::to_vec_named(&extra).unwrap();
@@ -166,7 +170,10 @@ mod error_mapping_tests {
     fn rename_not_found_returns_1() {
         let server = MockVfsServer::start();
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
-        let req = rmp_serde::to_vec_named(&serde_json::json!({"op": 5, "path": "/nope", "to_path": "/dest"})).unwrap();
+        let req = rmp_serde::to_vec_named(
+            &serde_json::json!({"op": 5, "path": "/nope", "to_path": "/dest"}),
+        )
+        .unwrap();
         s.write_all(&(req.len() as u32).to_be_bytes()).unwrap();
         s.write_all(&req).unwrap();
         let mut len_buf = [0u8; 4];
@@ -297,7 +304,10 @@ mod dir_ops_tests {
         let resp = call_json(&mut s, serde_json::json!({"op": 2, "path": "/"}));
         let entries = resp["entries"].as_array().unwrap();
         assert_eq!(entries.len(), 2);
-        let names: Vec<&str> = entries.iter().map(|e| e["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
         assert!(names.contains(&"a.txt"));
         assert!(names.contains(&"b.txt"));
     }
@@ -324,7 +334,10 @@ mod dir_ops_tests {
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let resp = call_json(&mut s, serde_json::json!({"op": 2, "path": "/parent"}));
         let entries = resp["entries"].as_array().unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
         assert!(names.contains(&"child.txt"));
         assert!(names.contains(&"sub"));
         assert!(!names.contains(&"deep.txt"));
@@ -354,7 +367,10 @@ mod dir_ops_tests {
         let server = MockVfsServer::start();
         server.add_file("/old.txt", b"content");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
-        let resp = call_json(&mut s, serde_json::json!({"op": 5, "path": "/old.txt", "to_path": "/new.txt"}));
+        let resp = call_json(
+            &mut s,
+            serde_json::json!({"op": 5, "path": "/old.txt", "to_path": "/new.txt"}),
+        );
         assert_eq!(resp["err"], 0);
         assert!(!server.exists("/old.txt"));
         assert_eq!(server.read_file("/new.txt").unwrap(), b"content");
@@ -398,11 +414,21 @@ mod file_ops_tests {
         rmp_serde::from_slice(&resp_buf).unwrap()
     }
 
-    fn open_file(stream: &mut UnixStream, path: &str, read: bool, write: bool, create: bool, truncate: bool) -> u64 {
-        let resp = call_typed(stream, serde_json::json!({
-            "op": 9, "path": path,
-            "open_opts": {"read": read, "write": write, "create": create, "create_new": false, "append": false, "truncate": truncate}
-        }));
+    fn open_file(
+        stream: &mut UnixStream,
+        path: &str,
+        read: bool,
+        write: bool,
+        create: bool,
+        truncate: bool,
+    ) -> u64 {
+        let resp = call_typed(
+            stream,
+            serde_json::json!({
+                "op": 9, "path": path,
+                "open_opts": {"read": read, "write": write, "create": create, "create_new": false, "append": false, "truncate": truncate}
+            }),
+        );
         assert_eq!(resp.err, 0, "open failed for {path}");
         resp.handle
     }
@@ -430,10 +456,13 @@ mod file_ops_tests {
         let server = MockVfsServer::start();
         server.add_file("/exists.txt", b"x");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
-        let resp = call_typed(&mut s, serde_json::json!({
-            "op": 9, "path": "/exists.txt",
-            "open_opts": {"read": true, "write": false, "create": false, "create_new": true, "append": false, "truncate": false}
-        }));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({
+                "op": 9, "path": "/exists.txt",
+                "open_opts": {"read": true, "write": false, "create": false, "create_new": true, "append": false, "truncate": false}
+            }),
+        );
         assert_eq!(resp.err, 2); // ALREADY_EXISTS
     }
 
@@ -452,7 +481,10 @@ mod file_ops_tests {
         server.add_file("/read.txt", b"hello world");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/read.txt", true, false, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h, "len": 100}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h, "len": 100}),
+        );
         assert_eq!(resp.err, 0);
         assert_eq!(resp.n, 11);
     }
@@ -464,9 +496,15 @@ mod file_ops_tests {
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/small.txt", true, false, false, false);
         // Read all
-        call_typed(&mut s, serde_json::json!({"op": 20, "handle": h, "len": 100}));
+        call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h, "len": 100}),
+        );
         // Read again at EOF
-        let resp = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h, "len": 100}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h, "len": 100}),
+        );
         assert_eq!(resp.n, 0);
     }
 
@@ -486,7 +524,10 @@ mod file_ops_tests {
         server.add_file("/w.txt", b"");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/w.txt", false, true, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 21, "handle": h, "data": [104, 105]}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 21, "handle": h, "data": [104, 105]}),
+        );
         assert_eq!(resp.n, 2);
         assert_eq!(server.read_file("/w.txt").unwrap(), b"hi");
     }
@@ -497,7 +538,10 @@ mod file_ops_tests {
         server.add_file("/empty_w.txt", b"");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/empty_w.txt", false, true, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 21, "handle": h, "data": []}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 21, "handle": h, "data": []}),
+        );
         assert_eq!(resp.n, 0);
     }
 
@@ -507,7 +551,10 @@ mod file_ops_tests {
         server.add_file("/seek.txt", b"abcdefghij");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/seek.txt", true, false, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 22, "handle": h, "seek_from": 0, "seek_pos": 5}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 22, "handle": h, "seek_from": 0, "seek_pos": 5}),
+        );
         assert_eq!(resp.pos, 5);
         let resp = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h, "len": 3}));
         assert_eq!(resp.n, 3);
@@ -519,7 +566,10 @@ mod file_ops_tests {
         server.add_file("/seekend.txt", b"abcdefghij");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/seekend.txt", true, false, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 22, "handle": h, "seek_from": 2, "seek_pos": -3}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 22, "handle": h, "seek_from": 2, "seek_pos": -3}),
+        );
         assert_eq!(resp.pos, 7);
     }
 
@@ -558,7 +608,10 @@ mod file_ops_tests {
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/closed.txt", true, false, false, false);
         call_typed(&mut s, serde_json::json!({"op": 24, "handle": h})); // close
-        let resp = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h, "len": 10})); // read
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h, "len": 10}),
+        ); // read
         assert_ne!(resp.err, 0);
     }
 
@@ -579,7 +632,10 @@ mod file_ops_tests {
         server.add_file("/extend.txt", b"ab");
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/extend.txt", true, true, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 25, "handle": h, "len": 10}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 25, "handle": h, "len": 10}),
+        );
         assert_eq!(resp.err, 0);
         assert_eq!(server.read_file("/extend.txt").unwrap().len(), 10);
     }
@@ -600,11 +656,17 @@ mod file_ops_tests {
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/roundtrip.txt", false, true, true, false);
         let payload = b"hello roundtrip";
-        call_typed(&mut s, serde_json::json!({"op": 21, "handle": h, "data": payload.to_vec()}));
+        call_typed(
+            &mut s,
+            serde_json::json!({"op": 21, "handle": h, "data": payload.to_vec()}),
+        );
         call_typed(&mut s, serde_json::json!({"op": 24, "handle": h})); // close
 
         let h2 = open_file(&mut s, "/roundtrip.txt", true, false, false, false);
-        let resp = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h2, "len": 100}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h2, "len": 100}),
+        );
         assert_eq!(resp.n, 15);
     }
 
@@ -616,10 +678,16 @@ mod file_ops_tests {
         let h1 = open_file(&mut s, "/multi.txt", true, false, false, false);
         let h2 = open_file(&mut s, "/multi.txt", true, false, false, false);
         // Read 3 bytes from h1
-        let r1 = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h1, "len": 3}));
+        let r1 = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h1, "len": 3}),
+        );
         assert_eq!(r1.n, 3);
         // h2 should still be at position 0
-        let r2 = call_typed(&mut s, serde_json::json!({"op": 20, "handle": h2, "len": 6}));
+        let r2 = call_typed(
+            &mut s,
+            serde_json::json!({"op": 20, "handle": h2, "len": 6}),
+        );
         assert_eq!(r2.n, 6);
     }
 
@@ -642,7 +710,10 @@ mod file_ops_tests {
         let mut s = UnixStream::connect(server.socket_path()).unwrap();
         let h = open_file(&mut s, "/large.bin", false, true, true, false);
         let data: Vec<u8> = (0..100_000).map(|i| (i % 256) as u8).collect();
-        let resp = call_typed(&mut s, serde_json::json!({"op": 21, "handle": h, "data": data}));
+        let resp = call_typed(
+            &mut s,
+            serde_json::json!({"op": 21, "handle": h, "data": data}),
+        );
         assert_eq!(resp.n, 100_000);
         assert_eq!(server.read_file("/large.bin").unwrap().len(), 100_000);
     }

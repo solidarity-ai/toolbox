@@ -89,9 +89,15 @@ struct MockResponse {
     n: i32,
 }
 
-fn is_zero_u64(v: &u64) -> bool { *v == 0 }
-fn is_zero_i64(v: &i64) -> bool { *v == 0 }
-fn is_zero_i32(v: &i32) -> bool { *v == 0 }
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
 
 #[derive(Serialize)]
 struct MockDirEntry {
@@ -141,7 +147,8 @@ impl MockState {
     }
 
     fn add_file(&mut self, path: &str, data: &[u8]) {
-        self.nodes.insert(path.to_string(), FsNode::File(data.to_vec()));
+        self.nodes
+            .insert(path.to_string(), FsNode::File(data.to_vec()));
     }
 
     fn add_dir(&mut self, path: &str) {
@@ -150,9 +157,10 @@ impl MockState {
 
     fn dispatch(&mut self, req: MockRequest) -> MockResponse {
         match req.op {
-            OP_READLINK => {
-                MockResponse { target: format!("/target/of{}", req.path), ..Default::default() }
-            }
+            OP_READLINK => MockResponse {
+                target: format!("/target/of{}", req.path),
+                ..Default::default()
+            },
             OP_READ_DIR => {
                 let dir_path = if req.path.is_empty() { "/" } else { &req.path };
                 match self.nodes.get(dir_path) {
@@ -162,9 +170,13 @@ impl MockState {
                         } else {
                             format!("{dir_path}/")
                         };
-                        let entries: Vec<MockDirEntry> = self.nodes.iter()
+                        let entries: Vec<MockDirEntry> = self
+                            .nodes
+                            .iter()
                             .filter(|(p, _)| {
-                                if *p == dir_path { return false; }
+                                if *p == dir_path {
+                                    return false;
+                                }
                                 p.starts_with(&prefix) && !p[prefix.len()..].contains('/')
                             })
                             .map(|(p, node)| {
@@ -175,68 +187,120 @@ impl MockState {
                                 };
                                 MockDirEntry {
                                     name,
-                                    meta: MockMetadata { is_dir, is_file, len, accessed: 0, created: 0, modified: 100 },
+                                    meta: MockMetadata {
+                                        is_dir,
+                                        is_file,
+                                        len,
+                                        accessed: 0,
+                                        created: 0,
+                                        modified: 100,
+                                    },
                                 }
                             })
                             .collect();
-                        MockResponse { entries, ..Default::default() }
+                        MockResponse {
+                            entries,
+                            ..Default::default()
+                        }
                     }
-                    Some(FsNode::File(_)) => MockResponse { err: ERR_NOT_DIR, ..Default::default() },
-                    None => MockResponse { err: ERR_NOT_FOUND, ..Default::default() },
+                    Some(FsNode::File(_)) => MockResponse {
+                        err: ERR_NOT_DIR,
+                        ..Default::default()
+                    },
+                    None => MockResponse {
+                        err: ERR_NOT_FOUND,
+                        ..Default::default()
+                    },
                 }
             }
             OP_CREATE_DIR => {
-                if let std::collections::hash_map::Entry::Vacant(entry) = self.nodes.entry(req.path) {
+                if let std::collections::hash_map::Entry::Vacant(entry) = self.nodes.entry(req.path)
+                {
                     entry.insert(FsNode::Dir);
                     MockResponse::default()
                 } else {
-                    MockResponse { err: ERR_ALREADY_EXISTS, ..Default::default() }
-                }
-            }
-            OP_REMOVE_DIR => {
-                match self.nodes.get(&req.path) {
-                    Some(FsNode::Dir) => {
-                        let prefix = format!("{}/", req.path);
-                        let has_children = self.nodes.keys().any(|k| k.starts_with(&prefix));
-                        if has_children {
-                            MockResponse { err: ERR_NOT_EMPTY, ..Default::default() }
-                        } else {
-                            self.nodes.remove(&req.path);
-                            MockResponse::default()
-                        }
+                    MockResponse {
+                        err: ERR_ALREADY_EXISTS,
+                        ..Default::default()
                     }
-                    Some(FsNode::File(_)) => MockResponse { err: ERR_NOT_FILE, ..Default::default() },
-                    None => MockResponse { err: ERR_NOT_FOUND, ..Default::default() },
                 }
             }
+            OP_REMOVE_DIR => match self.nodes.get(&req.path) {
+                Some(FsNode::Dir) => {
+                    let prefix = format!("{}/", req.path);
+                    let has_children = self.nodes.keys().any(|k| k.starts_with(&prefix));
+                    if has_children {
+                        MockResponse {
+                            err: ERR_NOT_EMPTY,
+                            ..Default::default()
+                        }
+                    } else {
+                        self.nodes.remove(&req.path);
+                        MockResponse::default()
+                    }
+                }
+                Some(FsNode::File(_)) => MockResponse {
+                    err: ERR_NOT_FILE,
+                    ..Default::default()
+                },
+                None => MockResponse {
+                    err: ERR_NOT_FOUND,
+                    ..Default::default()
+                },
+            },
             OP_RENAME => {
                 if let Some(node) = self.nodes.remove(&req.path) {
                     self.nodes.insert(req.to_path, node);
                     MockResponse::default()
                 } else {
-                    MockResponse { err: ERR_NOT_FOUND, ..Default::default() }
-                }
-            }
-            OP_METADATA | OP_SYMLINK_METADATA => {
-                match self.nodes.get(&req.path) {
-                    Some(FsNode::Dir) => MockResponse {
-                        meta: Some(MockMetadata { is_dir: true, is_file: false, len: 0, accessed: 0, created: 0, modified: 100 }),
+                    MockResponse {
+                        err: ERR_NOT_FOUND,
                         ..Default::default()
-                    },
-                    Some(FsNode::File(d)) => MockResponse {
-                        meta: Some(MockMetadata { is_dir: false, is_file: true, len: d.len() as u64, accessed: 0, created: 0, modified: 200 }),
-                        ..Default::default()
-                    },
-                    None => MockResponse { err: ERR_NOT_FOUND, ..Default::default() },
+                    }
                 }
             }
-            OP_REMOVE_FILE => {
-                match self.nodes.get(&req.path) {
-                    Some(FsNode::File(_)) => { self.nodes.remove(&req.path); MockResponse::default() }
-                    Some(FsNode::Dir) => MockResponse { err: ERR_NOT_FILE, ..Default::default() },
-                    None => MockResponse { err: ERR_NOT_FOUND, ..Default::default() },
+            OP_METADATA | OP_SYMLINK_METADATA => match self.nodes.get(&req.path) {
+                Some(FsNode::Dir) => MockResponse {
+                    meta: Some(MockMetadata {
+                        is_dir: true,
+                        is_file: false,
+                        len: 0,
+                        accessed: 0,
+                        created: 0,
+                        modified: 100,
+                    }),
+                    ..Default::default()
+                },
+                Some(FsNode::File(d)) => MockResponse {
+                    meta: Some(MockMetadata {
+                        is_dir: false,
+                        is_file: true,
+                        len: d.len() as u64,
+                        accessed: 0,
+                        created: 0,
+                        modified: 200,
+                    }),
+                    ..Default::default()
+                },
+                None => MockResponse {
+                    err: ERR_NOT_FOUND,
+                    ..Default::default()
+                },
+            },
+            OP_REMOVE_FILE => match self.nodes.get(&req.path) {
+                Some(FsNode::File(_)) => {
+                    self.nodes.remove(&req.path);
+                    MockResponse::default()
                 }
-            }
+                Some(FsNode::Dir) => MockResponse {
+                    err: ERR_NOT_FILE,
+                    ..Default::default()
+                },
+                None => MockResponse {
+                    err: ERR_NOT_FOUND,
+                    ..Default::default()
+                },
+            },
             OP_OPEN => {
                 let opts = req.open_opts.as_ref();
                 let create = opts.is_some_and(|o| o.create);
@@ -245,55 +309,105 @@ impl MockState {
                 let writable = opts.is_some_and(|o| o.write || o.append);
 
                 match self.nodes.get(&req.path) {
-                    Some(FsNode::File(_)) if create_new => {
-                        MockResponse { err: ERR_ALREADY_EXISTS, ..Default::default() }
-                    }
+                    Some(FsNode::File(_)) if create_new => MockResponse {
+                        err: ERR_ALREADY_EXISTS,
+                        ..Default::default()
+                    },
                     Some(FsNode::File(_)) => {
                         if truncate {
-                            self.nodes.insert(req.path.clone(), FsNode::File(Vec::new()));
+                            self.nodes
+                                .insert(req.path.clone(), FsNode::File(Vec::new()));
                         }
                         self.next_handle += 1;
                         let h = self.next_handle;
-                        self.handles.insert(h, FileHandle { path: req.path, pos: 0, writable });
-                        MockResponse { handle: h, ..Default::default() }
+                        self.handles.insert(
+                            h,
+                            FileHandle {
+                                path: req.path,
+                                pos: 0,
+                                writable,
+                            },
+                        );
+                        MockResponse {
+                            handle: h,
+                            ..Default::default()
+                        }
                     }
-                    Some(FsNode::Dir) => MockResponse { err: ERR_NOT_FILE, ..Default::default() },
+                    Some(FsNode::Dir) => MockResponse {
+                        err: ERR_NOT_FILE,
+                        ..Default::default()
+                    },
                     None if create => {
-                        self.nodes.insert(req.path.clone(), FsNode::File(Vec::new()));
+                        self.nodes
+                            .insert(req.path.clone(), FsNode::File(Vec::new()));
                         self.next_handle += 1;
                         let h = self.next_handle;
-                        self.handles.insert(h, FileHandle { path: req.path, pos: 0, writable });
-                        MockResponse { handle: h, ..Default::default() }
+                        self.handles.insert(
+                            h,
+                            FileHandle {
+                                path: req.path,
+                                pos: 0,
+                                writable,
+                            },
+                        );
+                        MockResponse {
+                            handle: h,
+                            ..Default::default()
+                        }
                     }
-                    None => MockResponse { err: ERR_NOT_FOUND, ..Default::default() },
+                    None => MockResponse {
+                        err: ERR_NOT_FOUND,
+                        ..Default::default()
+                    },
                 }
             }
             OP_FILE_READ => {
                 let h = match self.handles.get(&req.handle) {
                     Some(h) => h,
-                    None => return MockResponse { err: ERR_IO, ..Default::default() },
+                    None => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 let path = h.path.clone();
                 let pos = h.pos;
                 match self.nodes.get(&path) {
                     Some(FsNode::File(data)) => {
                         if pos >= data.len() {
-                            MockResponse { data: vec![], n: 0, ..Default::default() }
+                            MockResponse {
+                                data: vec![],
+                                n: 0,
+                                ..Default::default()
+                            }
                         } else {
                             let end = std::cmp::min(pos + req.len as usize, data.len());
                             let chunk = data[pos..end].to_vec();
                             let n = chunk.len() as i32;
                             self.handles.get_mut(&req.handle).unwrap().pos = end;
-                            MockResponse { data: chunk, n, ..Default::default() }
+                            MockResponse {
+                                data: chunk,
+                                n,
+                                ..Default::default()
+                            }
                         }
                     }
-                    _ => MockResponse { err: ERR_IO, ..Default::default() },
+                    _ => MockResponse {
+                        err: ERR_IO,
+                        ..Default::default()
+                    },
                 }
             }
             OP_FILE_WRITE => {
                 let h = match self.handles.get(&req.handle) {
                     Some(h) => h,
-                    None => return MockResponse { err: ERR_IO, ..Default::default() },
+                    None => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 let path = h.path.clone();
                 let pos = h.pos;
@@ -307,35 +421,62 @@ impl MockState {
                         data[pos..end].copy_from_slice(write_data);
                         let n = write_data.len() as i32;
                         self.handles.get_mut(&req.handle).unwrap().pos = end;
-                        MockResponse { n, ..Default::default() }
+                        MockResponse {
+                            n,
+                            ..Default::default()
+                        }
                     }
-                    _ => MockResponse { err: ERR_IO, ..Default::default() },
+                    _ => MockResponse {
+                        err: ERR_IO,
+                        ..Default::default()
+                    },
                 }
             }
             OP_FILE_SEEK => {
                 let h = match self.handles.get_mut(&req.handle) {
                     Some(h) => h,
-                    None => return MockResponse { err: ERR_IO, ..Default::default() },
+                    None => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 let path = h.path.clone();
                 let file_len = match self.nodes.get(&path) {
                     Some(FsNode::File(d)) => d.len() as i64,
-                    _ => return MockResponse { err: ERR_IO, ..Default::default() },
+                    _ => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 let new_pos = match req.seek_from {
                     0 => req.seek_pos,
                     1 => h.pos as i64 + req.seek_pos,
                     2 => file_len + req.seek_pos,
-                    _ => return MockResponse { err: ERR_IO, ..Default::default() },
+                    _ => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 h.pos = new_pos.max(0) as usize;
-                MockResponse { pos: new_pos, ..Default::default() }
+                MockResponse {
+                    pos: new_pos,
+                    ..Default::default()
+                }
             }
             OP_FILE_FLUSH => {
                 if self.handles.contains_key(&req.handle) {
                     MockResponse::default()
                 } else {
-                    MockResponse { err: ERR_IO, ..Default::default() }
+                    MockResponse {
+                        err: ERR_IO,
+                        ..Default::default()
+                    }
                 }
             }
             OP_FILE_CLOSE => {
@@ -346,7 +487,12 @@ impl MockState {
             OP_FILE_SET_LEN => {
                 let h = match self.handles.get(&req.handle) {
                     Some(h) => h,
-                    None => return MockResponse { err: ERR_IO, ..Default::default() },
+                    None => {
+                        return MockResponse {
+                            err: ERR_IO,
+                            ..Default::default()
+                        }
+                    }
                 };
                 let path = h.path.clone();
                 match self.nodes.get_mut(&path) {
@@ -354,10 +500,16 @@ impl MockState {
                         data.resize(req.len as usize, 0);
                         MockResponse::default()
                     }
-                    _ => MockResponse { err: ERR_IO, ..Default::default() },
+                    _ => MockResponse {
+                        err: ERR_IO,
+                        ..Default::default()
+                    },
                 }
             }
-            _ => MockResponse { err: ERR_UNSUPPORTED, ..Default::default() },
+            _ => MockResponse {
+                err: ERR_UNSUPPORTED,
+                ..Default::default()
+            },
         }
     }
 }

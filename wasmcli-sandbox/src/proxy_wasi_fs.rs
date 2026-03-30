@@ -7,8 +7,8 @@
 //! directly through the ProxyFs socket protocol — no temp dirs needed.
 
 use crate::proxy_fs::{
-    Conn, WireOpenOpts, WireRequest, OP_CREATE_DIR, OP_FILE_CLOSE, OP_FILE_READ, OP_FILE_WRITE,
-    OP_METADATA, OP_OPEN, OP_READ_DIR, OP_REMOVE_DIR, OP_REMOVE_FILE, OP_RENAME, OP_FILE_FLUSH,
+    Conn, WireOpenOpts, WireRequest, OP_CREATE_DIR, OP_FILE_CLOSE, OP_FILE_FLUSH, OP_FILE_READ,
+    OP_FILE_WRITE, OP_METADATA, OP_OPEN, OP_READ_DIR, OP_REMOVE_DIR, OP_REMOVE_FILE, OP_RENAME,
 };
 use std::sync::Arc;
 
@@ -72,7 +72,10 @@ impl ProxyDescriptor {
         let conn = self.conn();
 
         // First, check if it's a directory.
-        if let Ok(resp) = conn.raw_call(&WireRequest::path_op(OP_METADATA, std::path::Path::new(&full_path))) {
+        if let Ok(resp) = conn.raw_call(&WireRequest::path_op(
+            OP_METADATA,
+            std::path::Path::new(&full_path),
+        )) {
             if let Some(meta) = &resp.meta {
                 if meta.is_dir {
                     return Ok(ProxyDescriptor::Dir {
@@ -144,7 +147,10 @@ impl ProxyDescriptor {
     pub fn metadata(&self, path: &str) -> std::io::Result<ProxyMetadata> {
         let full_path = self.resolve_path(path);
         let conn = self.conn();
-        let resp = conn.raw_call(&WireRequest::path_op(OP_METADATA, std::path::Path::new(&full_path)))?;
+        let resp = conn.raw_call(&WireRequest::path_op(
+            OP_METADATA,
+            std::path::Path::new(&full_path),
+        ))?;
         match resp.meta {
             Some(m) => Ok(ProxyMetadata {
                 is_dir: m.is_dir,
@@ -159,35 +165,55 @@ impl ProxyDescriptor {
     pub fn read_dir(&self) -> std::io::Result<Vec<ProxyDirEntry>> {
         let path = match self {
             ProxyDescriptor::Dir { path, .. } => {
-                if path.is_empty() { "/" } else { path.as_str() }
+                if path.is_empty() {
+                    "/"
+                } else {
+                    path.as_str()
+                }
             }
             _ => return Err(std::io::Error::other("not a directory")),
         };
         let conn = self.conn();
-        let resp = conn.raw_call(&WireRequest::path_op(OP_READ_DIR, std::path::Path::new(path)))?;
-        Ok(resp.entries.into_iter().map(|e| ProxyDirEntry {
-            name: e.name,
-            is_dir: e.meta.is_dir,
-            is_file: e.meta.is_file,
-            len: e.meta.len,
-        }).collect())
+        let resp = conn.raw_call(&WireRequest::path_op(
+            OP_READ_DIR,
+            std::path::Path::new(path),
+        ))?;
+        Ok(resp
+            .entries
+            .into_iter()
+            .map(|e| ProxyDirEntry {
+                name: e.name,
+                is_dir: e.meta.is_dir,
+                is_file: e.meta.is_file,
+                len: e.meta.len,
+            })
+            .collect())
     }
 
     pub fn create_dir_at(&self, path: &str) -> std::io::Result<()> {
         let full_path = self.resolve_path(path);
-        self.conn().raw_call(&WireRequest::path_op(OP_CREATE_DIR, std::path::Path::new(&full_path)))?;
+        self.conn().raw_call(&WireRequest::path_op(
+            OP_CREATE_DIR,
+            std::path::Path::new(&full_path),
+        ))?;
         Ok(())
     }
 
     pub fn remove_dir_at(&self, path: &str) -> std::io::Result<()> {
         let full_path = self.resolve_path(path);
-        self.conn().raw_call(&WireRequest::path_op(OP_REMOVE_DIR, std::path::Path::new(&full_path)))?;
+        self.conn().raw_call(&WireRequest::path_op(
+            OP_REMOVE_DIR,
+            std::path::Path::new(&full_path),
+        ))?;
         Ok(())
     }
 
     pub fn remove_file_at(&self, path: &str) -> std::io::Result<()> {
         let full_path = self.resolve_path(path);
-        self.conn().raw_call(&WireRequest::path_op(OP_REMOVE_FILE, std::path::Path::new(&full_path)))?;
+        self.conn().raw_call(&WireRequest::path_op(
+            OP_REMOVE_FILE,
+            std::path::Path::new(&full_path),
+        ))?;
         Ok(())
     }
 
@@ -358,7 +384,9 @@ mod tests {
         let server = MockVfsServer::start();
         server.add_file("/small.txt", b"hi");
         let root = connect(server.socket_path()).unwrap();
-        let file = root.open_at("small.txt", true, false, false, false).unwrap();
+        let file = root
+            .open_at("small.txt", true, false, false, false)
+            .unwrap();
         let _ = file.read_file(100).unwrap(); // consume all
         let (data, eof) = file.read_file(100).unwrap();
         assert!(data.is_empty());
@@ -397,7 +425,9 @@ mod tests {
         let server = MockVfsServer::start();
         server.add_file("/empty_w.txt", b"");
         let root = connect(server.socket_path()).unwrap();
-        let file = root.open_at("empty_w.txt", false, true, false, false).unwrap();
+        let file = root
+            .open_at("empty_w.txt", false, true, false, false)
+            .unwrap();
         let n = file.write_file(b"").unwrap();
         assert_eq!(n, 0);
     }

@@ -17,13 +17,18 @@ use wasmer_wasix::virtual_fs::{
 #[allow(dead_code)]
 mod optional_bytes {
     use super::*;
-    pub fn serialize<S: Serializer>(val: &Option<Vec<u8>>, s: S) -> std::result::Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(
+        val: &Option<Vec<u8>>,
+        s: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         match val {
             Some(bytes) => serde_bytes::serialize(bytes.as_slice(), s),
             None => s.serialize_none(),
         }
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Option<Vec<u8>>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> std::result::Result<Option<Vec<u8>>, D::Error> {
         let opt: Option<serde_bytes::ByteBuf> = Option::deserialize(d)?;
         Ok(opt.map(|b| b.into_vec()))
     }
@@ -78,9 +83,15 @@ pub(crate) struct WireRequest {
     pub(crate) seek_pos: i64,
 }
 
-fn is_zero_u64(v: &u64) -> bool { *v == 0 }
-fn is_zero_i64(v: &i64) -> bool { *v == 0 }
-fn is_zero_i32(v: &i32) -> bool { *v == 0 }
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
 
 #[derive(Serialize)]
 pub(crate) struct WireOpenOpts {
@@ -205,8 +216,8 @@ pub(crate) struct Conn {
 
 impl Conn {
     pub(crate) fn new(path: &str) -> Result<Self> {
-        let stream = UnixStream::connect(path)
-            .with_context(|| format!("connect to VFS socket {path}"))?;
+        let stream =
+            UnixStream::connect(path).with_context(|| format!("connect to VFS socket {path}"))?;
         Ok(Self {
             stream: Mutex::new(stream),
         })
@@ -217,9 +228,10 @@ impl Conn {
     }
 
     pub(crate) fn raw_call(&self, req: &WireRequest) -> std::io::Result<WireResponse> {
-        let data = rmp_serde::to_vec_named(req)
-            .map_err(std::io::Error::other)?;
-        let mut stream = self.stream.lock()
+        let data = rmp_serde::to_vec_named(req).map_err(std::io::Error::other)?;
+        let mut stream = self
+            .stream
+            .lock()
             .map_err(|_| std::io::Error::other("lock poisoned"))?;
 
         // Write length-prefixed frame.
@@ -234,8 +246,7 @@ impl Conn {
         let mut resp_buf = vec![0u8; resp_len];
         stream.read_exact(&mut resp_buf)?;
 
-        let resp: WireResponse = rmp_serde::from_slice(&resp_buf)
-            .map_err(std::io::Error::other)?;
+        let resp: WireResponse = rmp_serde::from_slice(&resp_buf).map_err(std::io::Error::other)?;
         if resp.err != ERR_OK {
             return Err(wire_io_err(resp.err));
         }
@@ -398,7 +409,9 @@ struct ProxyFile {
 
 impl Drop for ProxyFile {
     fn drop(&mut self) {
-        let _ = self.conn.call(&WireRequest::handle_op(OP_FILE_CLOSE, self.handle));
+        let _ = self
+            .conn
+            .call(&WireRequest::handle_op(OP_FILE_CLOSE, self.handle));
     }
 }
 
@@ -483,7 +496,10 @@ impl tokio::io::AsyncWrite for ProxyFile {
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let me = self.get_mut();
-        match me.conn.call(&WireRequest::handle_op(OP_FILE_FLUSH, me.handle)) {
+        match me
+            .conn
+            .call(&WireRequest::handle_op(OP_FILE_FLUSH, me.handle))
+        {
             Ok(_) => Poll::Ready(Ok(())),
             Err(e) => Poll::Ready(Err(e.into())),
         }

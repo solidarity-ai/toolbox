@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -9,9 +10,24 @@ use wasmer::{
     Module,
 };
 use wasmer_types::ModuleHash;
-use wasmer_wasix::{runners::wasi::{RuntimeOrEngine, WasiRunner}, Pipe};
+use wasmer_wasix::{
+    runners::wasi::{MappedDirectory, RuntimeOrEngine, WasiRunner},
+    Pipe,
+};
 
 use crate::proxy_fs;
+
+const GUEST_ENV_CONTROL_VAR: &str = "TOOLBOX_GUEST_ENV_JSON";
+const GUEST_MOUNTS_CONTROL_VAR: &str = "TOOLBOX_GUEST_MOUNTS_JSON";
+const VFS_SOCK_CONTROL_VAR: &str = "TOOLBOX_VFS_SOCK";
+
+#[derive(Deserialize)]
+struct GuestMount {
+    #[serde(rename = "hostPath")]
+    host_path: String,
+    #[serde(rename = "guestPath")]
+    guest_path: String,
+}
 
 pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
     let mut features = Features::new();
@@ -32,27 +48,31 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
         .build()
         .context("create tokio runtime")?;
     let _guard = tokio_runtime.enter();
+    let guest_env = guest_env().context("decode guest env")?;
+    let guest_mounts = guest_mounts().context("decode guest mounts")?;
 
     let run_result = {
         let mut runner = WasiRunner::new();
         runner
             .with_args(guest_args.iter().map(String::as_str))
             .with_stdout(Box::new(stdout_tx))
-            .with_stderr(Box::new(stderr_tx));
+            .with_stderr(Box::new(stderr_tx))
+            .with_envs(guest_env);
+
+        if !guest_mounts.is_empty() {
+            runner.with_mapped_directories(guest_mounts.into_iter().map(|mount| MappedDirectory {
+                host: mount.host_path.into(),
+                guest: mount.guest_path,
+            }));
+        }
 
         // Mount the shared VFS if a socket path is provided.
-        if let Ok(socket_path) = env::var("TOOLBOX_VFS_SOCK") {
-            let proxy = proxy_fs::ProxyFs::connect(&socket_path)
-                .context("connect to VFS proxy")?;
+        if let Ok(socket_path) = env::var(VFS_SOCK_CONTROL_VAR) {
+            let proxy = proxy_fs::ProxyFs::connect(&socket_path).context("connect to VFS proxy")?;
             runner.with_mount("/work".to_string(), Arc::new(proxy));
         }
 
-        runner.run_wasm(
-            RuntimeOrEngine::Engine(engine),
-            "tool",
-            module,
-            module_hash,
-        )
+        runner.run_wasm(RuntimeOrEngine::Engine(engine), "tool", module, module_hash)
     };
 
     let mut stdout = String::new();
@@ -71,6 +91,22 @@ pub fn run(wasm_bytes: &[u8], guest_args: &[String]) -> Result<()> {
     run_result.context("run wasm module")?;
 
     Ok(())
+}
+
+fn guest_env() -> Result<Vec<(String, String)>> {
+    match env::var(GUEST_ENV_CONTROL_VAR) {
+        Ok(raw) => serde_json::from_str(&raw).context("parse TOOLBOX_GUEST_ENV_JSON"),
+        Err(env::VarError::NotPresent) => Ok(Vec::new()),
+        Err(err) => Err(err).context("read TOOLBOX_GUEST_ENV_JSON"),
+    }
+}
+
+fn guest_mounts() -> Result<Vec<GuestMount>> {
+    match env::var(GUEST_MOUNTS_CONTROL_VAR) {
+        Ok(raw) => serde_json::from_str(&raw).context("parse TOOLBOX_GUEST_MOUNTS_JSON"),
+        Err(env::VarError::NotPresent) => Ok(Vec::new()),
+        Err(err) => Err(err).context("read TOOLBOX_GUEST_MOUNTS_JSON"),
+    }
 }
 
 /// Try to load a pre-compiled module from the cache. If the cache misses,

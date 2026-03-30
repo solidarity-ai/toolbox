@@ -38,6 +38,7 @@ var (
 	newMITMProxy = func() (*mitmproxy.Proxy, error) {
 		return mitmproxy.New(nil)
 	}
+	configureMITMProxyForTest = func(*mitmproxy.Proxy) {}
 )
 
 func getCheckSession(pkg *tooldef.Package) *toolbox.CheckSession {
@@ -213,6 +214,7 @@ func startTSWasmProxyExecution(policy *transport.Policy) (_ *tswasmProxyExecutio
 	if err != nil {
 		return nil, fmt.Errorf("start mitm proxy: %w", err)
 	}
+	configureMITMProxyForTest(proxy)
 	proxy.Policy = policy
 
 	listener, err := proxy.ListenAndServe()
@@ -303,6 +305,20 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 		return "wasip2-cli"
 	default:
 		return "wasix-cli"
+	}
+}
+
+// SetMITMProxyConfiguratorForTest installs a temporary proxy configurator used
+// by integration tests that need local upstream TLS trust or remapped dialing.
+// It returns a restore function that callers should defer.
+func SetMITMProxyConfiguratorForTest(configure func(*mitmproxy.Proxy)) func() {
+	if configure == nil {
+		configure = func(*mitmproxy.Proxy) {}
+	}
+	previous := configureMITMProxyForTest
+	configureMITMProxyForTest = configure
+	return func() {
+		configureMITMProxyForTest = previous
 	}
 }
 

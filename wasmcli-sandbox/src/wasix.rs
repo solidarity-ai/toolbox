@@ -11,7 +11,10 @@ use wasmer::{
 };
 use wasmer_types::ModuleHash;
 use wasmer_wasix::{
-    runners::wasi::{MappedDirectory, RuntimeOrEngine, WasiRunner},
+    runners::{
+        wasi::{RuntimeOrEngine, WasiRunner},
+        MappedDirectory,
+    },
     Pipe,
 };
 

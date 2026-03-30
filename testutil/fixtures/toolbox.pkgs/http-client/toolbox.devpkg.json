@@ -1,9 +1,51 @@
 {
+  "module": "github.com/example/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },
+  "allowed_hosts": ["127.0.0.1"],
+  "credentials": [
+    {
+      "name": "bearer_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": ["127.0.0.1"],
+        "method": "bearer_header",
+        "pathPrefix": "/bearer"
+      }
+    },
+    {
+      "name": "basic_auth",
+      "type": "custom",
+      "inject": {
+        "hosts": ["127.0.0.1"],
+        "method": "basic_auth",
+        "pathPrefix": "/basic"
+      }
+    },
+    {
+      "name": "header_key",
+      "type": "api_key",
+      "inject": {
+        "hosts": ["127.0.0.1"],
+        "method": "api_key_header",
+        "headerName": "X-API-Key",
+        "pathPrefix": "/header"
+      }
+    },
+    {
+      "name": "query_key",
+      "type": "api_key",
+      "inject": {
+        "hosts": ["127.0.0.1"],
+        "method": "api_key_query",
+        "queryName": "api_key",
+        "pathPrefix": "/query"
+      }
+    }
+  ],
   "tools": [
     {
       "entry_ts": "tools/http-client.fetch.ts",

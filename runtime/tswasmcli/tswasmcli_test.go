@@ -8,19 +8,28 @@ import (
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 )
 
 // TestWasip2CLIRunsHTTPClientWasm is a sandbox integration test that runs
-// wasmcli-sandbox --runtime wasip2-cli directly against the pre-compiled
-// http-client.wasm fixture. The WASM binary does http.Get("https://httpbin.org/get")
-// and prints the status + body to stdout.
+// wasmcli-sandbox --runtime wasip2-cli against the pre-compiled http-client
+// fixture through the local MITM proxy path, proving the fixture no longer
+// depends on external httpbin.org behavior.
 func TestWasip2CLIRunsHTTPClientWasm(t *testing.T) {
+	tooltest.EnsureSandboxBinary(t)
 	requireWasip2Artifacts(t)
+
+	server := tooltest.StartHTTPClientLocalTLSServer(t)
+	policy := resolveHTTPClientPolicy(t, nil)
+	_, mounts, env := startRuntimeProxyHarness(t, policy, server)
 
 	wasmPath := filepath.Join(httpClientFixtureDir(), "dist", "http-client.wasm")
 	result, err := tswasmcli.Run(tswasmcli.Request{
 		WasmPath: wasmPath,
 		Runtime:  "wasip2-cli",
+		Args:     []string{server.URL("/plain/ok")},
+		Env:      env,
+		Mounts:   mounts,
 	})
 	if err != nil {
 		t.Fatalf("tswasmcli.Run: %v", err)
@@ -29,13 +38,14 @@ func TestWasip2CLIRunsHTTPClientWasm(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", result.ExitCode, result.Stderr)
 	}
-
 	if !strings.Contains(result.Stdout, "Status: 200 OK") {
 		t.Fatalf("expected stdout to contain 'Status: 200 OK', got:\n%s", result.Stdout)
 	}
-
-	if !strings.Contains(result.Stdout, "httpbin.org") {
-		t.Fatalf("expected stdout to contain 'httpbin.org', got:\n%s", result.Stdout)
+	if !strings.Contains(result.Stdout, "/plain/ok") {
+		t.Fatalf("expected stdout to contain '/plain/ok', got:\n%s", result.Stdout)
+	}
+	if got := server.HitCount(); got != 1 {
+		t.Fatalf("upstream hits = %d, want 1", got)
 	}
 }
 

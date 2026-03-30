@@ -1,6 +1,7 @@
 package mcpserver_test
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,10 +13,13 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/mcpserver"
+	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/transport/mitmproxy"
 )
 
 func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
@@ -383,31 +387,30 @@ func copyFile(src string, dst string) error {
 
 func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 	requireTSWasip2Artifacts(t)
+	tooltest.EnsureSandboxBinary(t)
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(httpClientFixtureDir()); err != nil {
-		t.Fatalf("add http-client package dir: %v", err)
-	}
+	server := tooltest.StartHTTPClientLocalTLSServer(t)
+	restore := invoke.SetMITMProxyConfiguratorForTest(func(proxy *mitmproxy.Proxy) {
+		proxy.UpstreamTLSConfig = &tls.Config{RootCAs: server.RootCAs(t)}
+	})
+	defer restore()
 
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
-	result := h.CallTool("httpClient.fetch", map[string]any{})
+	resolved := tooltest.ResolveHTTPClientToolset(t, testutil.NewTestSecretStore())
+	h := mcptest.NewHarness(t, mcpserver.New(resolved))
+	result := h.CallTool("httpClient.fetch", map[string]any{"url": server.URL("/plain/mcp")})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
 
-	if len(result.Content) == 0 {
-		t.Fatalf("expected content in result")
-	}
-	text, ok := mcp.AsTextContent(result.Content[0])
-	if !ok {
-		t.Fatalf("expected text content, got %#v", result.Content[0])
-	}
-	resultStr := text.Text
+	resultStr := requireSingleTextContent(t, result)
 	if !strings.Contains(resultStr, "Status: 200 OK") {
 		t.Fatalf("expected result to contain 'Status: 200 OK', got:\n%s", resultStr)
 	}
-	if !strings.Contains(resultStr, "httpbin.org") {
-		t.Fatalf("expected result to contain 'httpbin.org', got:\n%s", resultStr)
+	if !strings.Contains(resultStr, "/plain/mcp") {
+		t.Fatalf("expected result to contain '/plain/mcp', got:\n%s", resultStr)
+	}
+	if got := server.HitCount(); got != 1 {
+		t.Fatalf("upstream hits = %d, want 1", got)
 	}
 }
 

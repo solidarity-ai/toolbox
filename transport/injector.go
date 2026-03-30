@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -48,6 +49,7 @@ type Injector struct {
 	rules         []Rule
 	now           func() time.Time
 	refreshClient *http.Client
+	auditSink     audit.Sink
 
 	cacheMu       sync.RWMutex
 	oauth2Cache   map[string]oauth2CachedToken
@@ -95,6 +97,13 @@ func WithRefreshHTTPClient(client *http.Client) InjectorOption {
 	}
 }
 
+// WithAuditSink injects a best-effort audit sink for transport events.
+func WithAuditSink(sink audit.Sink) InjectorOption {
+	return func(i *Injector) {
+		i.auditSink = audit.SinkOrNoop(sink)
+	}
+}
+
 // NewInjector canonicalizes and validates the provided rules up front so live
 // requests only evaluate deterministic match state.
 func NewInjector(store secrets.SecretStore, rules []Rule) (*Injector, error) {
@@ -108,6 +117,7 @@ func NewInjectorWithOptions(store secrets.SecretStore, rules []Rule, opts ...Inj
 		store:         store,
 		now:           time.Now,
 		refreshClient: &http.Client{Timeout: defaultRefreshTimeout},
+		auditSink:     audit.NoopSink{},
 		oauth2Cache:   make(map[string]oauth2CachedToken),
 	}
 	for _, opt := range opts {
@@ -186,13 +196,13 @@ func (i *Injector) InjectRequest(ctx context.Context, rawURL string, headers *fe
 
 	switch rule.Inject.Method {
 	case "bearer_header":
-		return injectBearerHeader(rawURL, headers, rule, value)
+		return i.injectBearerHeader(rawURL, headers, rule, value)
 	case "basic_auth":
-		return injectBasicAuth(rawURL, headers, rule, value)
+		return i.injectBasicAuth(rawURL, headers, rule, value)
 	case "api_key_header":
-		return injectAPIKeyHeader(rawURL, headers, rule, value)
+		return i.injectAPIKeyHeader(rawURL, headers, rule, value)
 	case "api_key_query":
-		return injectAPIKeyQuery(parsed, rule, value)
+		return i.injectAPIKeyQuery(parsed, rule, value)
 	default:
 		return rawURL, fmt.Errorf("credential %q uses unsupported injection method %q", rule.Name, rule.Inject.Method)
 	}
@@ -418,7 +428,7 @@ func parseOAuth2ExpiresIn(raw json.RawMessage) (int64, error) {
 	return 0, fmt.Errorf("expires_in must be numeric")
 }
 
-func injectBearerHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+func (i *Injector) injectBearerHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
 	if hasHeader(headers, "authorization") {
 		return rawURL, nil
 	}
@@ -428,10 +438,11 @@ func injectBearerHeader(rawURL string, headers *fetch.Headers, rule Rule, value 
 	if err := headers.Append("Authorization", "Bearer "+value); err != nil {
 		return rawURL, fmt.Errorf("inject authorization header for %q: %w", rule.Name, err)
 	}
+	i.emitCredentialInjected(rule, rawURL)
 	return rawURL, nil
 }
 
-func injectBasicAuth(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+func (i *Injector) injectBasicAuth(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
 	if hasHeader(headers, "authorization") {
 		return rawURL, nil
 	}
@@ -446,10 +457,11 @@ func injectBasicAuth(rawURL string, headers *fetch.Headers, rule Rule, value str
 	if err := headers.Append("Authorization", authorization); err != nil {
 		return rawURL, fmt.Errorf("inject authorization header for %q: %w", rule.Name, err)
 	}
+	i.emitCredentialInjected(rule, rawURL)
 	return rawURL, nil
 }
 
-func injectAPIKeyHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+func (i *Injector) injectAPIKeyHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
 	if hasHeader(headers, rule.Inject.HeaderName) {
 		return rawURL, nil
 	}
@@ -459,14 +471,18 @@ func injectAPIKeyHeader(rawURL string, headers *fetch.Headers, rule Rule, value 
 	if err := headers.Append(rule.Inject.HeaderName, value); err != nil {
 		return rawURL, fmt.Errorf("inject api key header for %q: %w", rule.Name, err)
 	}
+	i.emitCredentialInjected(rule, rawURL)
 	return rawURL, nil
 }
 
-func injectAPIKeyQuery(parsed *url.URL, rule Rule, value string) (string, error) {
+func (i *Injector) injectAPIKeyQuery(parsed *url.URL, rule Rule, value string) (string, error) {
 	query := parsed.Query()
 	if query.Get(rule.Inject.QueryName) == "" {
 		query.Set(rule.Inject.QueryName, value)
 		parsed.RawQuery = query.Encode()
+		rewritten := parsed.String()
+		i.emitCredentialInjected(rule, rewritten)
+		return rewritten, nil
 	}
 	return parsed.String(), nil
 }
@@ -477,6 +493,29 @@ func parseBasicAuthSecret(secret string) (string, string, error) {
 		return "", "", fmt.Errorf("basic auth secret must be username:password")
 	}
 	return username, password, nil
+}
+
+func (i *Injector) emitCredentialInjected(rule Rule, rawURL string) {
+	if i == nil {
+		return
+	}
+	host, err := auditHost(rawURL)
+	if err != nil {
+		return
+	}
+	event, err := audit.NewCredentialInjected(host, rule.Name, rule.Inject.Method)
+	if err != nil {
+		return
+	}
+	audit.Emit(i.auditSink, event)
+}
+
+func auditHost(rawURL string) (string, error) {
+	parsed, err := parseRequestURL(rawURL)
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(parsed.Hostname()), nil
 }
 
 // NormalizeAllowedHosts canonicalizes a resolved allowlist into a deterministic,

@@ -1,10 +1,14 @@
 package toolset_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/audit"
+	"github.com/solidarity-ai/toolbox/fetch"
+	"github.com/solidarity-ai/toolbox/testutil"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -31,6 +35,72 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 	}
 	if len(secretKeys) != 1 || secretKeys[0] != rule.SecretKey {
 		t.Fatalf("transport policy secret keys = %v, want [%q]", secretKeys, rule.SecretKey)
+	}
+}
+
+func TestResolveToolAuthThreadsAuditSinkIntoTransportPolicy(t *testing.T) {
+	t.Parallel()
+
+	collector := audit.NewCollector()
+	store := testutil.NewTestSecretStore()
+	store.SeedStrings(map[string]string{
+		"github.com/example/github-issues/github_token": "top-secret",
+	})
+	resolved, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+		Name:        "github.issues.get",
+		Description: "Get a GitHub issue",
+		Package: &tooldef.Package{
+			Module:  "github.com/example/github-issues",
+			Name:    "github-issues",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+		},
+		AllowedHosts: []string{"example.invalid"},
+		EffectiveCredentials: []tooldef.PackageCredential{{
+			Name: "github_token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+	}}, toolset.Config{
+		SecretStore: store,
+		AuditSink:   collector,
+	})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+
+	policy, ok := resolved.ToolTransportPolicy("github.issues.get")
+	if !ok {
+		t.Fatal("expected runtime transport policy for tool")
+	}
+	_, err = policy.PrepareRequest(context.Background(), "https://api.github.com/repos/octocat/hello-world", fetch.NewHeaders())
+	if err == nil {
+		t.Fatal("expected allowlist denial after transport injection attempt")
+	}
+
+	want := []audit.Event{
+		{
+			Name: audit.EventCredentialInjected,
+			Payload: audit.CredentialInjected{
+				Host:         "api.github.com",
+				Credential:   "github_token",
+				InjectMethod: "bearer_header",
+			},
+		},
+		{
+			Name: audit.EventCredentialDenied,
+			Payload: audit.CredentialDenied{
+				Host:         "api.github.com",
+				Reason:       "not_allowed_by_policy",
+				Credential:   "github_token",
+				InjectMethod: "bearer_header",
+			},
+		},
+	}
+	if diff := cmp.Diff(want, collector.Events()); diff != "" {
+		t.Fatalf("audit mismatch (-want +got):\n%s", diff)
 	}
 }
 

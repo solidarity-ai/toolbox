@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 )
@@ -28,7 +29,13 @@ type Policy struct {
 // materialized so runtime preflight can distinguish "deny by default" from
 // "no transport policy was built".
 func NewPolicy(store secrets.SecretStore, rules []Rule, allowedHosts []string, requireRuntimePolicy bool) (*Policy, error) {
-	injector, err := NewInjector(store, rules)
+	return NewPolicyWithOptions(store, rules, allowedHosts, requireRuntimePolicy)
+}
+
+// NewPolicyWithOptions assembles the shared runtime transport policy for one
+// tool while allowing transport-owned optional seams such as audit sinks.
+func NewPolicyWithOptions(store secrets.SecretStore, rules []Rule, allowedHosts []string, requireRuntimePolicy bool, opts ...InjectorOption) (*Policy, error) {
+	injector, err := NewInjectorWithOptions(store, rules, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +84,7 @@ func (p *Policy) enforceAllowedHost(rawURL string) error {
 
 	host := strings.ToLower(parsed.Hostname())
 	if len(p.allowedHosts) == 0 {
+		p.emitCredentialDenied(host, "no_allowed_hosts_declared")
 		return fmt.Errorf("transport denied request to host %q: no allowed hosts declared", host)
 	}
 
@@ -86,6 +94,7 @@ func (p *Policy) enforceAllowedHost(rawURL string) error {
 		}
 	}
 
+	p.emitCredentialDenied(host, "not_allowed_by_policy")
 	return fmt.Errorf("transport denied request to host %q: not allowed by policy", host)
 }
 
@@ -106,4 +115,21 @@ func (p *Policy) AllowedHosts() []string {
 	out := make([]string, len(p.allowedHosts))
 	copy(out, p.allowedHosts)
 	return out
+}
+
+func (p *Policy) emitCredentialDenied(host, reason string) {
+	if p == nil || p.injector == nil {
+		return
+	}
+	credential := ""
+	injectMethod := ""
+	if rules := p.injector.Rules(); len(rules) == 1 {
+		credential = rules[0].Name
+		injectMethod = rules[0].Inject.Method
+	}
+	event, err := audit.NewCredentialDenied(host, reason, credential, injectMethod)
+	if err != nil {
+		return
+	}
+	audit.Emit(p.injector.auditSink, event)
 }

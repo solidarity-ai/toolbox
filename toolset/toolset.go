@@ -200,7 +200,13 @@ func resolveToolTransportPolicy(tool tooldef.ResolvedTool, cfg Config) (*transpo
 	if err != nil {
 		return nil, err
 	}
-	return transport.NewPolicy(cfg.SecretStore, rules, resolveToolAllowedHosts(tool), toolRequiresRuntimeTransportPolicy(tool))
+	return transport.NewPolicyWithOptions(
+		cfg.SecretStore,
+		rules,
+		resolveToolAllowedHosts(tool),
+		toolRequiresRuntimeTransportPolicy(tool),
+		transport.WithAuditSink(cfg.AuditSink),
+	)
 }
 
 func toolRequiresRuntimeTransportPolicy(tool tooldef.ResolvedTool) bool {

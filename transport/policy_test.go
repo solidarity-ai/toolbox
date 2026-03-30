@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil"
@@ -185,6 +186,92 @@ func TestPolicyPrepareRequest(t *testing.T) {
 			t.Fatalf("error = %v, want explicit denied-host context", err)
 		}
 	})
+	t.Run("emits denied event for deny by default", func(t *testing.T) {
+		t.Parallel()
+
+		collector := audit.NewCollector()
+		policy := mustNewPolicyWithAudit(t, nil, nil, nil, true, collector)
+
+		_, err := policy.PrepareRequest(context.Background(), "https://api.example.com/v1/issues", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected deny-by-default policy to reject request")
+		}
+
+		want := []audit.Event{{
+			Name: audit.EventCredentialDenied,
+			Payload: audit.CredentialDenied{
+				Host:   "api.example.com",
+				Reason: "no_allowed_hosts_declared",
+			},
+		}}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("denied audit mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("emits denied event with matched credential metadata when allowlist blocks injected request", func(t *testing.T) {
+		t.Parallel()
+
+		secretStore := testutil.NewTestSecretStore()
+		secretStore.SeedStrings(map[string]string{"pkg/api_key": "secret-token"})
+		collector := audit.NewCollector()
+
+		policy := mustNewPolicyWithAudit(t, secretStore, []transport.Rule{{
+			Name:      "api_key",
+			SecretKey: "pkg/api_key",
+			Inject: tooldef.CredentialInject{
+				Hosts:     []string{"api.example.com"},
+				Method:    "api_key_query",
+				QueryName: "token",
+			},
+		}}, []string{"example.invalid"}, false, collector)
+
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://api.example.com/v1/issues", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected denied host after injector mutation")
+		}
+		if gotURL != "https://api.example.com/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want original raw URL when preflight denies", gotURL)
+		}
+
+		want := []audit.Event{
+			{
+				Name: audit.EventCredentialInjected,
+				Payload: audit.CredentialInjected{
+					Host:         "api.example.com",
+					Credential:   "api_key",
+					InjectMethod: "api_key_query",
+				},
+			},
+			{
+				Name: audit.EventCredentialDenied,
+				Payload: audit.CredentialDenied{
+					Host:         "api.example.com",
+					Reason:       "not_allowed_by_policy",
+					Credential:   "api_key",
+					InjectMethod: "api_key_query",
+				},
+			},
+		}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("audit mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("malformed urls emit no misleading audit events", func(t *testing.T) {
+		t.Parallel()
+
+		collector := audit.NewCollector()
+		policy := mustNewPolicyWithAudit(t, nil, nil, []string{"api.example.com"}, false, collector)
+
+		_, err := policy.PrepareRequest(context.Background(), "://bad-url", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected malformed request url to fail")
+		}
+		if got := collector.Events(); len(got) != 0 {
+			t.Fatalf("collector events = %v, want no audit events on malformed url", got)
+		}
+	})
 }
 
 func mustNewPolicy(t *testing.T, store secrets.SecretStore, rules []transport.Rule, allowedHosts []string, requireRuntimePolicy bool) *transport.Policy {
@@ -193,6 +280,19 @@ func mustNewPolicy(t *testing.T, store secrets.SecretStore, rules []transport.Ru
 	policy, err := transport.NewPolicy(store, rules, allowedHosts, requireRuntimePolicy)
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected runtime policy")
+	}
+	return policy
+}
+
+func mustNewPolicyWithAudit(t *testing.T, store secrets.SecretStore, rules []transport.Rule, allowedHosts []string, requireRuntimePolicy bool, sink audit.Sink) *transport.Policy {
+	t.Helper()
+
+	policy, err := transport.NewPolicyWithOptions(store, rules, allowedHosts, requireRuntimePolicy, transport.WithAuditSink(sink))
+	if err != nil {
+		t.Fatalf("NewPolicyWithOptions: %v", err)
 	}
 	if policy == nil {
 		t.Fatal("expected runtime policy")

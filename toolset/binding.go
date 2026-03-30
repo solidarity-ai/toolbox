@@ -1,6 +1,7 @@
 package toolset
 
 import (
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
@@ -42,4 +43,5 @@ type Config struct {
 	ResourceBindings map[string]Binding // Resource-level bindings by canonical name
 	Context          map[string]any     // Flat key-value context from harness
 	SecretStore      secrets.SecretStore
+	AuditSink        audit.Sink
 }

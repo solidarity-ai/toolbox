@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil"
@@ -221,6 +222,68 @@ func TestInjectorBuiltInMethods(t *testing.T) {
 		}
 		if diff := cmp.Diff([][2]string{{"authorization", "Bearer oauth-token"}}, headers.Entries()); diff != "" {
 			t.Fatalf("headers mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestInjectorAuditEvents(t *testing.T) {
+	t.Parallel()
+
+	t.Run("emits credential_injected on successful mutation", func(t *testing.T) {
+		t.Parallel()
+
+		collector := audit.NewCollector()
+		injector := newInjectorWithOptions(t, stubSecretStore{values: map[string][]byte{
+			"pkg/exact": []byte("exact-token"),
+		}}, []transport.Rule{{
+			Name:      "exact",
+			SecretKey: "pkg/exact",
+			Type:      tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}}, transport.WithAuditSink(collector))
+
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/repos/octocat/hello-world", headers)
+		if err != nil {
+			t.Fatalf("InjectRequest: %v", err)
+		}
+
+		want := []audit.Event{{
+			Name: audit.EventCredentialInjected,
+			Payload: audit.CredentialInjected{
+				Host:         "api.github.com",
+				Credential:   "exact",
+				InjectMethod: "bearer_header",
+			},
+		}}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("missing secret material emits no false success event", func(t *testing.T) {
+		t.Parallel()
+
+		collector := audit.NewCollector()
+		injector := newInjectorWithOptions(t, stubSecretStore{}, []transport.Rule{{
+			Name:      "exact",
+			SecretKey: "pkg/exact",
+			Type:      tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}}, transport.WithAuditSink(collector))
+
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/repos/octocat/hello-world", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected missing secret store material to fail")
+		}
+		if got := collector.Events(); len(got) != 0 {
+			t.Fatalf("collector events = %v, want no success event on secret error", got)
 		}
 	})
 }

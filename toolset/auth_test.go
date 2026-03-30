@@ -257,6 +257,60 @@ func TestResolveToolAuthNamespaceHelpersRejectMalformedParts(t *testing.T) {
 	}
 }
 
+func TestResolveToolAuthFailsClosedWhenEffectiveCredentialsLackPackageMetadata(t *testing.T) {
+	t.Parallel()
+
+	_, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+		Name:        "github.issues.get",
+		Description: "Get a GitHub issue",
+		EffectiveCredentials: []tooldef.PackageCredential{{
+			Name: "github_token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+	}}, toolset.Config{})
+	if err == nil {
+		t.Fatal("expected missing package metadata to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "resolved credentials require package metadata") {
+		t.Fatalf("ResolveTools error = %v, want package metadata context", err)
+	}
+}
+
+func TestResolveToolAuthRejectsMalformedNamespaceDerivedSecretKeys(t *testing.T) {
+	t.Parallel()
+
+	_, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+		Name:        "github.issues.get",
+		Description: "Get a GitHub issue",
+		Package: &tooldef.Package{
+			Module:  "github.com/example/github-issues",
+			Name:    "github-issues",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+		},
+		EffectiveCredentials: []tooldef.PackageCredential{{
+			Name: "bad/token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+	}}, toolset.Config{})
+	if err == nil {
+		t.Fatal("expected malformed secret namespace part to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "credential \"bad/token\"") {
+		t.Fatalf("ResolveTools error = %v, want credential context", err)
+	}
+	if !strings.Contains(err.Error(), "must not contain '/'") {
+		t.Fatalf("ResolveTools error = %v, want namespace validation context", err)
+	}
+}
+
 func TestAgentViewDoesNotExposeTransportCredentialState(t *testing.T) {
 	t.Parallel()
 

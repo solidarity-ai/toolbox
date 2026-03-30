@@ -196,29 +196,37 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 }
 
 func resolveToolTransportPolicy(tool tooldef.ResolvedTool, cfg Config) (*transport.Policy, error) {
-	var rules []transport.Rule
-	if len(tool.EffectiveCredentials) > 0 {
-		if tool.Package == nil {
-			return nil, fmt.Errorf("resolved credentials require package metadata")
-		}
-		rules = make([]transport.Rule, 0, len(tool.EffectiveCredentials))
-		for _, declared := range tool.EffectiveCredentials {
-			secretKey, err := resolveSecretKey(tool.Package.Module, declared.Name)
-			if err != nil {
-				return nil, err
-			}
-			rules = append(rules, transport.Rule{
-				Name:      declared.Name,
-				Type:      declared.Type,
-				Provider:  declared.Provider,
-				Scopes:    append([]string(nil), declared.Scopes...),
-				SecretKey: secretKey,
-				Inject:    declared.Inject,
-			})
-		}
+	rules, err := resolveToolTransportRules(tool)
+	if err != nil {
+		return nil, err
+	}
+	return transport.NewPolicy(cfg.SecretStore, rules, resolveToolAllowedHosts(tool))
+}
+
+func resolveToolTransportRules(tool tooldef.ResolvedTool) ([]transport.Rule, error) {
+	if len(tool.EffectiveCredentials) == 0 {
+		return nil, nil
+	}
+	if tool.Package == nil {
+		return nil, fmt.Errorf("resolved credentials require package metadata")
 	}
 
-	return transport.NewPolicy(cfg.SecretStore, rules, tool.AllowedHosts)
+	rules := make([]transport.Rule, 0, len(tool.EffectiveCredentials))
+	for _, declared := range tool.EffectiveCredentials {
+		secretKey, err := resolveSecretKey(tool.Package.Module, declared.Name)
+		if err != nil {
+			return nil, fmt.Errorf("credential %q: %w", declared.Name, err)
+		}
+		rules = append(rules, transport.Rule{
+			Name:      declared.Name,
+			Type:      declared.Type,
+			Provider:  declared.Provider,
+			Scopes:    append([]string(nil), declared.Scopes...),
+			SecretKey: secretKey,
+			Inject:    declared.Inject,
+		})
+	}
+	return rules, nil
 }
 
 func resolveToolAllowedHosts(tool tooldef.ResolvedTool) []string {

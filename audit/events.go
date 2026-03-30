@@ -21,8 +21,8 @@ const (
 // payloads, query values, tokens, and raw authorization material must never be
 // added here.
 type Event struct {
-	Name    EventName
-	Payload Payload
+	Name    EventName `json:"name"`
+	Payload Payload   `json:"payload"`
 }
 
 // Payload is implemented by concrete secret-safe audit payloads.
@@ -32,27 +32,27 @@ type Payload interface {
 
 // CredentialInjected captures successful transport-managed credential mutation.
 type CredentialInjected struct {
-	Host         string
-	Credential   string
-	InjectMethod string
+	Host         string `json:"host"`
+	Credential   string `json:"credential"`
+	InjectMethod string `json:"inject_method"`
 }
 
 // CredentialRefresh captures one OAuth2 refresh attempt outcome.
 type CredentialRefresh struct {
-	Credential string
-	CacheKey   string
-	Outcome    string
-	Stage      string
-	Reason     string
-	ExpiresAt  time.Time
+	Credential string    `json:"credential"`
+	CacheKey   string    `json:"cache_key"`
+	Outcome    string    `json:"outcome"`
+	Stage      string    `json:"stage"`
+	Reason     string    `json:"reason,omitempty"`
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 
 // CredentialDenied captures transport allowlist denial.
 type CredentialDenied struct {
-	Host         string
-	Reason       string
-	Credential   string
-	InjectMethod string
+	Host         string `json:"host"`
+	Reason       string `json:"reason"`
+	Credential   string `json:"credential"`
+	InjectMethod string `json:"inject_method"`
 }
 
 func NewCredentialInjected(host, credential, injectMethod string) (Event, error) {

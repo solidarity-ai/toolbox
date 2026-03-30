@@ -17,10 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
 	"github.com/mark3labs/mcp-go/client"
 	clienttransport "github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
@@ -451,6 +453,137 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	}
 }
 
+func TestRunMCPServeWritesAuditLogWhenConfigured(t *testing.T) {
+	resourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-bearer-token" {
+			t.Fatalf("Authorization = %q, want Bearer test-bearer-token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer resourceServer.Close()
+
+	workspace := t.TempDir()
+	packageDir := filepath.Join(workspace, "package-repo")
+	consumerDir := filepath.Join(workspace, "consumer-repo")
+	if err := os.MkdirAll(filepath.Join(packageDir, "tools"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(package tools): %v", err)
+	}
+	if err := os.MkdirAll(consumerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", consumerDir, err)
+	}
+	writeJSONFile(t, filepath.Join(packageDir, "toolbox.devpkg.json"), map[string]any{
+		"module":        "example.com/acme/audit-http",
+		"name":          "audit-http",
+		"runtime":       "typescript-sandbox",
+		"allowed_hosts": []string{"127.0.0.1"},
+		"credentials": []map[string]any{{
+			"name": "api_token",
+			"type": "bearer",
+			"inject": map[string]any{
+				"hosts":  []string{"127.0.0.1"},
+				"method": "bearer_header",
+			},
+		}},
+		"tools": []map[string]any{{
+			"entry_ts":   "tools/ping.ts",
+			"effect":     "readOnly",
+			"idempotent": true,
+		}},
+	})
+	toolSource := "export default async function tool(): Promise<string> {\n  const resp = await fetch(\"" + resourceServer.URL + "/ping\", { headers: { Accept: \"application/json\" } });\n  if (resp.status !== 200) { throw new Error(`HTTP ${resp.status}`); }\n  return await resp.text();\n}\n"
+	if err := os.WriteFile(filepath.Join(packageDir, "tools", "ping.ts"), []byte(toolSource), 0o644); err != nil {
+		t.Fatalf("WriteFile(ping.ts): %v", err)
+	}
+
+	toolsetPath := filepath.Join(consumerDir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]string{"example.com/acme/audit-http": "v0.0.0"},
+		"tools":    []map[string]string{{"tool": "example.com/acme/audit-http@v0.0.0/ping"}},
+	})
+	writeJSONFile(t, filepath.Join(consumerDir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]string{"example.com/acme/audit-http": "../package-repo"},
+	})
+
+	configDir := filepath.Join(t.TempDir(), "config")
+	identityPath := writeMainTestIdentityFile(t, filepath.Join(configDir, "age"))
+	store := secrets.NewLocalSecretStore(filepath.Join(configDir, "toolbox", "secrets"), identityPath)
+	if err := store.Set(context.Background(), "example.com/acme/audit-http/api_token", []byte("test-bearer-token")); err != nil {
+		t.Fatalf("store.Set(api_token): %v", err)
+	}
+
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("TOOLBOX_AUDIT_LOG", auditPath)
+
+	serverRead, clientWrite := io.Pipe()
+	clientRead, serverWrite := io.Pipe()
+	defer clientRead.Close()
+	defer clientWrite.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- runWithIO(
+			[]string{"mcp", "serve", "--file", toolsetPath},
+			serverRead,
+			serverWrite,
+			io.Discard,
+		)
+	}()
+
+	stdio := clienttransport.NewIO(clientRead, clientWrite, io.NopCloser(strings.NewReader("")))
+	if err := stdio.Start(context.Background()); err != nil {
+		t.Fatalf("stdio.Start(): %v", err)
+	}
+	defer stdio.Close()
+
+	c := client.NewClient(stdio)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "toolbox-cli-test", Version: "1.0.0"}
+	initReq.Params.Capabilities = mcp.ClientCapabilities{}
+	if _, err := c.Initialize(ctx, initReq); err != nil {
+		t.Fatalf("Initialize(): %v", err)
+	}
+
+	callReq := mcp.CallToolRequest{}
+	callReq.Params.Name = "ping"
+	callReq.Params.Arguments = map[string]any{}
+	result, err := c.CallTool(ctx, callReq)
+	if err != nil {
+		t.Fatalf("CallTool(): %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool() returned MCP error: %#v", result)
+	}
+
+	_ = stdio.Close()
+	_ = clientWrite.Close()
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("mcp serve exited with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mcp serve to exit")
+	}
+
+	raw, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", auditPath, err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"name":"credential_injected"`) {
+		t.Fatalf("audit log = %q, want credential_injected event", text)
+	}
+	if !strings.Contains(text, `"credential":"api_token"`) || !strings.Contains(text, `"host":"127.0.0.1"`) {
+		t.Fatalf("audit log = %q, want credential and host payload", text)
+	}
+}
+
 func TestRunResolveRejectsInvalidUpgradeModuleArgument(t *testing.T) {
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
@@ -571,6 +704,22 @@ func hasToolNamed(tools []mcp.Tool, want string) bool {
 		}
 	}
 	return false
+}
+
+func writeMainTestIdentityFile(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", dir, err)
+	}
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("GenerateX25519Identity(): %v", err)
+	}
+	path := filepath.Join(dir, "keys.txt")
+	if err := os.WriteFile(path, []byte(identity.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	return path
 }
 
 func copyFixtureDir(t *testing.T, src, dst string) {

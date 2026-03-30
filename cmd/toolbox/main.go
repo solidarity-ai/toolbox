@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -200,7 +201,11 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	resolved, err := ts.ResolveWithConfig(context.Background(), resolver, toolset.Config{SecretStore: store})
+	auditSink, err := newAuditSinkFromEnv()
+	if err != nil {
+		return err
+	}
+	resolved, err := ts.ResolveWithConfig(context.Background(), resolver, toolset.Config{SecretStore: store, AuditSink: auditSink})
 	if err != nil {
 		return err
 	}
@@ -208,6 +213,14 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(resolved))
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
+}
+
+func newAuditSinkFromEnv() (audit.Sink, error) {
+	path := strings.TrimSpace(os.Getenv("TOOLBOX_AUDIT_LOG"))
+	if path == "" {
+		return nil, nil
+	}
+	return audit.NewFileSink(path)
 }
 
 func newResolver() (*registry.Resolver, error) {

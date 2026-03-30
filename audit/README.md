@@ -71,6 +71,7 @@ If a future feature needs extra observability, prefer adding a coarse classifica
 - `audit.SinkOrNoop(...)` guarantees callers always get a non-nil sink.
 - `audit.Emit(...)` / `audit.TryEmit(...)` must not change runtime behavior when auditing is absent or fails.
 - `audit.Collector` is the in-memory test helper for deterministic assertions.
+- `audit.FileSink` appends JSONL records to a local file for operator inspection.
 
 Typical pattern:
 
@@ -78,6 +79,12 @@ Typical pattern:
 2. Thread the sink into shared seams such as transport policy / injector setup.
 3. Emit only validated `audit.Event` values.
 4. In tests, use `audit.NewCollector()` and assert exact event ordering/payloads.
+
+### CLI file logging
+
+`toolbox mcp serve` now honors `TOOLBOX_AUDIT_LOG=/path/to/audit.jsonl` and writes one JSON object per line for emitted transport events.
+
+Current caveat: `toolbox auth` still uses the bootstrap HTTP path directly rather than the shared transport injector seam, so it does not currently emit the shared `credential_*` audit vocabulary even when `TOOLBOX_AUDIT_LOG` is set. The file sink is therefore most useful today on transport-backed execution paths such as `mcp serve`.
 
 ## How to inspect the S08 contract
 

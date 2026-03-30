@@ -11,6 +11,7 @@ package mitmproxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -20,12 +21,18 @@ import (
 	_ "embed"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/solidarity-ai/toolbox/fetch"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 //go:embed ca_cert.pem
@@ -55,9 +62,18 @@ type Proxy struct {
 	// If nil, traffic is forwarded silently.
 	Observer Observer
 
+	// Policy is the shared request-preflight seam used to prepare proxied
+	// requests before any upstream dial or write occurs.
+	Policy *transport.Policy
+
 	// UpstreamTLSConfig is the TLS configuration used when connecting to
 	// upstream servers. If nil, the default system trust store is used.
 	UpstreamTLSConfig *tls.Config
+
+	// UpstreamDialTLS, when set, overrides how the proxy establishes the TLS
+	// upstream connection. Tests can use this to remap dial targets while still
+	// exercising the real proxy preflight and rewrite path.
+	UpstreamDialTLS func(network, addr string, cfg *tls.Config) (net.Conn, error)
 }
 
 // Observer receives intercepted HTTP request/response pairs.
@@ -157,18 +173,18 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tlsClientConn.Close()
 
-	upstreamTLS := p.UpstreamTLSConfig
-	if upstreamTLS == nil {
-		upstreamTLS = &tls.Config{}
-	}
-	upstreamConn, err := tls.Dial("tcp", targetHost, upstreamTLS)
-	if err != nil {
-		return
-	}
-	defer upstreamConn.Close()
-
 	clientReader := bufio.NewReader(tlsClientConn)
-	upstreamReader := bufio.NewReader(upstreamConn)
+
+	var (
+		upstreamConn   *tls.Conn
+		upstreamReader *bufio.Reader
+		upstreamTarget string
+	)
+	defer func() {
+		if upstreamConn != nil {
+			upstreamConn.Close()
+		}
+	}()
 
 	for {
 		req, err := http.ReadRequest(clientReader)
@@ -176,12 +192,74 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		rawURL, err := reconstructHTTPSURL(targetHost, req)
+		if err != nil {
+			writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy rejected request: %v", err))
+			continue
+		}
+
+		reqHeaders := fetch.NewHeadersFromHTTP(req.Header)
+		preparedURL := rawURL
+		if p.Policy != nil {
+			preparedURL, err = p.Policy.PrepareRequest(context.Background(), rawURL, reqHeaders)
+			if err != nil {
+				status := http.StatusBadGateway
+				if strings.Contains(err.Error(), "transport denied request") {
+					status = http.StatusForbidden
+				}
+				writeProxyFailure(tlsClientConn, status, err.Error())
+				continue
+			}
+		}
+
+		dialTarget, err := rewritePreparedRequest(req, preparedURL, reqHeaders)
+		if err != nil {
+			writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy failed to rewrite request: %v", err))
+			continue
+		}
+
+		if upstreamConn == nil {
+			upstreamTLS := cloneTLSConfig(p.UpstreamTLSConfig)
+			if upstreamTLS.ServerName == "" {
+				serverName := req.URL.Hostname()
+				if serverName == "" {
+					serverName = host
+				}
+				upstreamTLS.ServerName = serverName
+			}
+			var rawUpstreamConn net.Conn
+			if p.UpstreamDialTLS != nil {
+				rawUpstreamConn, err = p.UpstreamDialTLS("tcp", dialTarget, upstreamTLS)
+			} else {
+				rawUpstreamConn, err = tls.Dial("tcp", dialTarget, upstreamTLS)
+			}
+			if err != nil {
+				writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy failed to connect upstream: %v", err))
+				upstreamConn = nil
+				continue
+			}
+			var ok bool
+			upstreamConn, ok = rawUpstreamConn.(*tls.Conn)
+			if !ok {
+				writeProxyFailure(tlsClientConn, http.StatusBadGateway, "proxy failed to connect upstream: dialer returned non-TLS connection")
+				_ = rawUpstreamConn.Close()
+				continue
+			}
+			upstreamReader = bufio.NewReader(upstreamConn)
+			upstreamTarget = dialTarget
+		} else if dialTarget != upstreamTarget {
+			writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy target mismatch: tunnel established for %s but request resolved to %s", upstreamTarget, dialTarget))
+			continue
+		}
+
 		if err := req.Write(upstreamConn); err != nil {
+			writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy failed to forward request: %v", err))
 			return
 		}
 
 		resp, err := http.ReadResponse(upstreamReader, req)
 		if err != nil {
+			writeProxyFailure(tlsClientConn, http.StatusBadGateway, fmt.Sprintf("proxy failed to read upstream response: %v", err))
 			return
 		}
 
@@ -191,10 +269,8 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
-			// Replace body so we can still forward it to the client.
 			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-			// Give observer a copy with its own body reader.
 			obsResp := *resp
 			obsResp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			p.Observer.Observe(host, req, &obsResp)
@@ -204,6 +280,90 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func reconstructHTTPSURL(connectTarget string, req *http.Request) (string, error) {
+	if req == nil || req.URL == nil {
+		return "", fmt.Errorf("missing request URL")
+	}
+
+	authority := req.URL.Host
+	if authority == "" {
+		authority = req.Host
+	}
+	if authority == "" {
+		authority = connectTarget
+	}
+	if authority == "" {
+		return "", fmt.Errorf("missing CONNECT target host")
+	}
+
+	parsed := *req.URL
+	parsed.Scheme = "https"
+	parsed.Host = authority
+	if parsed.Path == "" && parsed.Opaque == "" {
+		parsed.Path = "/"
+	}
+	return parsed.String(), nil
+}
+
+func rewritePreparedRequest(req *http.Request, preparedURL string, headers *fetch.Headers) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("missing request")
+	}
+	parsed, err := url.Parse(preparedURL)
+	if err != nil {
+		return "", fmt.Errorf("parse prepared url: %w", err)
+	}
+	if parsed.Hostname() == "" {
+		return "", fmt.Errorf("parse prepared url: missing host")
+	}
+
+	req.URL = parsed
+	req.Host = parsed.Host
+	req.RequestURI = ""
+	req.Header = make(http.Header)
+	for _, entry := range headers.Entries() {
+		req.Header.Add(entry[0], entry[1])
+	}
+
+	return authorityForHTTPS(parsed), nil
+}
+
+func authorityForHTTPS(parsed *url.URL) string {
+	if parsed == nil {
+		return ""
+	}
+	if parsed.Port() != "" {
+		return parsed.Host
+	}
+	return net.JoinHostPort(parsed.Hostname(), "443")
+}
+
+func writeProxyFailure(w io.Writer, status int, message string) {
+	if message == "" {
+		message = http.StatusText(status)
+	}
+	resp := &http.Response{
+		StatusCode:    status,
+		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        make(http.Header),
+		Body:          io.NopCloser(strings.NewReader(message + "\n")),
+		ContentLength: int64(len(message) + 1),
+		Close:         false,
+	}
+	resp.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	_ = resp.Write(w)
+}
+
+func cloneTLSConfig(cfg *tls.Config) *tls.Config {
+	if cfg == nil {
+		return &tls.Config{}
+	}
+	return cfg.Clone()
 }
 
 func (p *Proxy) getOrCreateCert(host string) (*tls.Certificate, error) {

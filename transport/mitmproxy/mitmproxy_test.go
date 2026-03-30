@@ -1,4 +1,4 @@
-package mitmproxy_test
+package mitmproxy
 
 import (
 	"crypto/ecdsa"
@@ -7,102 +7,419 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/solidarity-ai/toolbox/transport/mitmproxy"
+	"github.com/solidarity-ai/toolbox/secrets"
+	"github.com/solidarity-ai/toolbox/testutil"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
-func TestMITMProxy(t *testing.T) {
-	// Start a local HTTPS upstream.
-	upstreamCert, upstreamKey := selfSignedCert(t, "127.0.0.1")
-	upstream, upstreamAddr := startUpstream(t, upstreamCert, upstreamKey)
-	defer upstream.Close()
+func TestMITMProxyPolicyParity(t *testing.T) {
+	t.Parallel()
 
-	// Build an upstream trust pool so the proxy trusts our test server.
+	t.Run("allows matching host without mutation", func(t *testing.T) {
+		t.Parallel()
+
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			allowedHosts: []string{"127.0.0.1"},
+		})
+
+		resp := harness.mustGet(t, "/exact")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		defer resp.Body.Close()
+
+		if got := harness.upstreamHitCount(); got != 1 {
+			t.Fatalf("upstream hits = %d, want 1", got)
+		}
+		obs := harness.singleObservation(t)
+		if obs.URL != "https://"+harness.upstreamAddr+"/exact" {
+			t.Fatalf("observed URL = %q, want exact upstream URL", obs.URL)
+		}
+		if auth := obs.RequestHeader.Get("Authorization"); auth != "" {
+			t.Fatalf("authorization = %q, want empty", auth)
+		}
+	})
+
+	t.Run("wildcard and path prefix rules reuse bearer injection", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{"pkg/bearer": "token-123"})
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"*.example.test"},
+			rules: []transport.Rule{{
+				Name:      "bearer",
+				SecretKey: "pkg/bearer",
+				Inject: tooldef.CredentialInject{
+					Hosts:      []string{"*.example.test"},
+					Method:     "bearer_header",
+					PathPrefix: "/v1",
+				},
+			}},
+			upstreamHostOverride: "api.example.test",
+		})
+
+		resp := harness.mustGet(t, "/v1/issues")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		defer resp.Body.Close()
+
+		obs := harness.singleObservation(t)
+		if got := obs.RequestHeader.Get("Authorization"); got != "Bearer token-123" {
+			t.Fatalf("authorization = %q, want bearer token", got)
+		}
+		if got := obs.UpstreamHost; got != "api.example.test" {
+			t.Fatalf("upstream host = %q, want api.example.test", got)
+		}
+	})
+
+	t.Run("basic auth mutation reaches only upstream boundary", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{"pkg/basic": "aladdin:open-sesame"})
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"127.0.0.1"},
+			rules: []transport.Rule{{
+				Name:      "basic",
+				SecretKey: "pkg/basic",
+				Inject: tooldef.CredentialInject{
+					Hosts:  []string{"127.0.0.1"},
+					Method: "basic_auth",
+				},
+			}},
+		})
+
+		resp := harness.mustGet(t, "/basic")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		defer resp.Body.Close()
+
+		obs := harness.singleObservation(t)
+		want := "Basic " + base64.StdEncoding.EncodeToString([]byte("aladdin:open-sesame"))
+		if got := obs.RequestHeader.Get("Authorization"); got != want {
+			t.Fatalf("authorization = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("api key header mutation reaches upstream", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{"pkg/header": "header-secret"})
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"127.0.0.1"},
+			rules: []transport.Rule{{
+				Name:      "header-key",
+				SecretKey: "pkg/header",
+				Inject: tooldef.CredentialInject{
+					Hosts:      []string{"127.0.0.1"},
+					Method:     "api_key_header",
+					HeaderName: "X-API-Key",
+				},
+			}},
+		})
+
+		resp := harness.mustGet(t, "/header")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		defer resp.Body.Close()
+
+		obs := harness.singleObservation(t)
+		if got := obs.RequestHeader.Get("X-Api-Key"); got != "header-secret" {
+			t.Fatalf("X-API-Key = %q, want injected secret", got)
+		}
+	})
+
+	t.Run("api key query mutation reaches upstream but denial stays redacted", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{"pkg/query": "query-secret"})
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"127.0.0.1"},
+			rules: []transport.Rule{{
+				Name:      "query-key",
+				SecretKey: "pkg/query",
+				Inject: tooldef.CredentialInject{
+					Hosts:     []string{"127.0.0.1"},
+					Method:    "api_key_query",
+					QueryName: "token",
+				},
+			}},
+		})
+
+		resp := harness.mustGet(t, "/query")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		defer resp.Body.Close()
+
+		obs := harness.singleObservation(t)
+		if got := obs.URL; !strings.Contains(got, "token=query-secret") {
+			t.Fatalf("observed URL = %q, want injected query param at upstream boundary", got)
+		}
+
+		denyHarness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"example.invalid"},
+			rules: []transport.Rule{{
+				Name:      "query-key",
+				SecretKey: "pkg/query",
+				Inject: tooldef.CredentialInject{
+					Hosts:     []string{"127.0.0.1"},
+					Method:    "api_key_query",
+					QueryName: "token",
+				},
+			}},
+		})
+		deniedResp := denyHarness.mustGet(t, "/denied-query")
+		defer deniedResp.Body.Close()
+		body, _ := io.ReadAll(deniedResp.Body)
+		if deniedResp.StatusCode != http.StatusForbidden {
+			t.Fatalf("deny status = %d, want 403", deniedResp.StatusCode)
+		}
+		if strings.Contains(string(body), "query-secret") {
+			t.Fatalf("denial body leaked injected secret: %q", string(body))
+		}
+		if got := denyHarness.upstreamHitCount(); got != 0 {
+			t.Fatalf("upstream hits on denial = %d, want 0", got)
+		}
+	})
+
+	t.Run("deny by default returns explicit failure before any upstream dial", func(t *testing.T) {
+		t.Parallel()
+
+		harness := newProxyHarness(t, proxyHarnessConfig{})
+		resp := harness.mustGet(t, "/deny-default")
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", resp.StatusCode)
+		}
+		if !strings.Contains(string(body), `transport denied request to host "127.0.0.1": no allowed hosts declared`) {
+			t.Fatalf("body = %q, want explicit deny-by-default message", string(body))
+		}
+		if got := harness.upstreamHitCount(); got != 0 {
+			t.Fatalf("upstream hits = %d, want 0", got)
+		}
+		if got := harness.upstreamDialCount(); got != 0 {
+			t.Fatalf("upstream dials = %d, want 0", got)
+		}
+	})
+
+	t.Run("malformed request reconstruction and upstream dial failures fail closed", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := reconstructHTTPSURL("", &http.Request{URL: mustParseURL(t, "/relative")}); err == nil {
+			t.Fatal("expected missing CONNECT target to fail")
+		}
+
+		if _, err := rewritePreparedRequest(&http.Request{}, "http://", nil); err == nil {
+			t.Fatal("expected malformed prepared URL rewrite to fail")
+		}
+
+		proxy, err := New(nil)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		policy, err := transport.NewPolicy(nil, nil, []string{"127.0.0.1"}, false)
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
+		proxy.Policy = policy
+
+		proxyListener, err := proxy.ListenAndServe()
+		if err != nil {
+			t.Fatalf("ListenAndServe: %v", err)
+		}
+		defer proxyListener.Close()
+
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(CACertPEM()) {
+			t.Fatal("failed to add proxy CA cert")
+		}
+		proxyURL, _ := url.Parse("http://" + proxyListener.Addr().String())
+		client := &http.Client{Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		}}
+
+		resp, err := client.Get("https://127.0.0.1:1/dial-failure")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", resp.StatusCode)
+		}
+		if !strings.Contains(string(body), "proxy failed to connect upstream") {
+			t.Fatalf("body = %q, want upstream dial failure context", string(body))
+		}
+	})
+}
+
+type proxyHarnessConfig struct {
+	store                secrets.SecretStore
+	allowedHosts         []string
+	rules                []transport.Rule
+	upstreamHostOverride string
+}
+
+type observedExchange struct {
+	URL           string
+	RequestHeader http.Header
+	UpstreamHost  string
+}
+
+type proxyHarness struct {
+	client               *http.Client
+	upstreamAddr         string
+	upstreamHostOverride string
+
+	hitCount  *atomic.Int32
+	dialCount *atomic.Int32
+
+	obsMu        *sync.Mutex
+	observations *[]observedExchange
+}
+
+func newProxyHarness(t *testing.T, cfg proxyHarnessConfig) *proxyHarness {
+	t.Helper()
+
+	certHosts := []string{"127.0.0.1"}
+	if cfg.upstreamHostOverride != "" {
+		certHosts = append(certHosts, cfg.upstreamHostOverride)
+	}
+	upstreamCert, upstreamKey := selfSignedCert(t, certHosts...)
+	upstream, upstreamAddr, dialCount, hitCount := startCountingUpstream(t, upstreamCert, upstreamKey)
+	t.Cleanup(func() { upstream.Close() })
+
 	upstreamPool := x509.NewCertPool()
 	upstreamPool.AppendCertsFromPEM(upstreamCert)
 
-	// Track what the proxy observes.
-	var (
-		mu          sync.Mutex
-		observedURL string
-		observedHdr string
-	)
-
-	proxy, err := mitmproxy.New(mitmproxy.ObserverFunc(func(host string, req *http.Request, resp *http.Response) {
-		mu.Lock()
-		defer mu.Unlock()
-		observedURL = req.URL.String()
-		observedHdr = resp.Header.Get("X-Test-Secret")
+	observationsMu := &sync.Mutex{}
+	observations := &[]observedExchange{}
+	proxy, err := New(ObserverFunc(func(_ string, req *http.Request, _ *http.Response) {
+		observationsMu.Lock()
+		defer observationsMu.Unlock()
+		*observations = append(*observations, observedExchange{
+			URL:           req.URL.String(),
+			RequestHeader: req.Header.Clone(),
+			UpstreamHost:  req.Host,
+		})
 	}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	policy, err := transport.NewPolicy(cfg.store, cfg.rules, cfg.allowedHosts, true)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	proxy.Policy = policy
 	proxy.UpstreamTLSConfig = &tls.Config{RootCAs: upstreamPool}
+	if cfg.upstreamHostOverride != "" {
+		proxy.UpstreamDialTLS = func(network, addr string, tlsCfg *tls.Config) (net.Conn, error) {
+			if addr == cfg.upstreamHostOverride+":443" {
+				addr = upstreamAddr
+			}
+			return tls.Dial(network, addr, tlsCfg)
+		}
+	}
 
 	proxyListener, err := proxy.ListenAndServe()
 	if err != nil {
 		t.Fatalf("ListenAndServe: %v", err)
 	}
-	defer proxyListener.Close()
+	t.Cleanup(func() { proxyListener.Close() })
 
-	// Build a client that trusts the proxy's CA.
 	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM(mitmproxy.CACertPEM()) {
-		t.Fatal("failed to add CA cert")
+	if !caPool.AppendCertsFromPEM(CACertPEM()) {
+		t.Fatal("failed to add proxy CA cert")
 	}
 	proxyURL, _ := url.Parse("http://" + proxyListener.Addr().String())
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:           http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{RootCAs: caPool},
-		},
+	transportCfg := &http.Transport{
+		Proxy:           http.ProxyURL(proxyURL),
+		TLSClientConfig: &tls.Config{RootCAs: caPool},
 	}
 
-	resp, err := client.Get("https://" + upstreamAddr + "/get")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body["message"] != "hello from upstream" {
-		t.Errorf("body = %v, want message=hello from upstream", body)
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if observedURL != "/get" {
-		t.Errorf("observer URL = %q, want /get", observedURL)
-	}
-	if observedHdr != "visible-to-proxy" {
-		t.Errorf("observer header = %q, want visible-to-proxy", observedHdr)
+	return &proxyHarness{
+		client:               &http.Client{Transport: transportCfg},
+		upstreamAddr:         upstreamAddr,
+		upstreamHostOverride: cfg.upstreamHostOverride,
+		hitCount:             hitCount,
+		dialCount:            dialCount,
+		obsMu:                observationsMu,
+		observations:         observations,
 	}
 }
 
-func startUpstream(t *testing.T, certPEM, keyPEM []byte) (*http.Server, string) {
+func (h *proxyHarness) mustGet(t *testing.T, path string) *http.Response {
 	t.Helper()
 
+	targetHost := h.upstreamAddr
+	if h.upstreamHostOverride != "" {
+		targetHost = h.upstreamHostOverride
+	}
+	resp, err := h.client.Get("https://" + targetHost + path)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	return resp
+}
+
+func (h *proxyHarness) upstreamHitCount() int {
+	return int(h.hitCount.Load())
+}
+
+func (h *proxyHarness) upstreamDialCount() int {
+	return int(h.dialCount.Load())
+}
+
+func (h *proxyHarness) singleObservation(t *testing.T) observedExchange {
+	t.Helper()
+	h.obsMu.Lock()
+	defer h.obsMu.Unlock()
+	if len(*h.observations) != 1 {
+		t.Fatalf("observations = %d, want 1", len(*h.observations))
+	}
+	return (*h.observations)[0]
+}
+
+func startCountingUpstream(t *testing.T, certPEM, keyPEM []byte) (*http.Server, string, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+
+	hitCount := &atomic.Int32{}
+	dialCount := &atomic.Int32{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/get", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		hitCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Test-Secret", "visible-to-proxy")
-		json.NewEncoder(w).Encode(map[string]string{"message": "hello from upstream"})
+		json.NewEncoder(w).Encode(map[string]string{"path": r.URL.String()})
 	})
 
 	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
@@ -114,17 +431,31 @@ func startUpstream(t *testing.T, certPEM, keyPEM []byte) (*http.Server, string) 
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	tlsListener := tls.NewListener(listener, &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-	})
-
+	counting := &countingListener{Listener: listener, dialCount: dialCount}
+	tlsListener := tls.NewListener(counting, &tls.Config{Certificates: []tls.Certificate{tlsCert}})
 	server := &http.Server{Handler: mux}
 	go server.Serve(tlsListener)
-	return server, listener.Addr().String()
+	return server, listener.Addr().String(), dialCount, hitCount
 }
 
-func selfSignedCert(t *testing.T, host string) (certPEM, keyPEM []byte) {
+type countingListener struct {
+	net.Listener
+	dialCount *atomic.Int32
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err == nil {
+		l.dialCount.Add(1)
+	}
+	return conn, err
+}
+
+func selfSignedCert(t *testing.T, hosts ...string) (certPEM, keyPEM []byte) {
 	t.Helper()
+	if len(hosts) == 0 {
+		t.Fatal("selfSignedCert requires at least one host")
+	}
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -133,17 +464,19 @@ func selfSignedCert(t *testing.T, host string) (certPEM, keyPEM []byte) {
 
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: host},
+		Subject:               pkix.Name{CommonName: hosts[0]},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		template.IPAddresses = []net.IP{ip}
-	} else {
-		template.DNSNames = []string{host}
+	for _, host := range hosts {
+		if ip := net.ParseIP(host); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, host)
+		}
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -158,4 +491,13 @@ func selfSignedCert(t *testing.T, host string) (certPEM, keyPEM []byte) {
 	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	return
+}
+
+func mustParseURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("url.Parse(%q): %v", raw, err)
+	}
+	return u
 }

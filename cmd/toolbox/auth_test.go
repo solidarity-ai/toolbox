@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 	"github.com/solidarity-ai/toolbox/oauthbootstrap"
+	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
 	"github.com/solidarity-ai/toolbox/secrets"
 )
 
@@ -96,6 +98,51 @@ func TestRunAuthPromptsAndUsesTenantScope(t *testing.T) {
 	if !strings.Contains(stderr.String(), "OAuth client_id") || !strings.Contains(stderr.String(), "OAuth client_secret") {
 		t.Fatalf("stderr = %q, want both prompts", stderr.String())
 	}
+}
+
+func TestRunAuthGoogleEmulateEndToEndPersistsTenantRefreshState(t *testing.T) {
+	srv := emulatetest.StartGoogle(t)
+	provider, err := srv.GoogleProviderRef(context.Background())
+	if err != nil {
+		t.Fatalf("GoogleProviderRef(): %v", err)
+	}
+	storePath := filepath.Join(t.TempDir(), "secrets.age")
+	identityPath := writeAuthIdentityFile(t, t.TempDir())
+	packageDir := newOAuthPackageDir(t, authPackageOptions{provider: provider})
+
+	deps := authDeps{
+		prompt:      promptSecret,
+		newStore:    func() (secrets.SecretStore, error) { return secrets.NewLocalSecretStore(storePath, identityPath), nil },
+		openBrowser: func(ctx context.Context, authURL string) error { return srv.CompleteGoogleAuthorization(ctx, authURL) },
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			bootstrapper := oauthbootstrap.New(oauthbootstrap.Options{Store: store, HTTPClient: srv.SecureClient(), OpenBrowser: opener, CallbackTimeout: 5 * time.Second, ExchangeTimeout: 5 * time.Second})
+			return bootstrapper.Run
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = runAuthWithDeps([]string{"--tenant", "acme", packageDir}, strings.NewReader("client-google\n\n"), &stdout, &stderr, deps)
+	if err != nil {
+		t.Fatalf("runAuthWithDeps() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `authorized oauth2 credential "workspace"`) {
+		t.Fatalf("stdout = %q, want auth success output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `tenant "acme" scope`) {
+		t.Fatalf("stdout = %q, want tenant scope output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "public-client PKCE flow") {
+		t.Fatalf("stdout = %q, want PKCE output", stdout.String())
+	}
+
+	store := secrets.NewLocalSecretStore(storePath, identityPath)
+	assertAuthStoredValue(t, store, "example.com/acme/authpkg/tenant/acme/workspace/client_id", "client-google")
+	refreshToken := assertAuthStoredNonEmpty(t, store, "example.com/acme/authpkg/tenant/acme/workspace/refresh_token")
+	if !strings.HasPrefix(refreshToken, "google_refresh_") {
+		t.Fatalf("refresh_token = %q, want emulate google refresh token prefix", refreshToken)
+	}
+	assertAuthSecretMissing(t, store, "example.com/acme/authpkg/tenant/acme/workspace/client_secret")
+	assertAuthSecretMissing(t, store, "example.com/acme/authpkg/tenant/acme/workspace/access_token")
 }
 
 func TestRunAuthLoadsCurrentDirectoryByDefault(t *testing.T) {
@@ -285,11 +332,16 @@ func TestRunAuthLocalSecretStoreUnlockFailure(t *testing.T) {
 
 type authPackageOptions struct {
 	extraOAuthCredential bool
+	provider             any
 }
 
 func newOAuthPackageDir(t *testing.T, opts authPackageOptions) string {
 	t.Helper()
 	dir := t.TempDir()
+	provider := opts.provider
+	if provider == nil {
+		provider = "google"
+	}
 	manifest := map[string]any{
 		"module":  "example.com/acme/authpkg",
 		"name":    "authpkg",
@@ -297,7 +349,7 @@ func newOAuthPackageDir(t *testing.T, opts authPackageOptions) string {
 		"credentials": []map[string]any{{
 			"name":     "workspace",
 			"type":     "oauth2",
-			"provider": "google",
+			"provider": provider,
 			"scopes":   []string{"openid", "email"},
 			"inject": map[string]any{
 				"hosts":  []string{"www.googleapis.com"},
@@ -314,7 +366,7 @@ func newOAuthPackageDir(t *testing.T, opts authPackageOptions) string {
 		manifest["credentials"] = []map[string]any{{
 			"name":     "workspace",
 			"type":     "oauth2",
-			"provider": "google",
+			"provider": provider,
 			"scopes":   []string{"openid"},
 			"inject": map[string]any{
 				"hosts":  []string{"www.googleapis.com"},
@@ -323,7 +375,7 @@ func newOAuthPackageDir(t *testing.T, opts authPackageOptions) string {
 		}, {
 			"name":     "workspace-admin",
 			"type":     "oauth2",
-			"provider": "google",
+			"provider": provider,
 			"scopes":   []string{"openid", "email"},
 			"inject": map[string]any{
 				"hosts":  []string{"www.googleapis.com"},
@@ -363,6 +415,40 @@ func writeAuthIdentityFile(t *testing.T, dir string) string {
 		t.Fatalf("WriteFile(%q): %v", path, err)
 	}
 	return path
+}
+
+func assertAuthStoredValue(t *testing.T, store *secrets.LocalSecretStore, key string, want string) {
+	t.Helper()
+	got, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", key, err)
+	}
+	if string(got) != want {
+		t.Fatalf("Get(%q) = %q, want %q", key, string(got), want)
+	}
+}
+
+func assertAuthStoredNonEmpty(t *testing.T, store *secrets.LocalSecretStore, key string) string {
+	t.Helper()
+	got, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", key, err)
+	}
+	if strings.TrimSpace(string(got)) == "" {
+		t.Fatalf("Get(%q) returned empty value", key)
+	}
+	return string(got)
+}
+
+func assertAuthSecretMissing(t *testing.T, store *secrets.LocalSecretStore, key string) {
+	t.Helper()
+	_, err := store.Get(context.Background(), key)
+	if err == nil {
+		t.Fatalf("Get(%q) unexpectedly succeeded", key)
+	}
+	if err != secrets.ErrNotFound {
+		t.Fatalf("Get(%q) error = %v, want ErrNotFound", key, err)
+	}
 }
 
 type stubSecretStore struct{}

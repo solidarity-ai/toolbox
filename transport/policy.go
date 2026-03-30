@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
@@ -42,14 +44,49 @@ func NewPolicy(store secrets.SecretStore, rules []Rule, allowedHosts []string, r
 	}, nil
 }
 
-// PrepareRequest applies transport-managed request mutation. Allowlist
-// enforcement is intentionally deferred; this seam exists so both fetch and the
-// MITM proxy can share one resolved runtime policy object.
+// PrepareRequest applies transport-managed request mutation and request-host
+// allowlist enforcement for the shared runtime policy seam. Injector mutation
+// intentionally runs first so transport-owned auth preparation failures surface
+// before allowlist evaluation, but preflight failures always return the caller's
+// original request URL so hidden mutations do not leak back across the seam.
 func (p *Policy) PrepareRequest(ctx context.Context, rawURL string, headers *fetch.Headers) (string, error) {
-	if p == nil || p.injector == nil {
+	if p == nil {
 		return rawURL, nil
 	}
-	return p.injector.InjectRequest(ctx, rawURL, headers)
+
+	preparedURL := rawURL
+	if p.injector != nil {
+		var err error
+		preparedURL, err = p.injector.InjectRequest(ctx, rawURL, headers)
+		if err != nil {
+			return rawURL, err
+		}
+	}
+
+	if err := p.enforceAllowedHost(preparedURL); err != nil {
+		return rawURL, err
+	}
+	return preparedURL, nil
+}
+
+func (p *Policy) enforceAllowedHost(rawURL string) error {
+	parsed, err := parseRequestURL(rawURL)
+	if err != nil {
+		return err
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if len(p.allowedHosts) == 0 {
+		return fmt.Errorf("transport denied request to host %q: no allowed hosts declared", host)
+	}
+
+	for _, allowedHost := range p.allowedHosts {
+		if _, ok := newHostMatcher(allowedHost).match(host); ok {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("transport denied request to host %q: not allowed by policy", host)
 }
 
 // Rules returns the normalized credential rules carried by this policy.

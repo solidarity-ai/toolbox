@@ -28,7 +28,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 			Hosts:  []string{"api.github.com"},
 			Method: "bearer_header",
 		},
-	}}, nil, false)
+	}}, []string{"api.github.com"}, false)
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 				Hosts:  []string{parsedURL.Hostname()},
 				Method: "bearer_header",
 			},
-		}}, nil, false)
+		}}, []string{parsedURL.Hostname()}, false)
 		if err != nil {
 			t.Fatalf("NewPolicy: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 				Hosts:  []string{parsedURL.Hostname()},
 				Method: "bearer_header",
 			},
-		}}, nil, false)
+		}}, []string{parsedURL.Hostname()}, false)
 		if err != nil {
 			t.Fatalf("NewPolicy: %v", err)
 		}
@@ -119,6 +119,103 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 		}
 		if got := requestCount.Load(); got != 0 {
 			t.Fatalf("request count = %d, want 0 outbound requests when oauth2 lookup fails", got)
+		}
+	})
+
+	t.Run("deny by default short circuits before outbound fetch", func(t *testing.T) {
+		var requestCount atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer srv.Close()
+
+		policy, err := transport.NewPolicy(nil, nil, nil, true)
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
+
+		_, err = goFetchWithTransportPolicy(policy)(srv.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected deny-by-default policy to reject request")
+		}
+		if !strings.Contains(err.Error(), "no allowed hosts declared") {
+			t.Fatalf("error = %v, want deny-by-default context", err)
+		}
+		if got := requestCount.Load(); got != 0 {
+			t.Fatalf("request count = %d, want 0 outbound requests when allowlist denies", got)
+		}
+	})
+
+	t.Run("explicit denied hosts short circuit before outbound fetch", func(t *testing.T) {
+		var requestCount atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer srv.Close()
+
+		policy, err := transport.NewPolicy(nil, nil, []string{"example.invalid"}, false)
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
+
+		_, err = goFetchWithTransportPolicy(policy)(srv.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected explicit host allowlist to reject request")
+		}
+		if !strings.Contains(err.Error(), "not allowed by policy") {
+			t.Fatalf("error = %v, want explicit denied-host context", err)
+		}
+		if got := requestCount.Load(); got != 0 {
+			t.Fatalf("request count = %d, want 0 outbound requests when allowlist denies", got)
+		}
+	})
+
+	t.Run("allowed matching hosts still reach fetch seam", func(t *testing.T) {
+		var requestCount atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Fatalf("Authorization header = %q, want injected bearer token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer srv.Close()
+
+		parsedURL, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatalf("parse server url: %v", err)
+		}
+
+		policy, err := transport.NewPolicy(secretStore, []transport.Rule{{
+			Name:      "github_token",
+			SecretKey: "github.com/example/github-issues/github_token",
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{parsedURL.Hostname()},
+				Method: "bearer_header",
+			},
+		}}, []string{parsedURL.Hostname()}, false)
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
+
+		result, err := goFetchWithTransportPolicy(policy)(srv.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err != nil {
+			t.Fatalf("goFetchWithTransportPolicy: %v", err)
+		}
+		if got := requestCount.Load(); got != 1 {
+			t.Fatalf("request count = %d, want exactly 1 outbound request", got)
+		}
+		if result.Status != http.StatusOK {
+			t.Fatalf("status = %d, want %d", result.Status, http.StatusOK)
+		}
+		if result.Body != `{"ok":true}` {
+			t.Fatalf("body = %q, want JSON response", result.Body)
 		}
 	})
 }

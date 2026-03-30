@@ -1,9 +1,15 @@
 package transport_test
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/fetch"
+	"github.com/solidarity-ai/toolbox/secrets"
+	"github.com/solidarity-ai/toolbox/testutil"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/transport"
 )
 
@@ -70,4 +76,126 @@ func TestPolicy(t *testing.T) {
 			t.Fatalf("AllowedHosts() = %v, want nil", got)
 		}
 	})
+}
+
+func TestPolicyPrepareRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allows exact hosts while ignoring ports", func(t *testing.T) {
+		t.Parallel()
+
+		policy := mustNewPolicy(t, nil, nil, []string{"api.example.com"}, false)
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://api.example.com:8443/v1/issues", fetch.NewHeaders())
+		if err != nil {
+			t.Fatalf("PrepareRequest: %v", err)
+		}
+		if gotURL != "https://api.example.com:8443/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want unchanged", gotURL)
+		}
+	})
+
+	t.Run("allows wildcard subdomains", func(t *testing.T) {
+		t.Parallel()
+
+		policy := mustNewPolicy(t, nil, nil, []string{"*.example.com"}, false)
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://api.example.com/v1/issues", fetch.NewHeaders())
+		if err != nil {
+			t.Fatalf("PrepareRequest: %v", err)
+		}
+		if gotURL != "https://api.example.com/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want unchanged", gotURL)
+		}
+	})
+
+	t.Run("wildcard does not match bare parent host", func(t *testing.T) {
+		t.Parallel()
+
+		policy := mustNewPolicy(t, nil, nil, []string{"*.example.com"}, false)
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://example.com/v1/issues", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected bare parent host to be denied")
+		}
+		if gotURL != "https://example.com/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want original raw URL on denial", gotURL)
+		}
+		if !strings.Contains(err.Error(), `transport denied request to host "example.com": not allowed by policy`) {
+			t.Fatalf("error = %v, want explicit denied-host context", err)
+		}
+	})
+
+	t.Run("deny by default rejects when no allowlist is declared", func(t *testing.T) {
+		t.Parallel()
+
+		policy := mustNewPolicy(t, nil, nil, nil, true)
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://api.example.com/v1/issues", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected deny-by-default policy to reject request")
+		}
+		if gotURL != "https://api.example.com/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want original raw URL on denial", gotURL)
+		}
+		if !strings.Contains(err.Error(), `transport denied request to host "api.example.com": no allowed hosts declared`) {
+			t.Fatalf("error = %v, want explicit deny-by-default context", err)
+		}
+	})
+
+	t.Run("rejects malformed request urls before outbound fetch", func(t *testing.T) {
+		t.Parallel()
+
+		policy := mustNewPolicy(t, nil, nil, []string{"api.example.com"}, false)
+		gotURL, err := policy.PrepareRequest(context.Background(), "://bad-url", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected malformed request url to fail")
+		}
+		if gotURL != "://bad-url" {
+			t.Fatalf("PrepareRequest() url = %q, want original raw URL on parse failure", gotURL)
+		}
+		if !strings.Contains(err.Error(), "parse request url") {
+			t.Fatalf("error = %v, want parse request url context", err)
+		}
+	})
+
+	t.Run("injector mutations stay transport-owned when allowlist denies", func(t *testing.T) {
+		t.Parallel()
+
+		secretStore := testutil.NewTestSecretStore()
+		secretStore.SeedStrings(map[string]string{"pkg/api_key": "secret-token"})
+
+		policy := mustNewPolicy(t, secretStore, []transport.Rule{{
+			Name:      "api_key",
+			SecretKey: "pkg/api_key",
+			Inject: tooldef.CredentialInject{
+				Hosts:     []string{"api.example.com"},
+				Method:    "api_key_query",
+				QueryName: "token",
+			},
+		}}, []string{"example.invalid"}, false)
+
+		gotURL, err := policy.PrepareRequest(context.Background(), "https://api.example.com/v1/issues", fetch.NewHeaders())
+		if err == nil {
+			t.Fatal("expected denied host after injector mutation")
+		}
+		if gotURL != "https://api.example.com/v1/issues" {
+			t.Fatalf("PrepareRequest() url = %q, want original raw URL when preflight denies", gotURL)
+		}
+		if strings.Contains(gotURL, "secret-token") {
+			t.Fatalf("PrepareRequest() leaked injected secret in returned URL: %q", gotURL)
+		}
+		if !strings.Contains(err.Error(), `transport denied request to host "api.example.com": not allowed by policy`) {
+			t.Fatalf("error = %v, want explicit denied-host context", err)
+		}
+	})
+}
+
+func mustNewPolicy(t *testing.T, store secrets.SecretStore, rules []transport.Rule, allowedHosts []string, requireRuntimePolicy bool) *transport.Policy {
+	t.Helper()
+
+	policy, err := transport.NewPolicy(store, rules, allowedHosts, requireRuntimePolicy)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected runtime policy")
+	}
+	return policy
 }

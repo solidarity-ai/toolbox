@@ -3,6 +3,7 @@ package invoke_test
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func TestGoFetchAuthEmulateRouteReturns401WithoutInjectedAuth(t *testing.T) {
 	srv := emulatetest.Start(t)
 	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-unauth")
 	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesAllowedHosts(t, workDir, srv.AuthBaseURL())
 	rewriteGithubIssuesCredentialHost(t, workDir, "example.invalid")
 
 	resolved := resolveGithubIssuesToolset(t, workDir, nil)
@@ -35,6 +37,7 @@ func TestGoFetchAuthEmulateRouteReturns401WhenHostDoesNotMatchCredentialRule(t *
 	srv := emulatetest.Start(t)
 	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-host-miss")
 	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesAllowedHosts(t, workDir, srv.AuthBaseURL())
 	rewriteGithubIssuesCredentialHost(t, workDir, "example.invalid")
 
 	secretStore := testutil.NewTestSecretStore()
@@ -55,6 +58,7 @@ func TestGoFetchAuthMissingTransportCredentialReturnsHelpfulError(t *testing.T) 
 	srv := emulatetest.Start(t)
 	owner, repo, issueNumber, _ := seedGithubIssueCanary(t, srv, "go-fetch-missing-secret")
 	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesAllowedHosts(t, workDir, srv.AuthBaseURL())
 
 	resolved := resolveGithubIssuesToolset(t, workDir, nil)
 	_, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
@@ -77,6 +81,7 @@ func TestGoFetchAuthEmulateRouteSucceedsWithResolvedTransportAuth(t *testing.T) 
 	srv := emulatetest.Start(t)
 	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-auth")
 	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesAllowedHosts(t, workDir, srv.AuthBaseURL())
 
 	secretStore := testutil.NewTestSecretStore()
 	secretStore.SeedStrings(map[string]string{
@@ -110,6 +115,9 @@ func TestGoFetchAuthEmulateRouteSucceedsWithResolvedTransportAuth(t *testing.T) 
 	}
 	if issue.State != "open" {
 		t.Fatalf("issue state = %q, want open", issue.State)
+	}
+	if strings.Contains(result, srv.Token()) {
+		t.Fatalf("tool result leaked transport-managed auth token: %s", result)
 	}
 }
 
@@ -155,18 +163,22 @@ func seedGithubIssueCanary(t testing.TB, srv *emulatetest.Server, prefix string)
 	return owner, repo, issue.Number, title
 }
 
+func rewriteGithubIssuesAllowedHosts(t testing.TB, workDir, baseURL string) {
+	t.Helper()
+
+	manifestPath, manifest := loadGithubIssuesManifestForRewrite(t, workDir)
+	parsedBaseURL, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("parse base url for allowlist rewrite: %v", err)
+	}
+	manifest["allowed_hosts"] = []string{parsedBaseURL.Hostname()}
+	writeGithubIssuesManifestRewrite(t, manifestPath, manifest)
+}
+
 func rewriteGithubIssuesCredentialHost(t testing.TB, workDir, host string) {
 	t.Helper()
-	manifestPath := workDir + "/toolbox.devpkg.json"
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatalf("read manifest for host rewrite: %v", err)
-	}
 
-	var manifest map[string]any
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		t.Fatalf("decode manifest for host rewrite: %v", err)
-	}
+	manifestPath, manifest := loadGithubIssuesManifestForRewrite(t, workDir)
 	credentials, ok := manifest["credentials"].([]any)
 	if !ok || len(credentials) != 1 {
 		t.Fatalf("credentials malformed in %s: %#v", manifestPath, manifest["credentials"])
@@ -180,6 +192,27 @@ func rewriteGithubIssuesCredentialHost(t testing.TB, workDir, host string) {
 		t.Fatalf("inject config malformed in %s: %#v", manifestPath, credential["inject"])
 	}
 	inject["hosts"] = []string{host}
+	writeGithubIssuesManifestRewrite(t, manifestPath, manifest)
+}
+
+func loadGithubIssuesManifestForRewrite(t testing.TB, workDir string) (string, map[string]any) {
+	t.Helper()
+
+	manifestPath := workDir + "/toolbox.devpkg.json"
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest for host rewrite: %v", err)
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode manifest for host rewrite: %v", err)
+	}
+	return manifestPath, manifest
+}
+
+func writeGithubIssuesManifestRewrite(t testing.TB, manifestPath string, manifest map[string]any) {
+	t.Helper()
 
 	updated, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

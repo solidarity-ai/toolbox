@@ -543,7 +543,8 @@ func TestInjectorOAuth2RefreshCachesAccessTokenAndAvoidsRepeatProviderCalls(t *t
 	defer tokenServer.Close()
 
 	clock := &mutableClock{now: time.Unix(1_700_000_000, 0)}
-	injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithClock(clock.Now), transport.WithRefreshHTTPClient(tokenServer.Client()))
+	collector := audit.NewCollector()
+	injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithClock(clock.Now), transport.WithRefreshHTTPClient(tokenServer.Client()), transport.WithAuditSink(collector))
 
 	firstHeaders := fetch.NewHeaders()
 	_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", firstHeaders)
@@ -564,6 +565,37 @@ func TestInjectorOAuth2RefreshCachesAccessTokenAndAvoidsRepeatProviderCalls(t *t
 	}
 	if got := tokenCalls.Load(); got != 1 {
 		t.Fatalf("token endpoint calls = %d, want 1 cache-backed refresh", got)
+	}
+	wantEvents := []audit.Event{
+		{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "success",
+				Stage:      "token_refresh",
+				ExpiresAt:  clock.Now().Add(3600 * time.Second),
+			},
+		},
+		{
+			Name: audit.EventCredentialInjected,
+			Payload: audit.CredentialInjected{
+				Host:         "api.github.com",
+				Credential:   "github_oauth",
+				InjectMethod: "bearer_header",
+			},
+		},
+		{
+			Name: audit.EventCredentialInjected,
+			Payload: audit.CredentialInjected{
+				Host:         "api.github.com",
+				Credential:   "github_oauth",
+				InjectMethod: "bearer_header",
+			},
+		},
+	}
+	if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+		t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -702,7 +734,8 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 		store.SeedStrings(map[string]string{
 			"github.com/example/github-issues/github_oauth/client_id": "client-123",
 		})
-		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule("https://auth.example.invalid/token")})
+		collector := audit.NewCollector()
+		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule("https://auth.example.invalid/token")}, transport.WithAuditSink(collector))
 		headers := fetch.NewHeaders()
 		gotURL, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
 		if err == nil {
@@ -720,6 +753,19 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 		if strings.Contains(err.Error(), "client-123") {
 			t.Fatalf("error leaked secret material: %v", err)
 		}
+		want := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "secret_reread",
+				Reason:     "missing_secret_material",
+			},
+		}}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
+		}
 	})
 
 	t.Run("provider 500", func(t *testing.T) {
@@ -735,7 +781,8 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 		}))
 		defer tokenServer.Close()
 
-		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(tokenServer.Client()))
+		collector := audit.NewCollector()
+		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(tokenServer.Client()), transport.WithAuditSink(collector))
 		headers := fetch.NewHeaders()
 		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
 		if err == nil {
@@ -746,6 +793,19 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 		}
 		if !strings.Contains(err.Error(), "during token request") || !strings.Contains(err.Error(), "status 502") {
 			t.Fatalf("error = %v, want token request stage and upstream status", err)
+		}
+		want := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "token_request",
+				Reason:     "provider_error",
+			},
+		}}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
 
@@ -766,7 +826,8 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 
 		client := tokenServer.Client()
 		client.Timeout = 10 * time.Millisecond
-		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(client))
+		collector := audit.NewCollector()
+		injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(client), transport.WithAuditSink(collector))
 		headers := fetch.NewHeaders()
 		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
 		if err == nil {
@@ -774,6 +835,19 @@ func TestInjectorOAuth2RefreshFailsClosedWithActionableRedactedErrors(t *testing
 		}
 		if !strings.Contains(err.Error(), "during token request") {
 			t.Fatalf("error = %v, want token request stage", err)
+		}
+		want := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "token_request",
+				Reason:     "timeout",
+			},
+		}}
+		if diff := cmp.Diff(want, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
 }
@@ -807,7 +881,8 @@ func TestInjectorOAuth2RefreshRejectsMalformedResponses(t *testing.T) {
 			}))
 			defer tokenServer.Close()
 
-			injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(tokenServer.Client()))
+			collector := audit.NewCollector()
+			injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(tokenServer.Client()), transport.WithAuditSink(collector))
 			headers := fetch.NewHeaders()
 			_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
 			if err == nil {
@@ -818,6 +893,19 @@ func TestInjectorOAuth2RefreshRejectsMalformedResponses(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+			wantEvents := []audit.Event{{
+				Name: audit.EventCredentialRefresh,
+				Payload: audit.CredentialRefresh{
+					Credential: "github_oauth",
+					CacheKey:   "github.com/example/github-issues:github_oauth",
+					Outcome:    "failure",
+					Stage:      "response_parse",
+					Reason:     "malformed_response",
+				},
+			}}
+			if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+				t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -873,6 +961,112 @@ func TestInjectorOAuth2SingleflightSharesOneInFlightRefresh(t *testing.T) {
 	}
 	if got := tokenCalls.Load(); got != 1 {
 		t.Fatalf("token endpoint calls = %d, want 1 shared refresh", got)
+	}
+}
+
+func TestInjectorOAuth2SingleflightTimeoutEmitsRefreshFailureWithoutInjection(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	store.SeedStrings(map[string]string{
+		"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+		"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+		"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+	})
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"shared-token","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	collector := audit.NewCollector()
+	injector := newInjectorWithOptions(t, store, []transport.Rule{oauth2Rule(tokenServer.URL)}, transport.WithRefreshHTTPClient(tokenServer.Client()), transport.WithAuditSink(collector))
+
+	firstDone := make(chan error, 1)
+	go func() {
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
+		if err == nil {
+			if diff := cmp.Diff([][2]string{{"authorization", "Bearer shared-token"}}, headers.Entries()); diff != "" {
+				firstDone <- errors.New(diff)
+				return
+			}
+		}
+		firstDone <- err
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	headers := fetch.NewHeaders()
+	_, err := injector.InjectRequest(ctx, "https://api.github.com/user", headers)
+	if err == nil {
+		t.Fatal("expected singleflight wait timeout")
+	}
+	if !strings.Contains(err.Error(), "during singleflight wait") {
+		t.Fatalf("error = %v, want singleflight wait context", err)
+	}
+	if len(headers.Entries()) != 0 {
+		t.Fatalf("headers = %v, want no injection on timed out waiter", headers.Entries())
+	}
+
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+
+	wantEvents := []audit.Event{
+		{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "singleflight_wait",
+				Reason:     "timeout",
+			},
+		},
+		{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "success",
+				Stage:      "token_refresh",
+				ExpiresAt:  time.Now().UTC(),
+			},
+		},
+		{
+			Name: audit.EventCredentialInjected,
+			Payload: audit.CredentialInjected{
+				Host:         "api.github.com",
+				Credential:   "github_oauth",
+				InjectMethod: "bearer_header",
+			},
+		},
+	}
+	gotEvents := collector.Events()
+	if len(gotEvents) != 3 {
+		t.Fatalf("collector event count = %d, want 3", len(gotEvents))
+	}
+	refreshSuccess, ok := gotEvents[1].Payload.(audit.CredentialRefresh)
+	if !ok {
+		t.Fatalf("event[1] payload = %T, want audit.CredentialRefresh", gotEvents[1].Payload)
+	}
+	wantEvents[1].Payload = audit.CredentialRefresh{
+		Credential: "github_oauth",
+		CacheKey:   "github.com/example/github-issues:github_oauth",
+		Outcome:    "success",
+		Stage:      "token_refresh",
+		ExpiresAt:  refreshSuccess.ExpiresAt,
+	}
+	if diff := cmp.Diff(wantEvents, gotEvents); diff != "" {
+		t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 	}
 }
 

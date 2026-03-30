@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/testutil"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/transport"
@@ -273,7 +275,8 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		}))
 		defer apiServer.Close()
 
-		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+		collector := audit.NewCollector()
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicyWithAudit(t, store, tokenServer.URL, apiServer.URL, collector))
 
 		for attempt := range 2 {
 			result, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
@@ -290,6 +293,46 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		}
 		if got := tokenCalls.Load(); got != 1 {
 			t.Fatalf("token endpoint calls = %d, want 1 cached refresh", got)
+		}
+		gotEvents := collector.Events()
+		if len(gotEvents) != 3 {
+			t.Fatalf("collector event count = %d, want 3", len(gotEvents))
+		}
+		refreshSuccess, ok := gotEvents[0].Payload.(audit.CredentialRefresh)
+		if !ok {
+			t.Fatalf("event[0] payload = %T, want audit.CredentialRefresh", gotEvents[0].Payload)
+		}
+		host := mustParseFetchHostname(t, apiServer.URL)
+		wantEvents := []audit.Event{
+			{
+				Name: audit.EventCredentialRefresh,
+				Payload: audit.CredentialRefresh{
+					Credential: "github_oauth",
+					CacheKey:   "github.com/example/github-issues:github_oauth",
+					Outcome:    "success",
+					Stage:      "token_refresh",
+					ExpiresAt:  refreshSuccess.ExpiresAt,
+				},
+			},
+			{
+				Name: audit.EventCredentialInjected,
+				Payload: audit.CredentialInjected{
+					Host:         host,
+					Credential:   "github_oauth",
+					InjectMethod: "bearer_header",
+				},
+			},
+			{
+				Name: audit.EventCredentialInjected,
+				Payload: audit.CredentialInjected{
+					Host:         host,
+					Credential:   "github_oauth",
+					InjectMethod: "bearer_header",
+				},
+			},
+		}
+		if diff := cmp.Diff(wantEvents, gotEvents); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
 
@@ -318,7 +361,8 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		}))
 		defer apiServer.Close()
 
-		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+		collector := audit.NewCollector()
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicyWithAudit(t, store, tokenServer.URL, apiServer.URL, collector))
 		_, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
 		if err == nil {
 			t.Fatal("expected refresh failure before protected upstream fetch")
@@ -334,6 +378,19 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		}
 		if got := tokenCalls.Load(); got != 1 {
 			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+		wantEvents := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "token_request",
+				Reason:     "provider_error",
+			},
+		}}
+		if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
 
@@ -363,7 +420,8 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		}))
 		defer apiServer.Close()
 
-		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+		collector := audit.NewCollector()
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicyWithAudit(t, store, tokenServer.URL, apiServer.URL, collector))
 		_, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
 		if err == nil {
 			t.Fatal("expected malformed refresh payload to fail")
@@ -377,10 +435,36 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 		if got := tokenCalls.Load(); got != 1 {
 			t.Fatalf("token endpoint calls = %d, want 1", got)
 		}
+		wantEvents := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "response_parse",
+				Reason:     "malformed_response",
+			},
+		}}
+		if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
+		}
 	})
 }
 
+func mustParseFetchHostname(t *testing.T, raw string) string {
+	t.Helper()
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse url %q: %v", raw, err)
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
 func mustOAuth2FetchPolicy(t *testing.T, store *testutil.TestSecretStore, tokenURL string, protectedURL string) *transport.Policy {
+	return mustOAuth2FetchPolicyWithAudit(t, store, tokenURL, protectedURL, nil)
+}
+
+func mustOAuth2FetchPolicyWithAudit(t *testing.T, store *testutil.TestSecretStore, tokenURL string, protectedURL string, sink audit.Sink) *transport.Policy {
 	t.Helper()
 
 	parsedProtectedURL, err := url.Parse(protectedURL)
@@ -388,7 +472,7 @@ func mustOAuth2FetchPolicy(t *testing.T, store *testutil.TestSecretStore, tokenU
 		t.Fatalf("parse protected url: %v", err)
 	}
 
-	policy, err := transport.NewPolicy(store, []transport.Rule{{
+	policy, err := transport.NewPolicyWithOptions(store, []transport.Rule{{
 		Name:               "github_oauth",
 		SecretKey:          "github.com/example/github-issues/github_oauth/access_token",
 		Type:               tooldef.CredentialTypeOAuth2,
@@ -399,7 +483,7 @@ func mustOAuth2FetchPolicy(t *testing.T, store *testutil.TestSecretStore, tokenU
 			Hosts:  []string{parsedProtectedURL.Hostname()},
 			Method: "bearer_header",
 		},
-	}}, []string{parsedProtectedURL.Hostname()}, false)
+	}}, []string{parsedProtectedURL.Hostname()}, false, transport.WithAuditSink(sink))
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}

@@ -3,6 +3,7 @@ package audit
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // EventName is the canonical audit vocabulary for shared execution events.
@@ -10,6 +11,7 @@ type EventName string
 
 const (
 	EventCredentialInjected EventName = "credential_injected"
+	EventCredentialRefresh  EventName = "credential_refresh"
 	EventCredentialDenied   EventName = "credential_denied"
 )
 
@@ -35,6 +37,16 @@ type CredentialInjected struct {
 	InjectMethod string
 }
 
+// CredentialRefresh captures one OAuth2 refresh attempt outcome.
+type CredentialRefresh struct {
+	Credential string
+	CacheKey   string
+	Outcome    string
+	Stage      string
+	Reason     string
+	ExpiresAt  time.Time
+}
+
 // CredentialDenied captures transport allowlist denial.
 type CredentialDenied struct {
 	Host         string
@@ -50,6 +62,40 @@ func NewCredentialInjected(host, credential, injectMethod string) (Event, error)
 			Host:         normalizeAuditField(host),
 			Credential:   normalizeAuditField(credential),
 			InjectMethod: normalizeAuditField(injectMethod),
+		},
+	}
+	if err := event.Validate(); err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+func NewCredentialRefreshSuccess(credential, cacheKey string, expiresAt time.Time) (Event, error) {
+	event := Event{
+		Name: EventCredentialRefresh,
+		Payload: CredentialRefresh{
+			Credential: normalizeAuditField(credential),
+			CacheKey:   normalizeAuditField(cacheKey),
+			Outcome:    "success",
+			Stage:      "token_refresh",
+			ExpiresAt:  expiresAt.UTC(),
+		},
+	}
+	if err := event.Validate(); err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+func NewCredentialRefreshFailure(credential, cacheKey, stage, reason string) (Event, error) {
+	event := Event{
+		Name: EventCredentialRefresh,
+		Payload: CredentialRefresh{
+			Credential: normalizeAuditField(credential),
+			CacheKey:   normalizeAuditField(cacheKey),
+			Outcome:    "failure",
+			Stage:      normalizeAuditToken(stage),
+			Reason:     normalizeAuditToken(reason),
 		},
 	}
 	if err := event.Validate(); err != nil {
@@ -89,6 +135,10 @@ func (e Event) Validate() error {
 		if _, ok := e.Payload.(CredentialInjected); !ok {
 			return fmt.Errorf("audit event %q requires CredentialInjected payload", e.Name)
 		}
+	case EventCredentialRefresh:
+		if _, ok := e.Payload.(CredentialRefresh); !ok {
+			return fmt.Errorf("audit event %q requires CredentialRefresh payload", e.Name)
+		}
 	case EventCredentialDenied:
 		if _, ok := e.Payload.(CredentialDenied); !ok {
 			return fmt.Errorf("audit event %q requires CredentialDenied payload", e.Name)
@@ -112,6 +162,40 @@ func (p CredentialInjected) validate() error {
 	return nil
 }
 
+func (p CredentialRefresh) validate() error {
+	if p.Credential == "" {
+		return fmt.Errorf("credential is required")
+	}
+	if p.CacheKey == "" {
+		return fmt.Errorf("cache key is required")
+	}
+	switch p.Outcome {
+	case "success":
+		if p.Stage == "" {
+			return fmt.Errorf("stage is required")
+		}
+		if p.Reason != "" {
+			return fmt.Errorf("reason must be empty on success")
+		}
+		if p.ExpiresAt.IsZero() {
+			return fmt.Errorf("expires at is required on success")
+		}
+	case "failure":
+		if p.Stage == "" {
+			return fmt.Errorf("stage is required")
+		}
+		if p.Reason == "" {
+			return fmt.Errorf("reason is required on failure")
+		}
+		if !p.ExpiresAt.IsZero() {
+			return fmt.Errorf("expires at must be empty on failure")
+		}
+	default:
+		return fmt.Errorf("outcome must be success or failure")
+	}
+	return nil
+}
+
 func (p CredentialDenied) validate() error {
 	if p.Host == "" {
 		return fmt.Errorf("host is required")
@@ -124,4 +208,10 @@ func (p CredentialDenied) validate() error {
 
 func normalizeAuditField(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func normalizeAuditToken(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(" ", "_", "-", "_", "/", "_")
+	return replacer.Replace(trimmed)
 }

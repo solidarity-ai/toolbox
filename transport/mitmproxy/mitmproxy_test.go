@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/audit"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -69,10 +71,12 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 		}))
 		defer tokenServer.Close()
 
+		collector := audit.NewCollector()
 		harness := newProxyHarness(t, proxyHarnessConfig{
 			store:        store,
 			allowedHosts: []string{"127.0.0.1"},
 			rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+			auditSink:    collector,
 		})
 
 		for attempt := range 2 {
@@ -100,6 +104,45 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 		if got := tokenCalls.Load(); got != 1 {
 			t.Fatalf("token endpoint calls = %d, want 1 cached refresh", got)
 		}
+		gotEvents := collector.Events()
+		if len(gotEvents) != 3 {
+			t.Fatalf("collector event count = %d, want 3", len(gotEvents))
+		}
+		refreshSuccess, ok := gotEvents[0].Payload.(audit.CredentialRefresh)
+		if !ok {
+			t.Fatalf("event[0] payload = %T, want audit.CredentialRefresh", gotEvents[0].Payload)
+		}
+		wantEvents := []audit.Event{
+			{
+				Name: audit.EventCredentialRefresh,
+				Payload: audit.CredentialRefresh{
+					Credential: "github_oauth",
+					CacheKey:   "github.com/example/github-issues:github_oauth",
+					Outcome:    "success",
+					Stage:      "token_refresh",
+					ExpiresAt:  refreshSuccess.ExpiresAt,
+				},
+			},
+			{
+				Name: audit.EventCredentialInjected,
+				Payload: audit.CredentialInjected{
+					Host:         "127.0.0.1",
+					Credential:   "github_oauth",
+					InjectMethod: "bearer_header",
+				},
+			},
+			{
+				Name: audit.EventCredentialInjected,
+				Payload: audit.CredentialInjected{
+					Host:         "127.0.0.1",
+					Credential:   "github_oauth",
+					InjectMethod: "bearer_header",
+				},
+			},
+		}
+		if diff := cmp.Diff(wantEvents, gotEvents); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
+		}
 	})
 
 	t.Run("OAuth2 refresh failures return proxy-visible errors before any upstream dial", func(t *testing.T) {
@@ -119,10 +162,12 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 		}))
 		defer tokenServer.Close()
 
+		collector := audit.NewCollector()
 		harness := newProxyHarness(t, proxyHarnessConfig{
 			store:        store,
 			allowedHosts: []string{"127.0.0.1"},
 			rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+			auditSink:    collector,
 		})
 
 		resp := harness.mustGet(t, "/oauth2-failure")
@@ -145,6 +190,19 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 		}
 		if got := tokenCalls.Load(); got != 1 {
 			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+		wantEvents := []audit.Event{{
+			Name: audit.EventCredentialRefresh,
+			Payload: audit.CredentialRefresh{
+				Credential: "github_oauth",
+				CacheKey:   "github.com/example/github-issues:github_oauth",
+				Outcome:    "failure",
+				Stage:      "token_request",
+				Reason:     "provider_error",
+			},
+		}}
+		if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
 
@@ -169,10 +227,12 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 			}))
 			defer tokenServer.Close()
 
+			collector := audit.NewCollector()
 			harness := newProxyHarness(t, proxyHarnessConfig{
 				store:        store,
 				allowedHosts: []string{"127.0.0.1"},
 				rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+				auditSink:    collector,
 			})
 
 			resp := harness.mustGet(t, "/oauth2-malformed")
@@ -193,6 +253,19 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 			if got := tokenCalls.Load(); got != 1 {
 				t.Fatalf("token endpoint calls = %d, want 1", got)
 			}
+			wantEvents := []audit.Event{{
+				Name: audit.EventCredentialRefresh,
+				Payload: audit.CredentialRefresh{
+					Credential: "github_oauth",
+					CacheKey:   "github.com/example/github-issues:github_oauth",
+					Outcome:    "failure",
+					Stage:      "response_parse",
+					Reason:     "malformed_response",
+				},
+			}}
+			if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+				t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
+			}
 		})
 
 		t.Run("OAuth2 invalid provider config", func(t *testing.T) {
@@ -205,9 +278,11 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 				"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
 			})
 
+			collector := audit.NewCollector()
 			harness := newProxyHarness(t, proxyHarnessConfig{
 				store:        store,
 				allowedHosts: []string{"127.0.0.1"},
+				auditSink:    collector,
 				rules: []transport.Rule{{
 					Name:               "github_oauth",
 					SecretKey:          "github.com/example/github-issues/github_oauth/access_token",
@@ -236,6 +311,19 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 			}
 			if got := harness.upstreamDialCount(); got != 0 {
 				t.Fatalf("protected upstream dials = %d, want 0", got)
+			}
+			wantEvents := []audit.Event{{
+				Name: audit.EventCredentialRefresh,
+				Payload: audit.CredentialRefresh{
+					Credential: "github_oauth",
+					CacheKey:   "github.com/example/github-issues:github_oauth",
+					Outcome:    "failure",
+					Stage:      "provider_config",
+					Reason:     "provider_config",
+				},
+			}}
+			if diff := cmp.Diff(wantEvents, collector.Events()); diff != "" {
+				t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 			}
 		})
 	})
@@ -497,6 +585,7 @@ type proxyHarnessConfig struct {
 	store                secrets.SecretStore
 	allowedHosts         []string
 	rules                []transport.Rule
+	auditSink            audit.Sink
 	upstreamHostOverride string
 }
 
@@ -546,7 +635,7 @@ func newProxyHarness(t *testing.T, cfg proxyHarnessConfig) *proxyHarness {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	policy, err := transport.NewPolicy(cfg.store, cfg.rules, cfg.allowedHosts, true)
+	policy, err := transport.NewPolicyWithOptions(cfg.store, cfg.rules, cfg.allowedHosts, true, transport.WithAuditSink(cfg.auditSink))
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}

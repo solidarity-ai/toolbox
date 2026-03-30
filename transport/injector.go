@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -237,6 +238,7 @@ func (i *Injector) resolveOAuth2AccessToken(ctx context.Context, rule Rule) (str
 			return "", err
 		}
 		i.storeCachedOAuth2Token(rule.OAuth2CacheKey, refreshed)
+		i.emitCredentialRefreshSuccess(rule, refreshed.expiresAt)
 		return refreshed.accessToken, nil
 	})
 
@@ -386,6 +388,7 @@ func (i *Injector) optionalOAuth2Secret(ctx context.Context, rule Rule, family s
 }
 
 func (i *Injector) oauth2RefreshError(rule Rule, stage string, cause error) error {
+	i.emitCredentialRefreshFailure(rule, stage, classifyOAuth2RefreshFailure(stage, cause))
 	return fmt.Errorf(
 		"oauth2 refresh for credential %q (cache %q) failed during %s: %w; re-authorize by updating client_id, client_secret, and refresh_token secrets",
 		rule.Name,
@@ -393,6 +396,41 @@ func (i *Injector) oauth2RefreshError(rule Rule, stage string, cause error) erro
 		stage,
 		cause,
 	)
+}
+
+func classifyOAuth2RefreshFailure(stage string, cause error) string {
+	switch {
+	case errors.Is(cause, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(cause, context.Canceled):
+		return "canceled"
+	}
+
+	switch stage {
+	case "provider config":
+		return "provider_config"
+	case "response parse":
+		return "malformed_response"
+	case "cache lookup":
+		return "empty_access_token"
+	case "singleflight wait":
+		return "wait_failed"
+	case "secret reread":
+		if errors.Is(cause, secrets.ErrNotFound) {
+			return "missing_secret_material"
+		}
+		if strings.Contains(cause.Error(), "resolved unusable secret material") {
+			return "invalid_secret_material"
+		}
+		return "secret_read_failed"
+	case "token request":
+		if strings.Contains(cause.Error(), "provider returned status") {
+			return "provider_error"
+		}
+		return "request_failed"
+	default:
+		return "unknown"
+	}
 }
 
 func parseOAuth2ExpiresIn(raw json.RawMessage) (int64, error) {
@@ -504,6 +542,28 @@ func (i *Injector) emitCredentialInjected(rule Rule, rawURL string) {
 		return
 	}
 	event, err := audit.NewCredentialInjected(host, rule.Name, rule.Inject.Method)
+	if err != nil {
+		return
+	}
+	audit.Emit(i.auditSink, event)
+}
+
+func (i *Injector) emitCredentialRefreshSuccess(rule Rule, expiresAt time.Time) {
+	if i == nil {
+		return
+	}
+	event, err := audit.NewCredentialRefreshSuccess(rule.Name, rule.OAuth2CacheKey, expiresAt)
+	if err != nil {
+		return
+	}
+	audit.Emit(i.auditSink, event)
+}
+
+func (i *Injector) emitCredentialRefreshFailure(rule Rule, stage, reason string) {
+	if i == nil {
+		return
+	}
+	event, err := audit.NewCredentialRefreshFailure(rule.Name, rule.OAuth2CacheKey, stage, reason)
 	if err != nil {
 		return
 	}

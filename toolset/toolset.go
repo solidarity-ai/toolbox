@@ -234,21 +234,31 @@ func resolveToolTransportRules(tool tooldef.ResolvedTool) ([]transport.Rule, err
 		}
 
 		var provider *tooldef.OAuth2ProviderConfig
+		oauth2SecretFamily := ""
+		oauth2CacheKey := ""
 		if declared.Type == tooldef.CredentialTypeOAuth2 {
 			resolvedProvider, err := tooldef.ResolveOAuth2Provider(declared.Provider)
 			if err != nil {
 				return nil, fmt.Errorf("credential %q provider: %w", declared.Name, err)
 			}
 			provider = &resolvedProvider
+
+			oauth2SecretFamily, err = resolveOAuth2SecretFamily(tool.Package.Module, declared)
+			if err != nil {
+				return nil, fmt.Errorf("credential %q oauth2 secret family: %w", declared.Name, err)
+			}
+			oauth2CacheKey = resolveOAuth2CacheKey(tool.Package.Module, declared)
 		}
 
 		rules = append(rules, transport.Rule{
-			Name:           declared.Name,
-			Type:           declared.Type,
-			OAuth2Provider: provider,
-			Scopes:         append([]string(nil), declared.Scopes...),
-			SecretKey:      secretKey,
-			Inject:         declared.Inject,
+			Name:               declared.Name,
+			Type:               declared.Type,
+			OAuth2Provider:     provider,
+			OAuth2SecretFamily: oauth2SecretFamily,
+			OAuth2CacheKey:     oauth2CacheKey,
+			Scopes:             append([]string(nil), declared.Scopes...),
+			SecretKey:          secretKey,
+			Inject:             declared.Inject,
 		})
 	}
 	return rules, nil

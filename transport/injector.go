@@ -1,30 +1,42 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	pathpkg "path"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"golang.org/x/sync/singleflight"
 )
 
-const exactHostBonus = 1000
+const (
+	exactHostBonus        = 1000
+	defaultRefreshTimeout = 10 * time.Second
+	oauth2ExpiryBuffer    = 60 * time.Second
+)
 
 // Rule is the transport-owned runtime rule for simple credential injection.
 // It contains only runtime metadata needed for matching and request mutation.
 type Rule struct {
-	Name           string
-	SecretKey      string
-	Type           tooldef.CredentialType
-	OAuth2Provider *tooldef.OAuth2ProviderConfig
-	Scopes         []string
-	Inject         tooldef.CredentialInject
+	Name               string
+	SecretKey          string
+	Type               tooldef.CredentialType
+	OAuth2Provider     *tooldef.OAuth2ProviderConfig
+	OAuth2SecretFamily string
+	OAuth2CacheKey     string
+	Scopes             []string
+	Inject             tooldef.CredentialInject
 
 	hostMatchers []hostMatcher
 	pathPrefix   string
@@ -32,9 +44,17 @@ type Rule struct {
 
 // Injector validates, matches, and injects simple transport credentials.
 type Injector struct {
-	store secrets.SecretStore
-	rules []Rule
+	store         secrets.SecretStore
+	rules         []Rule
+	now           func() time.Time
+	refreshClient *http.Client
+
+	cacheMu       sync.RWMutex
+	oauth2Cache   map[string]oauth2CachedToken
+	oauth2Refresh singleflight.Group
 }
+
+type InjectorOption func(*Injector)
 
 type hostMatcher struct {
 	pattern string
@@ -47,11 +67,57 @@ type matchScore struct {
 	pathScore int
 }
 
+type oauth2CachedToken struct {
+	accessToken string
+	expiresAt   time.Time
+}
+
+type oauth2TokenResponse struct {
+	AccessToken string          `json:"access_token"`
+	ExpiresIn   json.RawMessage `json:"expires_in"`
+}
+
+// WithClock injects a deterministic clock for cache-expiry testing.
+func WithClock(now func() time.Time) InjectorOption {
+	return func(i *Injector) {
+		if now != nil {
+			i.now = now
+		}
+	}
+}
+
+// WithRefreshHTTPClient injects the direct OAuth2 refresh client.
+func WithRefreshHTTPClient(client *http.Client) InjectorOption {
+	return func(i *Injector) {
+		if client != nil {
+			i.refreshClient = client
+		}
+	}
+}
+
 // NewInjector canonicalizes and validates the provided rules up front so live
 // requests only evaluate deterministic match state.
 func NewInjector(store secrets.SecretStore, rules []Rule) (*Injector, error) {
+	return NewInjectorWithOptions(store, rules)
+}
+
+// NewInjectorWithOptions canonicalizes and validates the provided rules up
+// front so live requests only evaluate deterministic match state.
+func NewInjectorWithOptions(store secrets.SecretStore, rules []Rule, opts ...InjectorOption) (*Injector, error) {
+	injector := &Injector{
+		store:         store,
+		now:           time.Now,
+		refreshClient: &http.Client{Timeout: defaultRefreshTimeout},
+		oauth2Cache:   make(map[string]oauth2CachedToken),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(injector)
+		}
+	}
+
 	if len(rules) == 0 {
-		return &Injector{store: store}, nil
+		return injector, nil
 	}
 
 	normalized := make([]Rule, 0, len(rules))
@@ -67,7 +133,8 @@ func NewInjector(store secrets.SecretStore, rules []Rule) (*Injector, error) {
 		return nil, err
 	}
 
-	return &Injector{store: store, rules: normalized}, nil
+	injector.rules = normalized
+	return injector, nil
 }
 
 // Rules returns a snapshot of the normalized runtime rules.
@@ -132,6 +199,9 @@ func (i *Injector) InjectRequest(ctx context.Context, rawURL string, headers *fe
 }
 
 func (i *Injector) resolveSecretMaterial(ctx context.Context, rule Rule) (string, error) {
+	if rule.Type == tooldef.CredentialTypeOAuth2 && rule.OAuth2Provider != nil && rule.OAuth2SecretFamily != "" && rule.OAuth2CacheKey != "" {
+		return i.resolveOAuth2AccessToken(ctx, rule)
+	}
 	secret, err := i.store.Get(ctx, rule.SecretKey)
 	if err != nil {
 		return "", fmt.Errorf("resolve transport credential %q: %w", rule.SecretKey, err)
@@ -141,6 +211,211 @@ func (i *Injector) resolveSecretMaterial(ctx context.Context, rule Rule) (string
 		return "", fmt.Errorf("transport credential %q resolved unusable secret material", rule.SecretKey)
 	}
 	return value, nil
+}
+
+func (i *Injector) resolveOAuth2AccessToken(ctx context.Context, rule Rule) (string, error) {
+	if token, ok := i.lookupCachedOAuth2Token(rule.OAuth2CacheKey); ok {
+		return token, nil
+	}
+
+	result := i.oauth2Refresh.DoChan(rule.OAuth2CacheKey, func() (any, error) {
+		if token, ok := i.lookupCachedOAuth2Token(rule.OAuth2CacheKey); ok {
+			return token, nil
+		}
+		refreshed, err := i.refreshOAuth2Token(ctx, rule)
+		if err != nil {
+			return "", err
+		}
+		i.storeCachedOAuth2Token(rule.OAuth2CacheKey, refreshed)
+		return refreshed.accessToken, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return "", i.oauth2RefreshError(rule, "singleflight wait", ctx.Err())
+	case res := <-result:
+		if res.Err != nil {
+			return "", res.Err
+		}
+		token, _ := res.Val.(string)
+		if strings.TrimSpace(token) == "" {
+			return "", i.oauth2RefreshError(rule, "cache lookup", fmt.Errorf("refresh produced no access token"))
+		}
+		return token, nil
+	}
+}
+
+func (i *Injector) lookupCachedOAuth2Token(cacheKey string) (string, bool) {
+	i.cacheMu.RLock()
+	cached, ok := i.oauth2Cache[cacheKey]
+	i.cacheMu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	if !cached.expiresAt.After(i.now().Add(oauth2ExpiryBuffer)) {
+		return "", false
+	}
+	return cached.accessToken, true
+}
+
+func (i *Injector) storeCachedOAuth2Token(cacheKey string, cached oauth2CachedToken) {
+	i.cacheMu.Lock()
+	defer i.cacheMu.Unlock()
+	i.oauth2Cache[cacheKey] = cached
+}
+
+func (i *Injector) refreshOAuth2Token(ctx context.Context, rule Rule) (oauth2CachedToken, error) {
+	if rule.OAuth2Provider == nil || strings.TrimSpace(rule.OAuth2Provider.TokenURL) == "" {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "provider config", fmt.Errorf("token endpoint is required"))
+	}
+
+	refreshSecrets, err := i.loadOAuth2RefreshSecrets(ctx, rule)
+	if err != nil {
+		return oauth2CachedToken{}, err
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("client_id", refreshSecrets.clientID)
+	form.Set("refresh_token", refreshSecrets.refreshToken)
+	if refreshSecrets.clientSecret != "" {
+		form.Set("client_secret", refreshSecrets.clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rule.OAuth2Provider.TokenURL, bytes.NewBufferString(form.Encode()))
+	if err != nil {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := i.refreshClient.Do(req)
+	if err != nil {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", fmt.Errorf("provider returned status %d", resp.StatusCode))
+	}
+
+	var payload oauth2TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", err)
+	}
+	accessToken := strings.TrimSpace(payload.AccessToken)
+	if accessToken == "" {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", fmt.Errorf("access_token is required"))
+	}
+	expiresIn, err := parseOAuth2ExpiresIn(payload.ExpiresIn)
+	if err != nil {
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", err)
+	}
+
+	return oauth2CachedToken{
+		accessToken: accessToken,
+		expiresAt:   i.now().Add(time.Duration(expiresIn) * time.Second),
+	}, nil
+}
+
+type oauth2RefreshSecrets struct {
+	clientID     string
+	clientSecret string
+	refreshToken string
+}
+
+func (i *Injector) loadOAuth2RefreshSecrets(ctx context.Context, rule Rule) (oauth2RefreshSecrets, error) {
+	clientID, err := i.requireOAuth2Secret(ctx, rule, "client_id")
+	if err != nil {
+		return oauth2RefreshSecrets{}, err
+	}
+	refreshToken, err := i.requireOAuth2Secret(ctx, rule, "refresh_token")
+	if err != nil {
+		return oauth2RefreshSecrets{}, err
+	}
+	clientSecret, err := i.optionalOAuth2Secret(ctx, rule, "client_secret")
+	if err != nil {
+		return oauth2RefreshSecrets{}, err
+	}
+	return oauth2RefreshSecrets{
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		refreshToken: refreshToken,
+	}, nil
+}
+
+func (i *Injector) requireOAuth2Secret(ctx context.Context, rule Rule, family string) (string, error) {
+	key, err := tooldef.CredentialFamilyMemberKey(rule.OAuth2SecretFamily, family)
+	if err != nil {
+		return "", i.oauth2RefreshError(rule, "secret reread", err)
+	}
+	secret, err := i.store.Get(ctx, key)
+	if err != nil {
+		return "", i.oauth2RefreshError(rule, "secret reread", fmt.Errorf("%s: %w", family, err))
+	}
+	value := strings.TrimSpace(string(secret))
+	if value == "" {
+		return "", i.oauth2RefreshError(rule, "secret reread", fmt.Errorf("%s resolved unusable secret material", family))
+	}
+	return value, nil
+}
+
+func (i *Injector) optionalOAuth2Secret(ctx context.Context, rule Rule, family string) (string, error) {
+	key, err := tooldef.CredentialFamilyMemberKey(rule.OAuth2SecretFamily, family)
+	if err != nil {
+		return "", i.oauth2RefreshError(rule, "secret reread", err)
+	}
+	secret, err := i.store.Get(ctx, key)
+	if err != nil {
+		if err == secrets.ErrNotFound {
+			return "", nil
+		}
+		return "", i.oauth2RefreshError(rule, "secret reread", fmt.Errorf("%s: %w", family, err))
+	}
+	return strings.TrimSpace(string(secret)), nil
+}
+
+func (i *Injector) oauth2RefreshError(rule Rule, stage string, cause error) error {
+	return fmt.Errorf(
+		"oauth2 refresh for credential %q (cache %q) failed during %s: %w; re-authorize by updating client_id, client_secret, and refresh_token secrets",
+		rule.Name,
+		rule.OAuth2CacheKey,
+		stage,
+		cause,
+	)
+}
+
+func parseOAuth2ExpiresIn(raw json.RawMessage) (int64, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return 0, fmt.Errorf("expires_in is required")
+	}
+
+	var numeric json.Number
+	if err := json.Unmarshal(raw, &numeric); err == nil {
+		value, err := numeric.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("expires_in must be an integer")
+		}
+		if value <= 0 {
+			return 0, fmt.Errorf("expires_in must be positive")
+		}
+		return value, nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		value, err := json.Number(strings.TrimSpace(asString)).Int64()
+		if err != nil {
+			return 0, fmt.Errorf("expires_in must be numeric")
+		}
+		if value <= 0 {
+			return 0, fmt.Errorf("expires_in must be positive")
+		}
+		return value, nil
+	}
+
+	return 0, fmt.Errorf("expires_in must be numeric")
 }
 
 func injectBearerHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {

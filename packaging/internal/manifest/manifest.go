@@ -335,10 +335,6 @@ func validateCredentialList(field string, module tooldef.ModulePath, credentials
 			return fmt.Errorf("%s.type %q is invalid", prefix, cred.Type)
 		}
 
-		if err := validateCredentialProvider(prefix, cred); err != nil {
-			return err
-		}
-
 		method := strings.TrimSpace(cred.Inject.Method)
 		if method == "" {
 			method = "bearer_header"
@@ -347,6 +343,10 @@ func validateCredentialList(field string, module tooldef.ModulePath, credentials
 			return fmt.Errorf("%s.inject.method %q is invalid", prefix, cred.Inject.Method)
 		}
 		if err := validateCredentialInjectConfig(prefix+".inject", method, cred.Inject); err != nil {
+			return err
+		}
+
+		if err := validateCredentialProvider(prefix, cred); err != nil {
 			return err
 		}
 

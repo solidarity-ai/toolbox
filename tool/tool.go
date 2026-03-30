@@ -211,6 +211,56 @@ type PackageCredential struct {
 	AuthHosts []string          `json:"authHosts,omitempty"`
 }
 
+type packageCredentialJSON struct {
+	Name      string           `json:"name"`
+	Type      CredentialType   `json:"type"`
+	Provider  json.RawMessage  `json:"provider,omitempty"`
+	Scopes    []string         `json:"scopes,omitempty"`
+	Inject    CredentialInject `json:"inject"`
+	Strategy  string           `json:"strategy,omitempty"`
+	AuthHosts []string         `json:"authHosts,omitempty"`
+}
+
+func (c PackageCredential) MarshalJSON() ([]byte, error) {
+	payload := packageCredentialJSON{
+		Name:      c.Name,
+		Type:      c.Type,
+		Scopes:    c.Scopes,
+		Inject:    c.Inject,
+		Strategy:  c.Strategy,
+		AuthHosts: c.AuthHosts,
+	}
+	if !c.Provider.IsZero() {
+		raw, err := json.Marshal(c.Provider)
+		if err != nil {
+			return nil, err
+		}
+		payload.Provider = raw
+	}
+	return json.Marshal(payload)
+}
+
+func (c *PackageCredential) UnmarshalJSON(data []byte) error {
+	var payload packageCredentialJSON
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	*c = PackageCredential{
+		Name:      payload.Name,
+		Type:      payload.Type,
+		Scopes:    append([]string(nil), payload.Scopes...),
+		Inject:    payload.Inject,
+		Strategy:  payload.Strategy,
+		AuthHosts: append([]string(nil), payload.AuthHosts...),
+	}
+	if len(payload.Provider) > 0 {
+		if err := json.Unmarshal(payload.Provider, &c.Provider); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ResourceParam describes one inferred resource parameter and its canonical binding name.
 type ResourceParam struct {
 	Name        string `json:"name"`         // e.g. "account_id"

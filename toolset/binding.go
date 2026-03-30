@@ -27,6 +27,14 @@ func resolveSecretKey(module tooldef.ModulePath, credential tooldef.PackageCrede
 	return tooldef.CredentialSecretKey(module, credential.Name)
 }
 
+func resolveOAuth2SecretFamily(module tooldef.ModulePath, credential tooldef.PackageCredential) (string, error) {
+	return tooldef.CredentialFamilyNamespace(module, "", credential.Name)
+}
+
+func resolveOAuth2CacheKey(module tooldef.ModulePath, credential tooldef.PackageCredential) string {
+	return module.String() + ":" + credential.Name
+}
+
 // Config is the input to Resolve(). It carries bindings, context, and resolved
 // runtime dependencies such as transport-managed secret state.
 type Config struct {

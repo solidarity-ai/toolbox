@@ -70,6 +70,12 @@ func TestResolveToolAuthUsesReservedAccessTokenFamilyKeyForOAuth2(t *testing.T) 
 	if rules[0].SecretKey != "github.com/example/github-issues/github_oauth/access_token" {
 		t.Fatalf("secret key = %q, want oauth2 access token family key", rules[0].SecretKey)
 	}
+	if rules[0].OAuth2SecretFamily != "github.com/example/github-issues/github_oauth" {
+		t.Fatalf("oauth2 secret family = %q, want credential family namespace", rules[0].OAuth2SecretFamily)
+	}
+	if rules[0].OAuth2CacheKey != "github.com/example/github-issues:github_oauth" {
+		t.Fatalf("oauth2 cache key = %q, want stable module-plus-credential identity", rules[0].OAuth2CacheKey)
+	}
 	if rules[0].OAuth2Provider == nil {
 		t.Fatal("expected oauth2 provider config on runtime rule")
 	}

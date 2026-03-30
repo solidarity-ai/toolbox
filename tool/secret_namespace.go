@@ -45,9 +45,10 @@ func CredentialSecretKey(module ModulePath, credentialName string) (string, erro
 	return base + "/" + credentialPart, nil
 }
 
-// CredentialFamilySecretKey returns a family-scoped secret key nested beneath a
-// package or tenant namespace and reserved under one credential name.
-func CredentialFamilySecretKey(module ModulePath, tenant string, credentialName string, family string) (string, error) {
+// CredentialFamilyNamespace returns the credential-scoped namespace root beneath
+// the package or tenant namespace for family-key siblings such as access_token,
+// refresh_token, client_id, and client_secret.
+func CredentialFamilyNamespace(module ModulePath, tenant string, credentialName string) (string, error) {
 	base, err := PackageSecretNamespace(module)
 	if err != nil {
 		return "", err
@@ -62,11 +63,31 @@ func CredentialFamilySecretKey(module ModulePath, tenant string, credentialName 
 	if err != nil {
 		return "", err
 	}
+	return base + "/" + credentialPart, nil
+}
+
+// CredentialFamilyMemberKey returns a family-scoped secret key beneath a
+// credential namespace root.
+func CredentialFamilyMemberKey(namespace string, family string) (string, error) {
+	base := strings.TrimSpace(namespace)
+	if base == "" {
+		return "", fmt.Errorf("credential family namespace must not be empty")
+	}
 	familyPart, err := normalizeSecretNamespacePart("credential family", family)
 	if err != nil {
 		return "", err
 	}
-	return base + "/" + credentialPart + "/" + familyPart, nil
+	return strings.TrimRight(base, "/") + "/" + familyPart, nil
+}
+
+// CredentialFamilySecretKey returns a family-scoped secret key nested beneath a
+// package or tenant namespace and reserved under one credential name.
+func CredentialFamilySecretKey(module ModulePath, tenant string, credentialName string, family string) (string, error) {
+	namespace, err := CredentialFamilyNamespace(module, tenant, credentialName)
+	if err != nil {
+		return "", err
+	}
+	return CredentialFamilyMemberKey(namespace, family)
 }
 
 func normalizeSecretNamespacePart(label string, raw string) (string, error) {

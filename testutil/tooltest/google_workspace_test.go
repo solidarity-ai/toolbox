@@ -14,3 +14,12 @@ func TestCopyGoogleWorkspaceFixtureCopiesManifestAndTool(t *testing.T) {
 		}
 	}
 }
+
+func TestAssertPreparedGoogleWorkspaceFixtureContract(t *testing.T) {
+	harness := NewGoogleAuthHarness(t)
+	var baseURL string
+	baseURL = harness.Server.AuthBaseURL()
+	preparedDir := PrepareGoogleWorkspaceFixture(t, baseURL, harness.Provider)
+
+	AssertPreparedGoogleWorkspaceFixtureContract(t, preparedDir, baseURL, harness.Provider)
+}

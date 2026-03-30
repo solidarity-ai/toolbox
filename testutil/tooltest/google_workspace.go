@@ -223,6 +223,95 @@ func PrepareGoogleWorkspaceFixture(t testing.TB, baseURL string, provider toolde
 	return dir
 }
 
+// AssertPreparedGoogleWorkspaceFixtureContract verifies that a copied fixture still
+// reflects the package-author contract after local base URL and provider rewrites.
+func AssertPreparedGoogleWorkspaceFixtureContract(t testing.TB, dir, baseURL string, provider tooldef.OAuth2ProviderRef) {
+	t.Helper()
+
+	parsedBaseURL, err := parseGoogleWorkspaceBaseURL(baseURL)
+	if err != nil {
+		t.Fatalf("parse google-workspace base URL: %v", err)
+	}
+
+	toolRaw, err := os.ReadFile(filepath.Join(dir, "tools", "users.list.ts"))
+	if err != nil {
+		t.Fatalf("read google-workspace tool: %v", err)
+	}
+	wantEndpoint := strings.TrimRight(parsedBaseURL.String(), "/") + googleWorkspaceEndpointPath
+	if !strings.Contains(string(toolRaw), fmt.Sprintf(`const USERS_ENDPOINT = %q;`, wantEndpoint)) {
+		t.Fatalf("rewritten tool missing endpoint %q:\n%s", wantEndpoint, string(toolRaw))
+	}
+
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "toolbox.devpkg.json"))
+	if err != nil {
+		t.Fatalf("read google-workspace manifest: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatalf("decode google-workspace manifest: %v", err)
+	}
+
+	if got, ok := manifest["module"].(string); got != string(googleWorkspaceModulePath) || !ok {
+		t.Fatalf("manifest module = %#v, want %q", manifest["module"], googleWorkspaceModulePath)
+	}
+	gotAllowedHosts, ok := manifest["allowed_hosts"].([]any)
+	if !ok {
+		t.Fatalf("allowed_hosts = %#v, want []any", manifest["allowed_hosts"])
+	}
+	if diff := cmp.Diff([]any{parsedBaseURL.Hostname()}, gotAllowedHosts); diff != "" {
+		t.Fatalf("allowed_hosts mismatch (-want +got):\n%s", diff)
+	}
+
+	credentials, ok := manifest["credentials"].([]any)
+	if !ok || len(credentials) != 1 {
+		t.Fatalf("manifest credentials = %#v, want single oauth credential", manifest["credentials"])
+	}
+	credential, ok := credentials[0].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest credential malformed: %#v", credentials[0])
+	}
+	if got := credential["name"]; got != googleWorkspaceCredentialName {
+		t.Fatalf("credential name = %#v, want %q", got, googleWorkspaceCredentialName)
+	}
+	if got := credential["type"]; got != string(tooldef.CredentialTypeOAuth2) {
+		t.Fatalf("credential type = %#v, want oauth2", got)
+	}
+	inject, ok := credential["inject"].(map[string]any)
+	if !ok {
+		t.Fatalf("credential inject malformed: %#v", credential["inject"])
+	}
+	gotInjectHosts, ok := inject["hosts"].([]any)
+	if !ok {
+		t.Fatalf("inject.hosts = %#v, want []any", inject["hosts"])
+	}
+	if diff := cmp.Diff([]any{parsedBaseURL.Hostname()}, gotInjectHosts); diff != "" {
+		t.Fatalf("inject.hosts mismatch (-want +got):\n%s", diff)
+	}
+	if got := inject["method"]; got != "bearer_header" {
+		t.Fatalf("inject.method = %#v, want bearer_header", got)
+	}
+
+	if !provider.IsZero() {
+		providerJSON, err := json.Marshal(provider)
+		if err != nil {
+			t.Fatalf("encode google-workspace provider: %v", err)
+		}
+		var wantProvider any
+		if err := json.Unmarshal(providerJSON, &wantProvider); err != nil {
+			t.Fatalf("decode google-workspace provider: %v", err)
+		}
+		if diff := cmp.Diff(wantProvider, credential["provider"]); diff != "" {
+			t.Fatalf("provider mismatch (-want +got):\n%s", diff)
+		}
+	}
+
+	resolved, err := GoogleWorkspaceBuilderFromDir(t, dir).Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("Resolve(toolset.Config{}): %v", err)
+	}
+	AssertGoogleWorkspaceAgentViewHidden(t, resolved)
+}
+
 // NewGoogleAuthHarness prepares a copied google-workspace fixture, a real local
 // secret store, and the Google emulate provider endpoints for end-to-end auth tests.
 func NewGoogleAuthHarness(t *testing.T) *GoogleAuthHarness {

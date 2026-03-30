@@ -2,6 +2,7 @@ package tooltest
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
-	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestPrepareOAuthHTTPClientFixtureRewriteAndValidation(t *testing.T) {
@@ -23,82 +23,7 @@ func TestPrepareOAuthHTTPClientFixtureRewriteAndValidation(t *testing.T) {
 		if err := rewriteOAuthHTTPClientFixture(dir, "https://127.0.0.1:8443/proxy/ok", provider); err != nil {
 			t.Fatalf("rewriteOAuthHTTPClientFixture(): %v", err)
 		}
-
-		manifest := readHTTPClientTestManifest(t, filepath.Join(dir, "toolbox.devpkg.json"))
-		if got := manifest["runtime"]; got != string(HTTPClientExpectedPackageRuntime) {
-			t.Fatalf("runtime = %#v, want %q", got, HTTPClientExpectedPackageRuntime)
-		}
-		executables, ok := manifest["executables"].(map[string]any)
-		if !ok {
-			t.Fatalf("executables = %#v, want map", manifest["executables"])
-		}
-		if got := executables[HTTPClientExecutableName]; got != "dist/http-client.wasm" {
-			t.Fatalf("executables[%q] = %#v, want dist/http-client.wasm", HTTPClientExecutableName, got)
-		}
-		if got, ok := manifest["allowed_hosts"].([]any); !ok || len(got) != 1 || got[0] != "127.0.0.1" {
-			t.Fatalf("allowed_hosts = %#v, want [127.0.0.1]", manifest["allowed_hosts"])
-		}
-		credentials, ok := manifest["credentials"].([]any)
-		if !ok || len(credentials) != 1 {
-			t.Fatalf("credentials = %#v, want single oauth credential", manifest["credentials"])
-		}
-		credential := credentials[0].(map[string]any)
-		if credential["name"] != HTTPClientOAuthCredentialName {
-			t.Fatalf("credential.name = %#v, want %q", credential["name"], HTTPClientOAuthCredentialName)
-		}
-		if credential["type"] != string(tooldef.CredentialTypeOAuth2) {
-			t.Fatalf("credential.type = %#v, want oauth2", credential["type"])
-		}
-		inject := credential["inject"].(map[string]any)
-		if got, ok := inject["hosts"].([]any); !ok || len(got) != 1 || got[0] != "127.0.0.1" {
-			t.Fatalf("inject.hosts = %#v, want [127.0.0.1]", inject["hosts"])
-		}
-		if inject["method"] != "bearer_header" {
-			t.Fatalf("inject.method = %#v, want bearer_header", inject["method"])
-		}
-		if _, ok := inject["pathPrefix"]; ok {
-			t.Fatalf("inject.pathPrefix = %#v, want omitted for full-host oauth coverage", inject["pathPrefix"])
-		}
-		providerValue := credential["provider"].(map[string]any)
-		if providerValue["auth_url"] != "https://127.0.0.1:9443/oauth/authorize" {
-			t.Fatalf("provider.auth_url = %#v, want rewritten auth url", providerValue["auth_url"])
-		}
-		if providerValue["token_url"] != "https://127.0.0.1:9443/oauth/token" {
-			t.Fatalf("provider.token_url = %#v, want rewritten token url", providerValue["token_url"])
-		}
-
-		resolved, err := HTTPClientBuilderFromDir(t, dir).Resolve(toolset.Config{})
-		if err != nil {
-			t.Fatalf("Resolve(toolset.Config{}): %v", err)
-		}
-		if len(resolved.Tools()) != 1 {
-			t.Fatalf("resolved tool count = %d, want 1", len(resolved.Tools()))
-		}
-		tool := resolved.Tools()[0]
-		if tool.TSWasm == nil {
-			t.Fatal("resolved tool lost TSWasm runtime")
-		}
-		if got := tool.Package.Runtime; got != HTTPClientExpectedPackageRuntime {
-			t.Fatalf("resolved package runtime = %q, want %q", got, HTTPClientExpectedPackageRuntime)
-		}
-		if got := tool.TSWasm.Executables[HTTPClientExecutableName]; got != "dist/http-client.wasm" {
-			t.Fatalf("tswasm executable mapping = %q, want dist/http-client.wasm", got)
-		}
-		policy, ok := resolved.ToolTransportPolicy(HTTPClientToolName)
-		if !ok || policy == nil {
-			t.Fatal("expected runtime transport policy for oauth fixture")
-		}
-		if got := strings.Join(policy.AllowedHosts(), ","); got != "127.0.0.1" {
-			t.Fatalf("allowed hosts = %v, want [127.0.0.1]", policy.AllowedHosts())
-		}
-		rules := policy.Rules()
-		if len(rules) != 1 {
-			t.Fatalf("transport rule count = %d, want 1", len(rules))
-		}
-		if got := rules[0].OAuth2SecretFamily; got != HTTPClientOAuthSecretFamily(t) {
-			t.Fatalf("oauth2 secret family = %q, want %q", got, HTTPClientOAuthSecretFamily(t))
-		}
-		AssertHTTPClientAgentViewHidden(t, resolved)
+		AssertPreparedOAuthHTTPClientFixtureContract(t, dir, "https://127.0.0.1:8443/proxy/ok", provider)
 	})
 
 	t.Run("rejects malformed base url", func(t *testing.T) {
@@ -134,6 +59,46 @@ func TestPrepareOAuthHTTPClientFixtureRewriteAndValidation(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "provider rewrite invalid") {
 			t.Fatalf("rewriteOAuthHTTPClientFixture() error = %v, want provider validation", err)
 		}
+	})
+
+	t.Run("contract helper fails when executable-backed runtime drifts", func(t *testing.T) {
+		dir := CopyHTTPClientFixture(t)
+		if err := rewriteOAuthHTTPClientFixture(dir, "https://127.0.0.1:8443/proxy/ok", provider); err != nil {
+			t.Fatalf("rewriteOAuthHTTPClientFixture(): %v", err)
+		}
+		manifest := readHTTPClientTestManifest(t, filepath.Join(dir, "toolbox.devpkg.json"))
+		manifest["executables"] = map[string]any{}
+		writeHTTPClientTestManifest(t, filepath.Join(dir, "toolbox.devpkg.json"), manifest)
+
+		assertHTTPClientContractFails(t, func(tb testing.TB) {
+			AssertPreparedOAuthHTTPClientFixtureContract(tb, dir, "https://127.0.0.1:8443/proxy/ok", provider)
+		}, HTTPClientExecutableName)
+	})
+
+	t.Run("contract helper fails when oauth family rewrite drifts", func(t *testing.T) {
+		dir := CopyHTTPClientFixture(t)
+		if err := rewriteOAuthHTTPClientFixture(dir, "https://127.0.0.1:8443/proxy/ok", provider); err != nil {
+			t.Fatalf("rewriteOAuthHTTPClientFixture(): %v", err)
+		}
+		manifest := readHTTPClientTestManifest(t, filepath.Join(dir, "toolbox.devpkg.json"))
+		manifest["credentials"] = []map[string]any{{
+			"name": HTTPClientOAuthCredentialName,
+			"type": string(tooldef.CredentialTypeOAuth2),
+			"provider": map[string]any{
+				"auth_url":  provider.Endpoints.AuthURL,
+				"token_url": provider.Endpoints.TokenURL,
+			},
+			"scopes": []string{"openid", "email"},
+			"inject": map[string]any{
+				"hosts":  []string{"example.invalid"},
+				"method": "bearer_header",
+			},
+		}}
+		writeHTTPClientTestManifest(t, filepath.Join(dir, "toolbox.devpkg.json"), manifest)
+
+		assertHTTPClientContractFails(t, func(tb testing.TB) {
+			AssertPreparedOAuthHTTPClientFixtureContract(tb, dir, "https://127.0.0.1:8443/proxy/ok", provider)
+		}, "inject.hosts mismatch")
 	})
 }
 
@@ -189,6 +154,56 @@ func readHTTPClientTestManifest(t *testing.T, path string) map[string]any {
 		t.Fatalf("decode manifest: %v", err)
 	}
 	return manifest
+}
+
+func writeHTTPClientTestManifest(t *testing.T, path string, manifest map[string]any) {
+	t.Helper()
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+func assertHTTPClientContractFails(t *testing.T, fn func(testing.TB), want string) {
+	t.Helper()
+	inner := &contractFailureTB{TB: t}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(contractFailurePanic); !ok {
+				panic(r)
+			}
+		}
+		if !inner.failed {
+			t.Fatalf("expected helper to fail with %q", want)
+		}
+		if !strings.Contains(inner.msg.String(), want) {
+			t.Fatalf("helper failure = %q, want substring %q", inner.msg.String(), want)
+		}
+	}()
+	fn(inner)
+}
+
+type contractFailureTB struct {
+	testing.TB
+	failed bool
+	msg    strings.Builder
+}
+
+type contractFailurePanic struct{}
+
+func (tb *contractFailureTB) Fatal(args ...any) {
+	tb.failed = true
+	_, _ = tb.msg.WriteString(fmt.Sprint(args...))
+	panic(contractFailurePanic{})
+}
+
+func (tb *contractFailureTB) Fatalf(format string, args ...any) {
+	tb.failed = true
+	_, _ = tb.msg.WriteString(fmt.Sprintf(format, args...))
+	panic(contractFailurePanic{})
 }
 
 var _ secrets.SecretStore = (*secrets.LocalSecretStore)(nil)

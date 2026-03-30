@@ -222,6 +222,133 @@ func rewriteOAuthHTTPClientManifest(manifestPath string, baseURL *url.URL, provi
 	return nil
 }
 
+// AssertPreparedOAuthHTTPClientFixtureContract verifies that a copied fixture still
+// preserves the executable-backed MITM/TSWasm contract after OAuth-specific rewrites.
+func AssertPreparedOAuthHTTPClientFixtureContract(t testing.TB, dir, baseURL string, provider tooldef.OAuth2ProviderRef) {
+	t.Helper()
+
+	parsedBaseURL, err := parseOAuthHTTPClientBaseURL(baseURL)
+	if err != nil {
+		t.Fatalf("parse http-client base URL: %v", err)
+	}
+
+	manifestRaw, err := os.ReadFile(filepath.Join(dir, "toolbox.devpkg.json"))
+	if err != nil {
+		t.Fatalf("read http-client manifest: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatalf("decode http-client manifest: %v", err)
+	}
+
+	if got, ok := manifest["module"].(string); !ok || got != string(HTTPClientModule) {
+		t.Fatalf("manifest module = %#v, want %q", manifest["module"], HTTPClientModule)
+	}
+	if got, ok := manifest["runtime"].(string); !ok || got != string(HTTPClientExpectedPackageRuntime) {
+		t.Fatalf("manifest runtime = %#v, want %q", manifest["runtime"], HTTPClientExpectedPackageRuntime)
+	}
+	gotAllowedHosts, ok := manifest["allowed_hosts"].([]any)
+	if !ok {
+		t.Fatalf("allowed_hosts = %#v, want []any", manifest["allowed_hosts"])
+	}
+	if diff := cmp.Diff([]any{parsedBaseURL.Hostname()}, gotAllowedHosts); diff != "" {
+		t.Fatalf("allowed_hosts mismatch (-want +got):\n%s", diff)
+	}
+
+	executables, ok := manifest["executables"].(map[string]any)
+	if !ok {
+		t.Fatalf("executables = %#v, want map", manifest["executables"])
+	}
+	if got := executables[HTTPClientExecutableName]; got != "dist/http-client.wasm" {
+		t.Fatalf("executables[%q] = %#v, want dist/http-client.wasm", HTTPClientExecutableName, got)
+	}
+
+	credentials, ok := manifest["credentials"].([]any)
+	if !ok || len(credentials) != 1 {
+		t.Fatalf("manifest credentials = %#v, want single oauth credential", manifest["credentials"])
+	}
+	credential, ok := credentials[0].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest credential malformed: %#v", credentials[0])
+	}
+	if got := credential["name"]; got != HTTPClientOAuthCredentialName {
+		t.Fatalf("credential name = %#v, want %q", got, HTTPClientOAuthCredentialName)
+	}
+	if got := credential["type"]; got != string(tooldef.CredentialTypeOAuth2) {
+		t.Fatalf("credential type = %#v, want oauth2", got)
+	}
+	inject, ok := credential["inject"].(map[string]any)
+	if !ok {
+		t.Fatalf("credential inject malformed: %#v", credential["inject"])
+	}
+	gotInjectHosts, ok := inject["hosts"].([]any)
+	if !ok {
+		t.Fatalf("inject.hosts = %#v, want []any", inject["hosts"])
+	}
+	if diff := cmp.Diff([]any{parsedBaseURL.Hostname()}, gotInjectHosts); diff != "" {
+		t.Fatalf("inject.hosts mismatch (-want +got):\n%s", diff)
+	}
+	if got := inject["method"]; got != "bearer_header" {
+		t.Fatalf("inject.method = %#v, want bearer_header", got)
+	}
+	if _, ok := inject["pathPrefix"]; ok {
+		t.Fatalf("inject.pathPrefix = %#v, want omitted for full-host oauth coverage", inject["pathPrefix"])
+	}
+	gotScopes, ok := credential["scopes"].([]any)
+	if !ok {
+		t.Fatalf("credential.scopes = %#v, want []any", credential["scopes"])
+	}
+	wantScopes := []any{"openid", "email", "https://www.googleapis.com/auth/cloud-platform.read-only"}
+	if diff := cmp.Diff(wantScopes, gotScopes); diff != "" {
+		t.Fatalf("credential.scopes mismatch (-want +got):\n%s", diff)
+	}
+
+	providerJSON, err := json.Marshal(provider)
+	if err != nil {
+		t.Fatalf("encode http-client provider: %v", err)
+	}
+	var wantProvider any
+	if err := json.Unmarshal(providerJSON, &wantProvider); err != nil {
+		t.Fatalf("decode http-client provider: %v", err)
+	}
+	if diff := cmp.Diff(wantProvider, credential["provider"]); diff != "" {
+		t.Fatalf("provider mismatch (-want +got):\n%s", diff)
+	}
+
+	resolved, err := HTTPClientBuilderFromDir(t, dir).Resolve(toolset.Config{})
+	if err != nil {
+		t.Fatalf("Resolve(toolset.Config{}): %v", err)
+	}
+	if len(resolved.Tools()) != 1 {
+		t.Fatalf("resolved tool count = %d, want 1", len(resolved.Tools()))
+	}
+	tool := resolved.Tools()[0]
+	if tool.TSWasm == nil {
+		t.Fatal("resolved tool lost TSWasm runtime")
+	}
+	if got := tool.Package.Runtime; got != HTTPClientExpectedPackageRuntime {
+		t.Fatalf("resolved package runtime = %q, want %q", got, HTTPClientExpectedPackageRuntime)
+	}
+	if got := tool.TSWasm.Executables[HTTPClientExecutableName]; got != "dist/http-client.wasm" {
+		t.Fatalf("tswasm executable mapping = %q, want dist/http-client.wasm", got)
+	}
+	policy, ok := resolved.ToolTransportPolicy(HTTPClientToolName)
+	if !ok || policy == nil {
+		t.Fatal("expected runtime transport policy for oauth fixture")
+	}
+	if got := strings.Join(policy.AllowedHosts(), ","); got != parsedBaseURL.Hostname() {
+		t.Fatalf("allowed hosts = %v, want [%s]", policy.AllowedHosts(), parsedBaseURL.Hostname())
+	}
+	rules := policy.Rules()
+	if len(rules) != 1 {
+		t.Fatalf("transport rule count = %d, want 1", len(rules))
+	}
+	if got := rules[0].OAuth2SecretFamily; got != HTTPClientOAuthSecretFamily(t) {
+		t.Fatalf("oauth2 secret family = %q, want %q", got, HTTPClientOAuthSecretFamily(t))
+	}
+	AssertHTTPClientAgentViewHidden(t, resolved)
+}
+
 func HTTPClientOAuthSecretFamily(t testing.TB) string {
 	t.Helper()
 	family, err := tooldef.CredentialFamilyNamespace(HTTPClientModule, "", HTTPClientOAuthCredentialName)

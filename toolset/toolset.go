@@ -200,7 +200,22 @@ func resolveToolTransportPolicy(tool tooldef.ResolvedTool, cfg Config) (*transpo
 	if err != nil {
 		return nil, err
 	}
-	return transport.NewPolicy(cfg.SecretStore, rules, resolveToolAllowedHosts(tool))
+	return transport.NewPolicy(cfg.SecretStore, rules, resolveToolAllowedHosts(tool), toolRequiresRuntimeTransportPolicy(tool))
+}
+
+func toolRequiresRuntimeTransportPolicy(tool tooldef.ResolvedTool) bool {
+	if tool.TS != nil || tool.TSWasm != nil {
+		return true
+	}
+	if tool.Package == nil {
+		return false
+	}
+	switch tool.Package.Runtime {
+	case tooldef.RuntimeTypeScriptSandbox, tooldef.RuntimeTypeScriptWasixSandbox, tooldef.RuntimeTypeScriptWasip2Sandbox:
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveToolTransportRules(tool tooldef.ResolvedTool) ([]transport.Rule, error) {
@@ -248,7 +263,7 @@ func NewResolvedToolset(tools []tooldef.ResolvedTool) ResolvedToolset {
 	copy(out, tools)
 	transportPolicies := make(map[string]*transport.Policy)
 	for _, tool := range out {
-		policy, err := transport.NewPolicy(nil, nil, tool.AllowedHosts)
+		policy, err := resolveToolTransportPolicy(tool, Config{})
 		if err == nil && policy != nil {
 			transportPolicies[tool.Name] = policy
 		}

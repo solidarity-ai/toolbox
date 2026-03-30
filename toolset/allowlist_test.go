@@ -36,6 +36,12 @@ func TestResolveToolAllowedHosts(t *testing.T) {
 			Package:      &pkg,
 			AllowedHosts: nil,
 		},
+		{
+			Name:         "status.filtered",
+			Description:  "Get filtered status",
+			Package:      &pkg,
+			AllowedHosts: []string{" ", "\n", ""},
+		},
 	}
 
 	resolved, err := toolset.ResolveTools(tools, toolset.Config{})
@@ -77,10 +83,33 @@ func TestResolveToolAllowedHosts(t *testing.T) {
 		}
 	})
 
-	t.Run("deny by default leaves no runtime policy", func(t *testing.T) {
+	t.Run("deny by default keeps runtime policy while compatibility accessor stays empty", func(t *testing.T) {
+		policy, ok := resolved.ToolTransportPolicy("status.get")
+		if !ok {
+			t.Fatal("expected runtime transport policy for status.get")
+		}
+		if got := policy.AllowedHosts(); got != nil {
+			t.Fatalf("ToolTransportPolicy(status.get).AllowedHosts() = %v, want nil", got)
+		}
+
 		got, ok := resolved.ToolAllowedHosts("status.get")
 		if ok {
 			t.Fatalf("expected no allowlist for status.get, got %v", got)
+		}
+	})
+
+	t.Run("empty normalized allowlist still preserves deny by default runtime seam", func(t *testing.T) {
+		policy, ok := resolved.ToolTransportPolicy("status.filtered")
+		if !ok {
+			t.Fatal("expected runtime transport policy for status.filtered")
+		}
+		if got := policy.AllowedHosts(); got != nil {
+			t.Fatalf("ToolTransportPolicy(status.filtered).AllowedHosts() = %v, want nil", got)
+		}
+
+		got, ok := resolved.ToolAllowedHosts("status.filtered")
+		if ok {
+			t.Fatalf("expected no allowlist for status.filtered, got %v", got)
 		}
 	})
 }

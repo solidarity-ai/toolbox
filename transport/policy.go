@@ -10,6 +10,11 @@ import (
 // Policy is the transport-owned runtime policy surface for one resolved tool.
 // It keeps request mutation and allowlist state on the transport boundary so
 // runtime consumers do not need to understand toolset-specific auth plumbing.
+//
+// A policy may exist even when both rules and the normalized allowlist are
+// empty. That runtime-only shape intentionally represents deny-by-default for
+// transport-aware runtimes without exposing an allow-any state through callers
+// that use AllowedHosts().
 type Policy struct {
 	injector     *Injector
 	allowedHosts []string
@@ -17,14 +22,17 @@ type Policy struct {
 
 // NewPolicy assembles the shared runtime transport policy for one tool. The
 // policy may carry credential injection rules, allowed-host metadata, or both.
-func NewPolicy(store secrets.SecretStore, rules []Rule, allowedHosts []string) (*Policy, error) {
+// When requireRuntimePolicy is true, an otherwise empty policy is still
+// materialized so runtime preflight can distinguish "deny by default" from
+// "no transport policy was built".
+func NewPolicy(store secrets.SecretStore, rules []Rule, allowedHosts []string, requireRuntimePolicy bool) (*Policy, error) {
 	injector, err := NewInjector(store, rules)
 	if err != nil {
 		return nil, err
 	}
 
 	normalizedAllowedHosts := NormalizeAllowedHosts(allowedHosts)
-	if (injector == nil || len(injector.Rules()) == 0) && len(normalizedAllowedHosts) == 0 {
+	if !requireRuntimePolicy && (injector == nil || len(injector.Rules()) == 0) && len(normalizedAllowedHosts) == 0 {
 		return nil, nil
 	}
 

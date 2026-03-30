@@ -28,7 +28,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 			Hosts:  []string{"api.github.com"},
 			Method: "bearer_header",
 		},
-	}}, nil)
+	}}, nil, false)
 	if err != nil {
 		t.Fatalf("NewPolicy: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 				Hosts:  []string{parsedURL.Hostname()},
 				Method: "bearer_header",
 			},
-		}}, nil)
+		}}, nil, false)
 		if err != nil {
 			t.Fatalf("NewPolicy: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 				Hosts:  []string{parsedURL.Hostname()},
 				Method: "bearer_header",
 			},
-		}}, nil)
+		}}, nil, false)
 		if err != nil {
 			t.Fatalf("NewPolicy: %v", err)
 		}

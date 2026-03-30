@@ -197,6 +197,86 @@ func TestBootstrapCallbackTimeoutIncludesRedirectURI(t *testing.T) {
 	}
 }
 
+func TestBootstrapTokenExchangeTimeoutStaysStageSpecificAndSecretSafe(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	tokenServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"access-timeout","refresh_token":"refresh-timeout","expires_in":3600}`)
+	}))
+	defer tokenServer.Close()
+
+	provider := oauthProviderRefFromServer(tokenServer.URL)
+	client := tokenServer.Client()
+	client.Timeout = 10 * time.Millisecond
+	bootstrap := oauthbootstrap.New(oauthbootstrap.Options{
+		Store:           store,
+		HTTPClient:      client,
+		CallbackTimeout: 2 * time.Second,
+		ExchangeTimeout: time.Second,
+		OpenBrowser: func(ctx context.Context, authURL string) error {
+			return completeCallback(t, authURL, "auth-code-timeout", "")
+		},
+	})
+
+	_, err := bootstrap.Run(context.Background(), oauthbootstrap.Request{
+		Package:      singleCredentialPackage(provider, "github_oauth", []string{"repo"}),
+		ClientID:     "client-public",
+		ClientSecret: "client-secret-timeout",
+	})
+	if err == nil {
+		t.Fatal("expected token exchange timeout")
+	}
+	if !strings.Contains(err.Error(), "during token exchange") {
+		t.Fatalf("error = %v, want token exchange stage", err)
+	}
+	for _, leaked := range []string{"client-secret-timeout", "auth-code-timeout", "refresh-timeout", "access-timeout"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("error leaked secret material %q: %v", leaked, err)
+		}
+	}
+}
+
+func TestBootstrapMalformedTokenResponsePreservesStageWithoutEchoingPayload(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	tokenServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"access-123","refresh_token":"refresh-123","expires_in":"soon"}`)
+	}))
+	defer tokenServer.Close()
+
+	provider := oauthProviderRefFromServer(tokenServer.URL)
+	bootstrap := oauthbootstrap.New(oauthbootstrap.Options{
+		Store:           store,
+		HTTPClient:      tokenServer.Client(),
+		CallbackTimeout: 2 * time.Second,
+		OpenBrowser: func(ctx context.Context, authURL string) error {
+			return completeCallback(t, authURL, "auth-code-malformed", "")
+		},
+	})
+
+	_, err := bootstrap.Run(context.Background(), oauthbootstrap.Request{
+		Package:      singleCredentialPackage(provider, "github_oauth", []string{"repo"}),
+		ClientID:     "client-public",
+		ClientSecret: "client-secret-malformed",
+	})
+	if err == nil {
+		t.Fatal("expected malformed token response failure")
+	}
+	if !strings.Contains(err.Error(), "during token exchange") || !strings.Contains(err.Error(), "malformed expires_in") {
+		t.Fatalf("error = %v, want token exchange parse context", err)
+	}
+	for _, leaked := range []string{"access-123", "refresh-123", "auth-code-malformed", "client-secret-malformed"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("error leaked secret material %q: %v", leaked, err)
+		}
+	}
+}
+
 func TestBootstrapCredentialSelectionRejectsBlankClientID(t *testing.T) {
 	t.Parallel()
 

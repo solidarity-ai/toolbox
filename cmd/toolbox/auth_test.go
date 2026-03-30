@@ -296,6 +296,58 @@ func TestRunAuthBubblesBootstrapStageFailure(t *testing.T) {
 	}
 }
 
+func TestRunAuthRefreshFailuresPreserveGuidanceAndRedactSecretValues(t *testing.T) {
+	packageDir := newOAuthPackageDir(t, authPackageOptions{})
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithDeps([]string{packageDir}, strings.NewReader("client-123\nsecret-456\n"), &stdout, &stderr, authDeps{
+		prompt: promptSecret,
+		newStore: func() (secrets.SecretStore, error) {
+			return &stubSecretStore{}, nil
+		},
+		openBrowser: func(context.Context, string) error { return nil },
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			return func(context.Context, oauthbootstrap.Request) (oauthbootstrap.Result, error) {
+				return oauthbootstrap.Result{}, &oauthbootstrap.StageError{Stage: "token exchange", Err: fmt.Errorf("oauth2 refresh for credential %q failed during token request: provider returned status 502 with payload {\"client_id\":\"client-123\",\"client_secret\":\"secret-456\",\"refresh_token\":\"refresh-789\",\"access_token\":\"access-000\"} and query refresh_token=refresh-789&client_secret=secret-456; re-authorize by updating client_id, client_secret, and refresh_token secrets", "workspace")}
+			}
+		},
+	})
+	if err == nil {
+		t.Fatal("runAuthWithDeps() error = nil, want refresh failure")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "auth: token exchange failed") || !strings.Contains(got, "re-authorize by updating client_id, client_secret, and refresh_token secrets") {
+		t.Fatalf("error = %v, want stage-specific refresh guidance", err)
+	}
+	for _, leaked := range []string{"client-123", "secret-456", "refresh-789", "access-000"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("error leaked secret material %q: %v", leaked, err)
+		}
+	}
+	for _, want := range []string{"\"client_id\":\"[redacted]\"", "client_secret=[redacted]", "refresh_token=[redacted]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error = %v, want redacted marker %q", err, want)
+		}
+	}
+}
+
+func TestRedactAuthErrorRedactsNonStageBootstrapPayloads(t *testing.T) {
+	err := redactAuthError(".", "workspace", "", fmt.Errorf("bootstrap provider payload {\"refresh_token\":\"refresh-123\"} authorization: Bearer access-xyz code=auth-code-123"))
+	got := err.Error()
+	if !strings.Contains(got, "auth: bootstrap failed") {
+		t.Fatalf("error = %v, want bootstrap context", err)
+	}
+	for _, leaked := range []string{"refresh-123", "access-xyz", "auth-code-123"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("error leaked secret material %q: %v", leaked, err)
+		}
+	}
+	for _, want := range []string{"\"refresh_token\":\"[redacted]\"", "authorization: Bearer [redacted]", "code=[redacted]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error = %v, want redacted marker %q", err, want)
+		}
+	}
+}
+
 func TestRunAuthLocalSecretStoreUnlockFailure(t *testing.T) {
 	packageDir := newOAuthPackageDir(t, authPackageOptions{})
 	missingIdentity := filepath.Join(t.TempDir(), "missing-keys.txt")

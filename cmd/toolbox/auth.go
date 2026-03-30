@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -225,6 +226,28 @@ func browserCommand(rawURL string) (string, []string, error) {
 	}
 }
 
+var authSecretRedactionPatterns = []struct {
+	re   *regexp.Regexp
+	repl string
+}{
+	{
+		re:   regexp.MustCompile(`(?i)("(?:access_token|refresh_token|client_secret|client_id|code|authorization_code|id_token)"\s*:\s*")([^"]*)(")`),
+		repl: `${1}[redacted]${3}`,
+	},
+	{
+		re:   regexp.MustCompile(`(?i)((?:^|[?&\s,(])(?:access_token|refresh_token|client_secret|client_id|code|authorization_code|id_token)=)([^&\s,)]*)`),
+		repl: `${1}[redacted]`,
+	},
+	{
+		re:   regexp.MustCompile(`(?i)((?:access_token|refresh_token|client_secret|client_id|code|authorization_code|id_token)\s*=\s*")([^"]*)(")`),
+		repl: `${1}[redacted]${3}`,
+	},
+	{
+		re:   regexp.MustCompile(`(?i)(authorization\s*:\s*bearer\s+)([^\s,;]+)`),
+		repl: `${1}[redacted]`,
+	},
+}
+
 func redactAuthError(packagePath, credentialName, tenant string, err error) error {
 	contextLabel := fmt.Sprintf("path %q credential %q", packagePath, credentialName)
 	if tenant != "" {
@@ -232,9 +255,17 @@ func redactAuthError(packagePath, credentialName, tenant string, err error) erro
 	}
 	var stageErr *oauthbootstrap.StageError
 	if errors.As(err, &stageErr) {
-		return fmt.Errorf("auth: %s failed for %s: %v", stageErr.Stage, contextLabel, stageErr.Err)
+		return fmt.Errorf("auth: %s failed for %s: %s", stageErr.Stage, contextLabel, redactAuthDetail(stageErr.Err.Error()))
 	}
-	return fmt.Errorf("auth: bootstrap failed for %s: %v", contextLabel, err)
+	return fmt.Errorf("auth: bootstrap failed for %s: %s", contextLabel, redactAuthDetail(err.Error()))
+}
+
+func redactAuthDetail(detail string) string {
+	redacted := detail
+	for _, pattern := range authSecretRedactionPatterns {
+		redacted = pattern.re.ReplaceAllString(redacted, pattern.repl)
+	}
+	return redacted
 }
 
 func printAuthUsage(f io.Writer) {

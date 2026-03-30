@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -887,6 +888,227 @@ func TestManifestAllowedHostsValidation(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "allowed_hosts") {
 			t.Fatalf("ParseDev() error = %v, want allowed_hosts field mention", err)
+		}
+	})
+}
+
+func TestToolCredentialOverrideSemantics(t *testing.T) {
+	t.Parallel()
+
+	dev, err := ParseDev([]byte(`{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "google_workspace",
+      "type": "oauth2",
+      "provider": "google",
+      "inject": { "hosts": ["www.googleapis.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts" },
+    { "entry_ts": "tools/status.check.ts", "credentials": [] },
+    {
+      "entry_ts": "tools/calendar.list.ts",
+      "credentials": [
+        {
+          "name": "google_calendar",
+          "type": "oauth2",
+          "provider": "google",
+          "inject": { "hosts": ["www.googleapis.com"], "method": "bearer_header" }
+        }
+      ]
+    }
+  ]
+}`))
+	if err != nil {
+		t.Fatalf("ParseDev() error: %v", err)
+	}
+
+	if dev.Tools[0].CredentialsPresent {
+		t.Fatal("tool[0] credentials should be absent and inherit package credentials")
+	}
+	if !dev.Tools[1].CredentialsPresent {
+		t.Fatal("tool[1] credentials should preserve explicit empty declaration")
+	}
+	if len(dev.Tools[1].Credentials) != 0 {
+		t.Fatalf("tool[1] credentials len = %d, want 0", len(dev.Tools[1].Credentials))
+	}
+	if !dev.Tools[2].CredentialsPresent {
+		t.Fatal("tool[2] credentials should preserve explicit replacement declaration")
+	}
+	if diff := cmp.Diff([]tooldef.PackageCredential{{
+		Name:     "google_calendar",
+		Type:     tooldef.CredentialTypeOAuth2,
+		Provider: "google",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{"www.googleapis.com"},
+			Method: "bearer_header",
+		},
+	}}, dev.Tools[2].Credentials); diff != "" {
+		t.Fatalf("ParseDev() tool replacement credentials mismatch (-want +got):\n%s", diff)
+	}
+
+	pkg := Compile(dev)
+	if pkg.Tools[0].CredentialsPresent {
+		t.Fatal("Compile() should keep absent tool credentials absent")
+	}
+	if !pkg.Tools[1].CredentialsPresent {
+		t.Fatal("Compile() should preserve explicit empty tool credentials")
+	}
+	if !pkg.Tools[2].CredentialsPresent {
+		t.Fatal("Compile() should preserve explicit replacement tool credentials")
+	}
+
+	raw, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatalf("json.Marshal(pkg) error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(compiled) error: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 3 {
+		t.Fatalf("compiled JSON tools = %#v, want 3 entries", payload["tools"])
+	}
+	toolJSON, ok := tools[1].(map[string]any)
+	if !ok {
+		t.Fatalf("compiled JSON tool[1] = %#v, want object", tools[1])
+	}
+	creds, ok := toolJSON["credentials"].([]any)
+	if !ok {
+		t.Fatalf("compiled JSON tool[1] credentials = %#v, want explicit empty array", toolJSON["credentials"])
+	}
+	if len(creds) != 0 {
+		t.Fatalf("compiled JSON tool[1] credentials len = %d, want 0", len(creds))
+	}
+
+	loaded, err := ParsePkg(raw)
+	if err != nil {
+		t.Fatalf("ParsePkg() error: %v", err)
+	}
+	if loaded.Tools[0].CredentialsPresent {
+		t.Fatal("ParsePkg() should keep absent tool credentials absent")
+	}
+	if !loaded.Tools[1].CredentialsPresent {
+		t.Fatal("ParsePkg() should preserve explicit empty tool credentials")
+	}
+	if len(loaded.Tools[1].Credentials) != 0 {
+		t.Fatalf("loaded tool[1] credentials len = %d, want 0", len(loaded.Tools[1].Credentials))
+	}
+	if !loaded.Tools[2].CredentialsPresent {
+		t.Fatal("ParsePkg() should preserve explicit replacement tool credentials")
+	}
+	if diff := cmp.Diff(pkg.Tools[2].Credentials, loaded.Tools[2].Credentials); diff != "" {
+		t.Fatalf("ParsePkg() tool replacement credentials mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestManifestToolCredentialValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dev manifest rejects malformed tool credential metadata", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "credentials": [
+        {
+          "name": "",
+          "type": "nope",
+          "inject": { "hosts": [""] }
+        }
+      ]
+    }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "credentials") || !strings.Contains(err.Error(), "hosts") {
+			t.Fatalf("ParseDev() error = %v, want credentials and nested hosts field mention", err)
+		}
+	})
+
+	t.Run("dev manifest rejects tool credentials without module", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "credentials": [
+        {
+          "name": "google_workspace",
+          "type": "bearer",
+          "inject": { "hosts": ["www.googleapis.com"] }
+        }
+      ]
+    }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "module is required") || !strings.Contains(err.Error(), "tools[0].credentials") {
+			t.Fatalf("ParseDev() error = %v, want module and tool credentials field mention", err)
+		}
+	})
+
+	t.Run("schema rejects wrong tool credentials type in compiled manifest", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParsePkg([]byte(`{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/users.list.ts",
+      "effect": "readOnly",
+      "credentials": "inherit"
+    }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParsePkg() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "credentials") {
+			t.Fatalf("ParsePkg() error = %v, want credentials field mention", err)
+		}
+	})
+
+	t.Run("validate compiled rejects invalid tool credential replacement", func(t *testing.T) {
+		t.Parallel()
+		_, err := ValidateCompiled(tooldef.Package{
+			Module:  tooldef.ModulePath("github.com/example/google-workspace"),
+			Name:    "google-workspace",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Tools: []tooldef.PackageTool{{
+				EntryTS:            "tools/users.list.ts",
+				Effect:             tooldef.EffectReadOnly,
+				CredentialsPresent: true,
+				Credentials: []tooldef.PackageCredential{{
+					Name: "google_workspace",
+					Type: tooldef.CredentialTypeBearer,
+					Inject: tooldef.CredentialInject{
+						Hosts: []string{""},
+					},
+				}},
+			}},
+		}, ValidationModeDist)
+		if err == nil {
+			t.Fatal("ValidateCompiled() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "tools[0].credentials[0].inject.hosts[0]") {
+			t.Fatalf("ValidateCompiled() error = %v, want nested tool credential field mention", err)
 		}
 	})
 }

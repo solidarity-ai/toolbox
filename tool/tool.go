@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"encoding/json"
 	"io/fs"
 
 	"github.com/microsoft/typescript-go/toolbox"
@@ -76,6 +77,67 @@ type PackageTool struct {
 	ResourceParams     []ResourceParam        `json:"resourceParams,omitempty"`
 	AllowedHosts       []string               `json:"allowed_hosts,omitempty"`
 	AllowedHostsExtend []string               `json:"allowed_hosts_extend,omitempty"`
+	Credentials        []PackageCredential    `json:"-"`
+	CredentialsPresent bool                   `json:"-"`
+}
+
+type packageToolJSON struct {
+	EntryTS            string               `json:"entry_ts"`
+	Idempotent         *bool                `json:"idempotent,omitempty"`
+	Effect             Effect               `json:"effect,omitempty"`
+	Description        string               `json:"description,omitempty"`
+	ParamsSchema       map[string]any       `json:"paramsSchema,omitempty"`
+	ResourceParams     []ResourceParam      `json:"resourceParams,omitempty"`
+	AllowedHosts       []string             `json:"allowed_hosts,omitempty"`
+	AllowedHostsExtend []string             `json:"allowed_hosts_extend,omitempty"`
+	Credentials        *[]PackageCredential `json:"credentials,omitempty"`
+}
+
+func (t PackageTool) MarshalJSON() ([]byte, error) {
+	payload := packageToolJSON{
+		EntryTS:            t.EntryTS,
+		Idempotent:         t.Idempotent,
+		Effect:             t.Effect,
+		Description:        t.Description,
+		ParamsSchema:       t.ParamsSchema,
+		ResourceParams:     t.ResourceParams,
+		AllowedHosts:       t.AllowedHosts,
+		AllowedHostsExtend: t.AllowedHostsExtend,
+	}
+	if t.CredentialsPresent {
+		credentials := make([]PackageCredential, len(t.Credentials))
+		copy(credentials, t.Credentials)
+		payload.Credentials = &credentials
+	}
+	return json.Marshal(payload)
+}
+
+func (t *PackageTool) UnmarshalJSON(data []byte) error {
+	var payload packageToolJSON
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var credentials []PackageCredential
+	if payload.Credentials != nil {
+		credentials = append([]PackageCredential(nil), (*payload.Credentials)...)
+	}
+	*t = PackageTool{
+		EntryTS:            payload.EntryTS,
+		Idempotent:         payload.Idempotent,
+		Effect:             payload.Effect,
+		Description:        payload.Description,
+		ParamsSchema:       payload.ParamsSchema,
+		ResourceParams:     payload.ResourceParams,
+		AllowedHosts:       payload.AllowedHosts,
+		AllowedHostsExtend: payload.AllowedHostsExtend,
+		Credentials:        credentials,
+	}
+	_, t.CredentialsPresent = raw["credentials"]
+	return nil
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current

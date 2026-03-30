@@ -62,12 +62,67 @@ type DevManifestToolResource struct {
 }
 
 type DevManifestTool struct {
-	EntryTS            string                   `json:"entry_ts"`
-	Idempotent         *bool                    `json:"idempotent"`
-	Effect             *tooldef.Effect          `json:"effect"`
-	Resource           *DevManifestToolResource `json:"resource,omitempty"`
-	AllowedHosts       []string                 `json:"allowed_hosts,omitempty"`
-	AllowedHostsExtend []string                 `json:"allowed_hosts_extend,omitempty"`
+	EntryTS            string                      `json:"entry_ts"`
+	Idempotent         *bool                       `json:"idempotent"`
+	Effect             *tooldef.Effect             `json:"effect"`
+	Resource           *DevManifestToolResource    `json:"resource,omitempty"`
+	AllowedHosts       []string                    `json:"allowed_hosts,omitempty"`
+	AllowedHostsExtend []string                    `json:"allowed_hosts_extend,omitempty"`
+	Credentials        []tooldef.PackageCredential `json:"-"`
+	CredentialsPresent bool                        `json:"-"`
+}
+
+type devManifestToolJSON struct {
+	EntryTS            string                       `json:"entry_ts"`
+	Idempotent         *bool                        `json:"idempotent"`
+	Effect             *tooldef.Effect              `json:"effect"`
+	Resource           *DevManifestToolResource     `json:"resource,omitempty"`
+	AllowedHosts       []string                     `json:"allowed_hosts,omitempty"`
+	AllowedHostsExtend []string                     `json:"allowed_hosts_extend,omitempty"`
+	Credentials        *[]tooldef.PackageCredential `json:"credentials,omitempty"`
+}
+
+func (t DevManifestTool) MarshalJSON() ([]byte, error) {
+	payload := devManifestToolJSON{
+		EntryTS:            t.EntryTS,
+		Idempotent:         t.Idempotent,
+		Effect:             t.Effect,
+		Resource:           t.Resource,
+		AllowedHosts:       t.AllowedHosts,
+		AllowedHostsExtend: t.AllowedHostsExtend,
+	}
+	if t.CredentialsPresent {
+		credentials := make([]tooldef.PackageCredential, len(t.Credentials))
+		copy(credentials, t.Credentials)
+		payload.Credentials = &credentials
+	}
+	return json.Marshal(payload)
+}
+
+func (t *DevManifestTool) UnmarshalJSON(data []byte) error {
+	var payload devManifestToolJSON
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var credentials []tooldef.PackageCredential
+	if payload.Credentials != nil {
+		credentials = append([]tooldef.PackageCredential(nil), (*payload.Credentials)...)
+	}
+	*t = DevManifestTool{
+		EntryTS:            payload.EntryTS,
+		Idempotent:         payload.Idempotent,
+		Effect:             payload.Effect,
+		Resource:           payload.Resource,
+		AllowedHosts:       payload.AllowedHosts,
+		AllowedHostsExtend: payload.AllowedHostsExtend,
+		Credentials:        credentials,
+	}
+	_, t.CredentialsPresent = raw["credentials"]
+	return nil
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -103,7 +158,7 @@ func ParseDev(data []byte) (DevManifest, error) {
 		if err := validateEntryName(tool.EntryTS); err != nil {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
 		}
-		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+		if err := validateToolMetadata(fmt.Sprintf("tools[%d]", i), manifest.Module, tool); err != nil {
 			return DevManifest{}, fmt.Errorf("validate dev manifest metadata: %w", err)
 		}
 	}
@@ -128,7 +183,7 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 		return tooldef.Package{}, fmt.Errorf("validate pkg manifest metadata: %w", err)
 	}
 	for i, tool := range pkg.Tools {
-		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+		if err := validatePackageToolMetadata(fmt.Sprintf("tools[%d]", i), pkg.Module, tool); err != nil {
 			return tooldef.Package{}, fmt.Errorf("validate pkg manifest metadata: %w", err)
 		}
 	}
@@ -175,6 +230,8 @@ func Compile(dev DevManifest) tooldef.Package {
 			ResourceParams:     resourceParams,
 			AllowedHosts:       append([]string(nil), tool.AllowedHosts...),
 			AllowedHostsExtend: append([]string(nil), tool.AllowedHostsExtend...),
+			Credentials:        append([]tooldef.PackageCredential(nil), tool.Credentials...),
+			CredentialsPresent: tool.CredentialsPresent,
 		}
 	}
 	return pkg
@@ -188,7 +245,7 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 		return nil, fmt.Errorf("validate compiled package metadata: %w", err)
 	}
 	for i, tool := range pkg.Tools {
-		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+		if err := validatePackageToolMetadata(fmt.Sprintf("tools[%d]", i), pkg.Module, tool); err != nil {
 			return nil, fmt.Errorf("validate compiled package metadata: %w", err)
 		}
 	}
@@ -225,16 +282,43 @@ func validatePackageMetadata(module tooldef.ModulePath, allowedHosts []string, c
 	if err := validateHostList("allowed_hosts", allowedHosts); err != nil {
 		return err
 	}
+	if err := validateCredentialList("credentials", module, credentials); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateToolMetadata(prefix string, module tooldef.ModulePath, tool DevManifestTool) error {
+	if err := validateToolAllowedHosts(prefix, tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+		return err
+	}
+	if err := validateCredentialList(prefix+".credentials", module, tool.Credentials); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePackageToolMetadata(prefix string, module tooldef.ModulePath, tool tooldef.PackageTool) error {
+	if err := validateToolAllowedHosts(prefix, tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+		return err
+	}
+	if err := validateCredentialList(prefix+".credentials", module, tool.Credentials); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCredentialList(field string, module tooldef.ModulePath, credentials []tooldef.PackageCredential) error {
 	if len(credentials) == 0 {
 		return nil
 	}
 	if module == "" {
-		return fmt.Errorf("module is required when credentials are declared")
+		return fmt.Errorf("module is required when %s are declared", field)
 	}
 
 	seenNames := make(map[string]struct{}, len(credentials))
 	for i, cred := range credentials {
-		prefix := fmt.Sprintf("credentials[%d]", i)
+		prefix := fmt.Sprintf("%s[%d]", field, i)
 		name := strings.TrimSpace(cred.Name)
 		if name == "" {
 			return fmt.Errorf("%s.name must not be empty", prefix)

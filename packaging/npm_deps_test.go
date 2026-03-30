@@ -285,6 +285,9 @@ func assertGithubIssuesAuthContractForHost(t *testing.T, pkg tooldef.Package, wa
 	if len(pkg.Credentials) != 1 {
 		t.Fatalf("package credentials = %d, want 1", len(pkg.Credentials))
 	}
+	if len(pkg.AllowedHosts) != 1 || pkg.AllowedHosts[0] != wantHost {
+		t.Fatalf("package allowed_hosts = %v, want [%s]", pkg.AllowedHosts, wantHost)
+	}
 	cred := pkg.Credentials[0]
 	if cred.Name != "github_token" {
 		t.Fatalf("credential name = %q, want github_token", cred.Name)

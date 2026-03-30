@@ -2,9 +2,12 @@
   "module": "github.com/example/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
-  "sha256": "d87ab5c6136ea3a9c588c1257aecb14f57317b923b40b492c5b27d075bbac2b5",
+  "sha256": "5bb25360742b67353c2681e5129387f4dae0a26499c50f813929e25476116dcc",
   "additionalTypeScriptGlobs": [
     "tools/shims.ts"
+  ],
+  "allowed_hosts": [
+    "api.github.com"
   ],
   "credentials": [
     {

@@ -78,7 +78,8 @@ func InstallNPMDeps(t testing.TB, dir string) {
 
 // RewriteGithubIssuesFixtureBaseURL rewrites the copied fixture to target the
 // provided base URL instead of api.github.com, and updates credential host
-// matching to the base URL hostname so transport auth still resolves.
+// matching plus package allowlist host matching to the base URL hostname so
+// transport auth and fetch preflight stay aligned.
 func RewriteGithubIssuesFixtureBaseURL(t testing.TB, dir, baseURL string) {
 	t.Helper()
 
@@ -113,7 +114,9 @@ func RewriteGithubIssuesFixtureBaseURL(t testing.TB, dir, baseURL string) {
 	if !ok {
 		t.Fatalf("github-issues credential inject malformed: %#v", credential["inject"])
 	}
-	inject["hosts"] = []string{parsed.Hostname()}
+	hostname := parsed.Hostname()
+	inject["hosts"] = []string{hostname}
+	manifest["allowed_hosts"] = []string{hostname}
 
 	updatedManifest, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

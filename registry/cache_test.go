@@ -128,6 +128,41 @@ func TestCache(t *testing.T) {
 	}
 }
 
+func TestCachePreservesModuleIdentityInArchiveLoads(t *testing.T) {
+	archiveBytes, manifestBytes := buildPackageArchiveFixture(t, `{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": { "hosts": ["api.github.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`)
+	cache := newTempCache(t)
+	module := ModulePath("github.com/example/github-tools")
+	version := Version("v1.2.3")
+	if err := cache.Put(module, version, archiveBytes, manifestBytes); err != nil {
+		t.Fatalf("Put() error: %v", err)
+	}
+
+	loaded, err := cache.LoadArchive(module, version)
+	if err != nil {
+		t.Fatalf("LoadArchive() error: %v", err)
+	}
+	if got := loaded.Package.Module; got != module {
+		t.Fatalf("loaded module = %q, want %q", got, module)
+	}
+	if len(loaded.Package.Credentials) != 1 {
+		t.Fatalf("loaded credentials = %d, want 1", len(loaded.Package.Credentials))
+	}
+}
+
 func newTempCache(t *testing.T) *Cache {
 	t.Helper()
 	cache, err := NewCache(t.TempDir())
@@ -161,6 +196,37 @@ func loadDistFixtureBytes(t *testing.T, fixtureName string) ([]byte, []byte) {
 	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read manifest fixture %s: %v", manifestPath, err)
+	}
+	return archiveBytes, manifestBytes
+}
+
+func buildPackageArchiveFixture(t *testing.T, manifestJSON string) ([]byte, []byte) {
+	t.Helper()
+
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, packaging.DevManifestFilename), []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "tools"), 0o755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "tools", "issues.list.ts"), []byte("export default function() { return 'ok'; }\n"), 0o644); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := packaging.Pack(srcDir, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	archiveBytes, err := os.ReadFile(result.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	manifestBytes, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
 	}
 	return archiveBytes, manifestBytes
 }

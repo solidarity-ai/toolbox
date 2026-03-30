@@ -319,7 +319,7 @@ func TestInferEffect(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		entryTS  string
+		entryTS    string
 		wantEffect tooldef.Effect
 	}{
 		{"tools/users.list.ts", tooldef.EffectReadOnly},
@@ -524,7 +524,7 @@ func TestCompileWithResourceBindingsOverride(t *testing.T) {
 			{
 				EntryTS:    "tools/account.tickets.list.ts",
 				Idempotent: boolPtr(true),
-				Effect: effectPtr(tooldef.EffectReadOnly),
+				Effect:     effectPtr(tooldef.EffectReadOnly),
 				Resource: &DevManifestToolResource{
 					Bindings: map[string]string{"account_id": "zendesk_account"},
 				},
@@ -615,6 +615,144 @@ func TestCompileWithResourceModeOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCompilePreservesModuleAndCredentials(t *testing.T) {
+	t.Parallel()
+
+	dev := DevManifest{
+		Module:  tooldef.ModulePath("github.com/example/acme-tools"),
+		Name:    "acme-tools",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Credentials: []tooldef.PackageCredential{{
+			Name:     "github_token",
+			Type:     tooldef.CredentialTypeBearer,
+			Provider: "github",
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+		Tools: []DevManifestTool{{
+			EntryTS:    "tools/issues.list.ts",
+			Idempotent: boolPtr(true),
+			Effect:     effectPtr(tooldef.EffectReadOnly),
+		}},
+	}
+
+	got := Compile(dev)
+	if got.Module != dev.Module {
+		t.Fatalf("Compile() module = %q, want %q", got.Module, dev.Module)
+	}
+	if diff := cmp.Diff(dev.Credentials, got.Credentials); diff != "" {
+		t.Fatalf("Compile() credentials mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestCredentialMetadataValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dev manifest requires module when credentials are declared", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": { "hosts": ["api.github.com"] }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "module is required") {
+			t.Fatalf("ParseDev() error = %v, want module requirement", err)
+		}
+	})
+
+	t.Run("dev manifest rejects secret-valued declaration fields", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "token": "shh",
+      "inject": { "hosts": ["api.github.com"] }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "token") {
+			t.Fatalf("ParseDev() error = %v, want token field mention", err)
+		}
+	})
+
+	t.Run("compiled manifest rejects secret-valued declaration fields", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParsePkg([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "client_secret": "shh",
+      "inject": { "hosts": ["api.github.com"] }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts", "effect": "readOnly" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParsePkg() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "client_secret") {
+			t.Fatalf("ParsePkg() error = %v, want client_secret field mention", err)
+		}
+	})
+
+	t.Run("compiled validation rejects invalid module and empty hosts", func(t *testing.T) {
+		t.Parallel()
+		_, err := ValidateCompiled(tooldef.Package{
+			Module:  tooldef.ModulePath("not-a-module"),
+			Name:    "github-tools",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "github_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{
+					Hosts: []string{""},
+				},
+			}},
+			Tools: []tooldef.PackageTool{{
+				EntryTS: "tools/issues.list.ts",
+				Effect:  tooldef.EffectReadOnly,
+			}},
+		}, ValidationModeDist)
+		if err == nil {
+			t.Fatal("ValidateCompiled() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "invalid module") {
+			t.Fatalf("ValidateCompiled() error = %v, want invalid module", err)
+		}
+	})
 }
 
 func boolPtr(v bool) *bool {

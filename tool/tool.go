@@ -8,12 +8,14 @@ import (
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
-	Name                      string            `json:"name"`
-	Runtime                   ToolRuntime       `json:"runtime"`
-	SHA256                    string            `json:"sha256,omitempty"`
-	AdditionalTypeScriptGlobs []string          `json:"additionalTypeScriptGlobs,omitempty"`
-	Executables               map[string]string `json:"executables,omitempty"`
-	Tools                     []PackageTool     `json:"tools"`
+	Module                    ModulePath          `json:"module,omitempty"`
+	Name                      string              `json:"name"`
+	Runtime                   ToolRuntime         `json:"runtime"`
+	SHA256                    string              `json:"sha256,omitempty"`
+	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs,omitempty"`
+	Executables               map[string]string   `json:"executables,omitempty"`
+	Credentials               []PackageCredential `json:"credentials,omitempty"`
+	Tools                     []PackageTool       `json:"tools"`
 }
 
 type ToolRuntime string
@@ -31,6 +33,31 @@ const (
 	EffectReversible   Effect = "reversible"
 	EffectIrreversible Effect = "irreversible"
 )
+
+type CredentialType string
+
+const (
+	CredentialTypeOAuth2 CredentialType = "oauth2"
+	CredentialTypeAPIKey CredentialType = "api_key"
+	CredentialTypeBearer CredentialType = "bearer"
+	CredentialTypeCustom CredentialType = "custom"
+)
+
+type CredentialInject struct {
+	Hosts      []string `json:"hosts,omitempty"`
+	PathPrefix string   `json:"pathPrefix,omitempty"`
+	Method     string   `json:"method,omitempty"`
+}
+
+type PackageCredential struct {
+	Name      string           `json:"name"`
+	Type      CredentialType   `json:"type"`
+	Provider  string           `json:"provider,omitempty"`
+	Scopes    []string         `json:"scopes,omitempty"`
+	Inject    CredentialInject `json:"inject"`
+	Strategy  string           `json:"strategy,omitempty"`
+	AuthHosts []string         `json:"authHosts,omitempty"`
+}
 
 // ResourceParam describes one inferred resource parameter and its canonical binding name.
 type ResourceParam struct {

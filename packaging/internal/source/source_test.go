@@ -302,6 +302,56 @@ func TestResolvedTools(t *testing.T) {
 	})
 }
 
+func TestResolvedToolsPreservePackageIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "issues.list.ts"), "export default function() {}")
+
+	loaded, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir() error: %v", err)
+	}
+	if got := loaded.Package.Module; got != tooldef.ModulePath("github.com/example/github-tools") {
+		t.Fatalf("loaded module = %q, want %q", got, "github.com/example/github-tools")
+	}
+	if len(loaded.Package.Credentials) != 1 {
+		t.Fatalf("loaded credentials = %d, want 1", len(loaded.Package.Credentials))
+	}
+
+	resolved := loaded.ResolvedTools()
+	if len(resolved) != 1 {
+		t.Fatalf("resolved tools = %d, want 1", len(resolved))
+	}
+	if resolved[0].Package == nil {
+		t.Fatal("resolved tool missing package metadata")
+	}
+	if got := resolved[0].Package.Module; got != tooldef.ModulePath("github.com/example/github-tools") {
+		t.Fatalf("resolved package module = %q, want %q", got, "github.com/example/github-tools")
+	}
+	if len(resolved[0].Package.Credentials) != 1 {
+		t.Fatalf("resolved package credentials = %d, want 1", len(resolved[0].Package.Credentials))
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

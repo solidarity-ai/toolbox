@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
 )
 
@@ -294,6 +297,50 @@ func TestResolver(t *testing.T) {
 	})
 }
 
+func TestResolverPreservesModuleIdentityFromFetchedArchive(t *testing.T) {
+	t.Parallel()
+
+	archiveBytes, manifestBytes := buildResolverPackageArchiveFixture(t, `{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": { "hosts": ["api.github.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`)
+	module := ModulePath("github.com/example/github-tools")
+	version := Version("v1.2.3")
+	cache := newTempCache(t)
+	resolver := NewResolver(cache, &mockSource{result: FetchResult{
+		Archive:  archiveBytes,
+		Manifest: manifestBytes,
+		Metadata: ResolveMetadata{
+			ArchiveSHA256: sha256Hex(archiveBytes),
+			GitSHA:        strings.Repeat("a", 40),
+			ResolvedFrom:  ResolvedFromGitHubRelease,
+			ResolvedAt:    "2026-03-28T12:00:00Z",
+		},
+	}})
+
+	result, err := resolver.Resolve(context.Background(), module, version)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if got := result.Package.Package.Module; got != module {
+		t.Fatalf("resolved module = %q, want %q", got, module)
+	}
+	if len(result.Package.Package.Credentials) != 1 {
+		t.Fatalf("resolved credentials = %d, want 1", len(result.Package.Package.Credentials))
+	}
+}
+
 func assertErrorContains(t *testing.T, err error, want string) {
 	t.Helper()
 	if err == nil {
@@ -302,4 +349,35 @@ func assertErrorContains(t *testing.T, err error, want string) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %q, want substring %q", err.Error(), want)
 	}
+}
+
+func buildResolverPackageArchiveFixture(t *testing.T, manifestJSON string) ([]byte, []byte) {
+	t.Helper()
+
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, packaging.DevManifestFilename), []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "tools"), 0o755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "tools", "issues.list.ts"), []byte("export default function() { return 'ok'; }\n"), 0o644); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+
+	outDir := t.TempDir()
+	result, err := packaging.Pack(srcDir, outDir)
+	if err != nil {
+		t.Fatalf("Pack() error: %v", err)
+	}
+
+	archiveBytes, err := os.ReadFile(result.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	manifestBytes, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	return archiveBytes, manifestBytes
 }

@@ -45,11 +45,13 @@ type LoadResult struct {
 
 // DevManifest is the source authoring format read from toolbox.devpkg.json.
 type DevManifest struct {
-	Name                      string              `json:"name"`
-	Runtime                   tooldef.ToolRuntime `json:"runtime"`
-	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs"`
-	Executables               map[string]string   `json:"executables"`
-	Tools                     []DevManifestTool   `json:"tools"`
+	Module                    tooldef.ModulePath          `json:"module,omitempty"`
+	Name                      string                      `json:"name"`
+	Runtime                   tooldef.ToolRuntime         `json:"runtime"`
+	AdditionalTypeScriptGlobs []string                    `json:"additionalTypeScriptGlobs"`
+	Executables               map[string]string           `json:"executables"`
+	Credentials               []tooldef.PackageCredential `json:"credentials,omitempty"`
+	Tools                     []DevManifestTool           `json:"tools"`
 }
 
 // DevManifestToolResource groups resource-related overrides for a tool.
@@ -61,7 +63,7 @@ type DevManifestToolResource struct {
 type DevManifestTool struct {
 	EntryTS    string                   `json:"entry_ts"`
 	Idempotent *bool                    `json:"idempotent"`
-	Effect     *tooldef.Effect           `json:"effect"`
+	Effect     *tooldef.Effect          `json:"effect"`
 	Resource   *DevManifestToolResource `json:"resource,omitempty"`
 }
 
@@ -91,6 +93,9 @@ func ParseDev(data []byte) (DevManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
 	}
+	if err := validatePackageMetadata(manifest.Module, manifest.Credentials); err != nil {
+		return DevManifest{}, fmt.Errorf("validate dev manifest metadata: %w", err)
+	}
 	for _, tool := range manifest.Tools {
 		if err := validateEntryName(tool.EntryTS); err != nil {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
@@ -101,9 +106,20 @@ func ParseDev(data []byte) (DevManifest, error) {
 
 // ParsePkg parses a compiled package manifest (toolbox.pkg.json).
 func ParsePkg(data []byte) (tooldef.Package, error) {
+	var instance map[string]any
+	if err := json.Unmarshal(data, &instance); err != nil {
+		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
+	if err := resolvedToolboxPkgDevSchema.Validate(instance); err != nil {
+		return tooldef.Package{}, fmt.Errorf("validate pkg manifest: %w", err)
+	}
+
 	var pkg tooldef.Package
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
+	if err := validatePackageMetadata(pkg.Module, pkg.Credentials); err != nil {
+		return tooldef.Package{}, fmt.Errorf("validate pkg manifest metadata: %w", err)
 	}
 	return pkg, nil
 }
@@ -112,10 +128,12 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 // applying inference rules for missing fields.
 func Compile(dev DevManifest) tooldef.Package {
 	pkg := tooldef.Package{
+		Module:                    dev.Module,
 		Name:                      dev.Name,
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
 		Executables:               dev.Executables,
+		Credentials:               append([]tooldef.PackageCredential(nil), dev.Credentials...),
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
 	}
 	for i, tool := range dev.Tools {
@@ -152,6 +170,10 @@ func Compile(dev DevManifest) tooldef.Package {
 // and dist (strict) schemas. In dev mode, dist violations are returned as
 // warnings. In dist mode, they are errors.
 func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, error) {
+	if err := validatePackageMetadata(pkg.Module, pkg.Credentials); err != nil {
+		return nil, fmt.Errorf("validate compiled package metadata: %w", err)
+	}
+
 	raw, err := json.Marshal(pkg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal compiled package: %w", err)
@@ -173,6 +195,50 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 		warnings = append(warnings, Warning{Message: fmt.Sprintf("distribution validation: %v", err)})
 	}
 	return warnings, nil
+}
+
+func validatePackageMetadata(module tooldef.ModulePath, credentials []tooldef.PackageCredential) error {
+	if module != "" {
+		if _, err := tooldef.ParseModulePath(module.String()); err != nil {
+			return fmt.Errorf("invalid module %q: %w", module, err)
+		}
+	}
+	if len(credentials) == 0 {
+		return nil
+	}
+	if module == "" {
+		return fmt.Errorf("module is required when credentials are declared")
+	}
+
+	seenNames := make(map[string]struct{}, len(credentials))
+	for i, cred := range credentials {
+		prefix := fmt.Sprintf("credentials[%d]", i)
+		name := strings.TrimSpace(cred.Name)
+		if name == "" {
+			return fmt.Errorf("%s.name must not be empty", prefix)
+		}
+		if _, exists := seenNames[name]; exists {
+			return fmt.Errorf("%s.name %q is duplicated", prefix, name)
+		}
+		seenNames[name] = struct{}{}
+
+		switch cred.Type {
+		case tooldef.CredentialTypeOAuth2, tooldef.CredentialTypeAPIKey, tooldef.CredentialTypeBearer, tooldef.CredentialTypeCustom:
+			// ok
+		default:
+			return fmt.Errorf("%s.type %q is invalid", prefix, cred.Type)
+		}
+
+		if len(cred.Inject.Hosts) == 0 {
+			return fmt.Errorf("%s.inject.hosts must declare at least one host", prefix)
+		}
+		for j, host := range cred.Inject.Hosts {
+			if strings.TrimSpace(host) == "" {
+				return fmt.Errorf("%s.inject.hosts[%d] must not be empty", prefix, j)
+			}
+		}
+	}
+	return nil
 }
 
 // InferEffect derives an effect from the tool entry filename verb.

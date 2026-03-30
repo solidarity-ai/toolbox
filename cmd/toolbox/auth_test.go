@@ -25,7 +25,7 @@ func TestRunAuthHelpIncludesUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "toolbox auth [--tenant TENANT] [PACKAGE_DIR]") {
+	if !strings.Contains(stdout.String(), "toolbox auth [--tenant TENANT] [--pkce auto|always|never] [--print-auth-url] [PACKAGE_DIR]") {
 		t.Fatalf("help output = %q, want auth usage", stdout.String())
 	}
 }
@@ -98,6 +98,90 @@ func TestRunAuthPromptsAndUsesTenantScope(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "OAuth client_id") || !strings.Contains(stderr.String(), "OAuth client_secret") {
 		t.Fatalf("stderr = %q, want both prompts", stderr.String())
+	}
+}
+
+func TestRunAuthPrintAuthURLSkipsBrowserLaunchAndPrintsURL(t *testing.T) {
+	packageDir := newOAuthPackageDir(t, authPackageOptions{})
+	var openerCalls int
+
+	deps := authDeps{
+		prompt: promptSecret,
+		newStore: func() (secrets.SecretStore, error) {
+			return &stubSecretStore{}, nil
+		},
+		openBrowser: func(context.Context, string) error {
+			openerCalls++
+			return fmt.Errorf("browser opener should not be called")
+		},
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			return func(ctx context.Context, req oauthbootstrap.Request) (oauthbootstrap.Result, error) {
+				if err := opener(ctx, "https://accounts.example.com/oauth/authorize?client_id=test-client&redirect_uri=http%3A%2F%2F127.0.0.1%3A43123%2Foauth%2Fcallback"); err != nil {
+					return oauthbootstrap.Result{}, err
+				}
+				return oauthbootstrap.Result{
+					CredentialName:  req.CredentialName,
+					SecretNamespace: "example.com/acme/authpkg/workspace",
+					PersistedKeys:   []string{"client_id", "refresh_token"},
+					UsedPKCE:        true,
+				}, nil
+			}
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithDeps([]string{"--print-auth-url", packageDir}, strings.NewReader("client-123\n\n"), &stdout, &stderr, deps)
+	if err != nil {
+		t.Fatalf("runAuthWithDeps() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if openerCalls != 0 {
+		t.Fatalf("browser opener calls = %d, want 0", openerCalls)
+	}
+	if !strings.Contains(stderr.String(), "Open this authorization URL in a browser") {
+		t.Fatalf("stderr = %q, want manual-open guidance", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "https://accounts.example.com/oauth/authorize?client_id=test-client&redirect_uri=http%3A%2F%2F127.0.0.1%3A43123%2Foauth%2Fcallback") {
+		t.Fatalf("stderr = %q, want printed authorization URL", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "ssh -L 43123:127.0.0.1:43123 host-name") {
+		t.Fatalf("stderr = %q, want ssh port-forward command", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `authorized oauth2 credential "workspace"`) {
+		t.Fatalf("stdout = %q, want auth success output", stdout.String())
+	}
+}
+
+func TestRunAuthPKCEModeAlwaysPassesThroughEvenWithClientSecret(t *testing.T) {
+	packageDir := newOAuthPackageDir(t, authPackageOptions{})
+	var gotReq oauthbootstrap.Request
+
+	deps := authDeps{
+		prompt: promptSecret,
+		newStore: func() (secrets.SecretStore, error) {
+			return &stubSecretStore{}, nil
+		},
+		openBrowser: func(context.Context, string) error { return nil },
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			return func(ctx context.Context, req oauthbootstrap.Request) (oauthbootstrap.Result, error) {
+				gotReq = req
+				return oauthbootstrap.Result{CredentialName: req.CredentialName, SecretNamespace: "example.com/acme/authpkg/workspace", PersistedKeys: []string{"client_id", "client_secret", "refresh_token"}, UsedPKCE: true}, nil
+			}
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithDeps([]string{"--pkce=always", packageDir}, strings.NewReader("client-123\nsecret-456\n"), &stdout, &stderr, deps)
+	if err != nil {
+		t.Fatalf("runAuthWithDeps() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if gotReq.PKCEMode != oauthbootstrap.PKCEModeAlways {
+		t.Fatalf("PKCEMode = %q, want always", gotReq.PKCEMode)
+	}
+	if gotReq.ClientSecret != "secret-456" {
+		t.Fatalf("client secret = %q, want secret-456", gotReq.ClientSecret)
+	}
+	if !strings.Contains(stdout.String(), "PKCE + client-secret flow") {
+		t.Fatalf("stdout = %q, want PKCE + client-secret output", stdout.String())
 	}
 }
 

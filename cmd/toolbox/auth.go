@@ -53,6 +53,8 @@ func runAuthWithDeps(args []string, stdin io.Reader, stdout, stderr io.Writer, d
 	fs := flag.NewFlagSet("auth", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	tenant := fs.String("tenant", "", "tenant secret namespace")
+	printAuthURL := fs.Bool("print-auth-url", false, "print the authorization URL instead of launching a local browser")
+	pkceMode := fs.String("pkce", string(oauthbootstrap.PKCEModeAuto), "pkce mode: auto, always, or never")
 	if err := fs.Parse(args); err != nil {
 		printAuthUsage(stderr)
 		return fmt.Errorf("auth: %w", err)
@@ -72,6 +74,16 @@ func runAuthWithDeps(args []string, stdin io.Reader, stdout, stderr io.Writer, d
 	}
 	if deps.newBootstrap == nil {
 		deps.newBootstrap = defaultAuthDeps.newBootstrap
+	}
+
+	effectiveOpenBrowser := deps.openBrowser
+	if *printAuthURL {
+		effectiveOpenBrowser = func(_ context.Context, rawURL string) error {
+			if _, err := fmt.Fprint(stderr, manualAuthInstructions(rawURL)); err != nil {
+				return err
+			}
+			return nil
+		}
 	}
 
 	packagePath := "."
@@ -104,17 +116,22 @@ func runAuthWithDeps(args []string, stdin io.Reader, stdout, stderr io.Writer, d
 		return fmt.Errorf("auth: prompt collection failed for path %q client_secret: %w", packagePath, err)
 	}
 
+	if _, err := oauthbootstrap.PKCEMode(*pkceMode).ShouldUse(clientSecret); err != nil {
+		return fmt.Errorf("auth: invalid --pkce %q: %w", *pkceMode, err)
+	}
+
 	store, err := deps.newStore()
 	if err != nil {
 		return fmt.Errorf("auth: local secret store initialization failed for path %q: %w", packagePath, err)
 	}
-	bootstrap := deps.newBootstrap(store, deps.openBrowser)
+	bootstrap := deps.newBootstrap(store, effectiveOpenBrowser)
 	result, err := bootstrap(context.Background(), oauthbootstrap.Request{
 		Package:        loaded,
 		CredentialName: credentialName,
 		Tenant:         strings.TrimSpace(*tenant),
 		ClientID:       clientID,
 		ClientSecret:   clientSecret,
+		PKCEMode:       oauthbootstrap.PKCEMode(*pkceMode),
 	})
 	if err != nil {
 		return redactAuthError(packagePath, credentialName, strings.TrimSpace(*tenant), err)
@@ -124,9 +141,12 @@ func runAuthWithDeps(args []string, stdin io.Reader, stdout, stderr io.Writer, d
 	if strings.TrimSpace(*tenant) != "" {
 		scopeLabel = fmt.Sprintf("tenant %q", strings.TrimSpace(*tenant))
 	}
-	flowLabel := "confidential-client"
+	flowLabel := "client-secret flow"
 	if result.UsedPKCE {
 		flowLabel = "public-client PKCE"
+		if strings.TrimSpace(clientSecret) != "" {
+			flowLabel = "PKCE + client-secret"
+		}
 	}
 	fmt.Fprintf(stdout, "authorized oauth2 credential %q for path %q (module %q, %s scope); stored %d durable secrets in %q via %s flow\n",
 		result.CredentialName,
@@ -215,6 +235,34 @@ func openBrowser(ctx context.Context, rawURL string) error {
 	return nil
 }
 
+func manualAuthInstructions(rawURL string) string {
+	var builder strings.Builder
+	builder.WriteString("Open this authorization URL in a browser, then complete the OAuth flow while this command keeps running:\n")
+	builder.WriteString(rawURL)
+	builder.WriteString("\n")
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return builder.String()
+	}
+	redirectURI := strings.TrimSpace(parsed.Query().Get("redirect_uri"))
+	if redirectURI == "" {
+		return builder.String()
+	}
+	redirectParsed, err := url.Parse(redirectURI)
+	if err != nil {
+		return builder.String()
+	}
+	host := redirectParsed.Hostname()
+	port := redirectParsed.Port()
+	if host == "" || port == "" {
+		return builder.String()
+	}
+
+	fmt.Fprintf(&builder, "\nIf your browser is on another machine, forward the localhost callback first:\nssh -L %s:%s:%s host-name\n", port, host, port)
+	return builder.String()
+}
+
 func browserCommand(rawURL string) (string, []string, error) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -270,5 +318,5 @@ func redactAuthDetail(detail string) string {
 
 func printAuthUsage(f io.Writer) {
 	fmt.Fprintln(f, "usage:")
-	fmt.Fprintln(f, "  toolbox auth [--tenant TENANT] [PACKAGE_DIR]")
+	fmt.Fprintln(f, "  toolbox auth [--tenant TENANT] [--pkce auto|always|never] [--print-auth-url] [PACKAGE_DIR]")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +28,40 @@ const (
 )
 
 type BrowserOpener func(context.Context, string) error
+
+type PKCEMode string
+
+const (
+	PKCEModeAuto   PKCEMode = "auto"
+	PKCEModeAlways PKCEMode = "always"
+	PKCEModeNever  PKCEMode = "never"
+)
+
+func (m PKCEMode) Normalize() PKCEMode {
+	switch strings.ToLower(strings.TrimSpace(string(m))) {
+	case "", string(PKCEModeAuto):
+		return PKCEModeAuto
+	case string(PKCEModeAlways):
+		return PKCEModeAlways
+	case string(PKCEModeNever):
+		return PKCEModeNever
+	default:
+		return PKCEMode("")
+	}
+}
+
+func (m PKCEMode) ShouldUse(clientSecret string) (bool, error) {
+	switch m.Normalize() {
+	case PKCEModeAuto:
+		return strings.TrimSpace(clientSecret) == "", nil
+	case PKCEModeAlways:
+		return true, nil
+	case PKCEModeNever:
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid pkce mode %q (want auto, always, or never)", string(m))
+	}
+}
 
 type ListenerFactory func(network, address string) (net.Listener, error)
 
@@ -64,9 +99,10 @@ type Request struct {
 	Tenant         string
 	ClientID       string
 	ClientSecret   string
+	PKCEMode       PKCEMode
 }
 
-type Result struct {
+ type Result struct {
 	CredentialName   string
 	RedirectURI      string
 	AuthorizationURL string
@@ -158,7 +194,10 @@ func (b *Bootstrapper) Run(ctx context.Context, req Request) (Result, error) {
 		return Result{}, &StageError{Stage: "callback validation", Err: fmt.Errorf("generate callback state: %w", err)}
 	}
 
-	usedPKCE := strings.TrimSpace(req.ClientSecret) == ""
+	usedPKCE, err := req.PKCEMode.ShouldUse(req.ClientSecret)
+	if err != nil {
+		return Result{}, &StageError{Stage: "credential selection", Err: err}
+	}
 	verifier := ""
 	challenge := ""
 	if usedPKCE {
@@ -435,7 +474,15 @@ func (b *Bootstrapper) exchangeCode(ctx context.Context, req exchangeRequest) (t
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return tokenResponse{}, &StageError{Stage: "token exchange", Err: fmt.Errorf("provider token endpoint for credential %q returned status %d", req.Credential, resp.StatusCode)}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return tokenResponse{}, &StageError{Stage: "token exchange", Err: fmt.Errorf("provider token endpoint for credential %q returned status %d (and response body could not be read: %v)", req.Credential, resp.StatusCode, readErr)}
+		}
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			return tokenResponse{}, &StageError{Stage: "token exchange", Err: fmt.Errorf("provider token endpoint for credential %q returned status %d", req.Credential, resp.StatusCode)}
+		}
+		return tokenResponse{}, &StageError{Stage: "token exchange", Err: fmt.Errorf("provider token endpoint for credential %q returned status %d: %s", req.Credential, resp.StatusCode, detail)}
 	}
 
 	var payload tokenResponse

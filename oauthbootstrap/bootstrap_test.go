@@ -88,6 +88,113 @@ func TestBootstrapPKCEPublicClientUsesChallengeAndVerifier(t *testing.T) {
 	assertSecretAbsent(t, store, "github.com/example/github-issues/github_oauth/client_secret")
 }
 
+func TestBootstrapPKCEAlwaysIncludesVerifierEvenWithClientSecret(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	provider, tokenServer := newOAuthTestProvider(t, func(t *testing.T, _ http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery: %v", err)
+		}
+		if got := values.Get("client_secret"); got != "secret-123" {
+			t.Fatalf("client_secret = %q, want secret-123", got)
+		}
+		if got := values.Get("code_verifier"); got == "" {
+			t.Fatal("expected code_verifier when pkce mode is always")
+		}
+	})
+	defer tokenServer.Close()
+
+	var opened string
+	bootstrap := oauthbootstrap.New(oauthbootstrap.Options{
+		Store:      store,
+		HTTPClient: tokenServer.Client(),
+		OpenBrowser: func(ctx context.Context, authURL string) error {
+			opened = authURL
+			return completeCallback(t, authURL, "auth-code", "")
+		},
+		CallbackTimeout: 2 * time.Second,
+	})
+
+	result, err := bootstrap.Run(context.Background(), oauthbootstrap.Request{
+		Package:      singleCredentialPackage(provider, "github_oauth", []string{"repo", "user:email"}),
+		ClientID:     "client-confidential",
+		ClientSecret: "secret-123",
+		PKCEMode:     oauthbootstrap.PKCEModeAlways,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.UsedPKCE {
+		t.Fatal("UsedPKCE = false, want true when pkce mode is always")
+	}
+	parsed, err := url.Parse(opened)
+	if err != nil {
+		t.Fatalf("Parse(auth url): %v", err)
+	}
+	if got := parsed.Query().Get("code_challenge"); got == "" {
+		t.Fatal("code_challenge missing from pkce-always auth url")
+	}
+}
+
+func TestBootstrapPKCENeverOmitsVerifierEvenWithoutClientSecret(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	provider, tokenServer := newOAuthTestProvider(t, func(t *testing.T, _ http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("ParseQuery: %v", err)
+		}
+		if got := values.Get("client_secret"); got != "" {
+			t.Fatalf("client_secret = %q, want omitted", got)
+		}
+		if got := values.Get("code_verifier"); got != "" {
+			t.Fatalf("code_verifier = %q, want omitted when pkce mode is never", got)
+		}
+	})
+	defer tokenServer.Close()
+
+	var opened string
+	bootstrap := oauthbootstrap.New(oauthbootstrap.Options{
+		Store:      store,
+		HTTPClient: tokenServer.Client(),
+		OpenBrowser: func(ctx context.Context, authURL string) error {
+			opened = authURL
+			return completeCallback(t, authURL, "auth-code", "")
+		},
+		CallbackTimeout: 2 * time.Second,
+	})
+
+	result, err := bootstrap.Run(context.Background(), oauthbootstrap.Request{
+		Package:  singleCredentialPackage(provider, "github_oauth", []string{"repo"}),
+		ClientID: "client-public",
+		PKCEMode: oauthbootstrap.PKCEModeNever,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.UsedPKCE {
+		t.Fatal("UsedPKCE = true, want false when pkce mode is never")
+	}
+	parsed, err := url.Parse(opened)
+	if err != nil {
+		t.Fatalf("Parse(auth url): %v", err)
+	}
+	if got := parsed.Query().Get("code_challenge"); got != "" {
+		t.Fatalf("code_challenge = %q, want omitted when pkce mode is never", got)
+	}
+}
+
 func TestBootstrapCredentialSelectionFailures(t *testing.T) {
 	t.Parallel()
 

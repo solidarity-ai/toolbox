@@ -14,6 +14,7 @@ import (
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -195,7 +196,11 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	resolved, err := ts.Resolve(context.Background(), resolver)
+	store, err := newAuthLocalSecretStore()
+	if err != nil {
+		return err
+	}
+	resolved, err := ts.ResolveWithConfig(context.Background(), resolver, toolset.Config{SecretStore: store})
 	if err != nil {
 		return err
 	}
@@ -246,6 +251,6 @@ func printUsage(f io.Writer) {
 	fmt.Fprintln(f, "usage:")
 	fmt.Fprintln(f, "  toolbox resolve [--file FILE] [--upgrade MODULE]")
 	fmt.Fprintln(f, "  toolbox versions [--file FILE] <module>")
-	fmt.Fprintln(f, "  toolbox auth [--tenant TENANT] [PACKAGE_DIR]")
+	fmt.Fprintln(f, "  toolbox auth [--tenant TENANT] [--pkce auto|always|never] [--print-auth-url] [PACKAGE_DIR]")
 	fmt.Fprintln(f, "  toolbox mcp serve [--file FILE]")
 }

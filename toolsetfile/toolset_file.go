@@ -319,6 +319,10 @@ func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
 // verifying, and rewriting the sibling lockfile only after all packages have
 // resolved successfully.
 func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) (toolset.ResolvedToolset, error) {
+	return f.ResolveWithConfig(ctx, resolver, toolset.Config{})
+}
+
+func (f *ToolsetFile) ResolveWithConfig(ctx context.Context, resolver *registry.Resolver, cfg toolset.Config) (toolset.ResolvedToolset, error) {
 	if f == nil {
 		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file: nil toolset file")
 	}
@@ -398,5 +402,5 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 		}
 	}
 
-	return builder.Resolve(toolset.Config{})
+	return builder.Resolve(cfg)
 }

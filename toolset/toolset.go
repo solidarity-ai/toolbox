@@ -232,13 +232,23 @@ func resolveToolTransportRules(tool tooldef.ResolvedTool) ([]transport.Rule, err
 		if err != nil {
 			return nil, fmt.Errorf("credential %q: %w", declared.Name, err)
 		}
+
+		var provider *tooldef.OAuth2ProviderConfig
+		if declared.Type == tooldef.CredentialTypeOAuth2 {
+			resolvedProvider, err := tooldef.ResolveOAuth2Provider(declared.Provider)
+			if err != nil {
+				return nil, fmt.Errorf("credential %q provider: %w", declared.Name, err)
+			}
+			provider = &resolvedProvider
+		}
+
 		rules = append(rules, transport.Rule{
-			Name:      declared.Name,
-			Type:      declared.Type,
-			Provider:  declared.Provider,
-			Scopes:    append([]string(nil), declared.Scopes...),
-			SecretKey: secretKey,
-			Inject:    declared.Inject,
+			Name:           declared.Name,
+			Type:           declared.Type,
+			OAuth2Provider: provider,
+			Scopes:         append([]string(nil), declared.Scopes...),
+			SecretKey:      secretKey,
+			Inject:         declared.Inject,
 		})
 	}
 	return rules, nil

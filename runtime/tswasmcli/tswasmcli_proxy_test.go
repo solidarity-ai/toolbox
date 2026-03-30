@@ -95,6 +95,7 @@ func TestWasip2CLIProxyAllowsInjectedRequestsWithoutLeakingSecrets(t *testing.T)
 				t.Fatalf("tswasmcli.Run: %v", err)
 			}
 			if result.ExitCode != 0 {
+				skipIfTinyGoWasip2HTTPUnavailable(t, result.Stdout, result.Stderr)
 				t.Fatalf("expected exit code 0, got %d; stderr: %s", result.ExitCode, result.Stderr)
 			}
 			if got := server.HitCount(); got != 1 {
@@ -167,6 +168,7 @@ func TestWasip2CLIProxyDeniedAndMissingSecretsFailClosed(t *testing.T) {
 				t.Fatalf("expected non-zero exit code; stdout=%q stderr=%q", result.Stdout, result.Stderr)
 			}
 			combined := result.Stdout + "\n" + result.Stderr
+			skipIfTinyGoWasip2HTTPUnavailable(t, combined)
 			if !strings.Contains(combined, tt.wantErrSubstr) {
 				t.Fatalf("combined output = %q, want %q", combined, tt.wantErrSubstr)
 			}

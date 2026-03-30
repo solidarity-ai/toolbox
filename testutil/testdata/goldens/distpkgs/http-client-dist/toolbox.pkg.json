@@ -1,10 +1,62 @@
 {
+  "module": "github.com/example/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "94d38e5d76460c8e433335e2a0fc31dc4a8420303b425cd9803a81fdb3ff4e8d",
+  "sha256": "adb9939c7ec1c7db976807340c0fec8e72f8210a5a259aa35a09a191aebd30b5",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },
+  "allowed_hosts": [
+    "127.0.0.1"
+  ],
+  "credentials": [
+    {
+      "name": "bearer_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": [
+          "127.0.0.1"
+        ],
+        "pathPrefix": "/bearer",
+        "method": "bearer_header"
+      }
+    },
+    {
+      "name": "basic_auth",
+      "type": "custom",
+      "inject": {
+        "hosts": [
+          "127.0.0.1"
+        ],
+        "pathPrefix": "/basic",
+        "method": "basic_auth"
+      }
+    },
+    {
+      "name": "header_key",
+      "type": "api_key",
+      "inject": {
+        "hosts": [
+          "127.0.0.1"
+        ],
+        "pathPrefix": "/header",
+        "method": "api_key_header",
+        "headerName": "X-API-Key"
+      }
+    },
+    {
+      "name": "query_key",
+      "type": "api_key",
+      "inject": {
+        "hosts": [
+          "127.0.0.1"
+        ],
+        "pathPrefix": "/query",
+        "method": "api_key_query",
+        "queryName": "api_key"
+      }
+    }
+  ],
   "tools": [
     {
       "entry_ts": "tools/http-client.fetch.ts",

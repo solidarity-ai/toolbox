@@ -628,7 +628,7 @@ func TestCompilePreservesModuleAndCredentials(t *testing.T) {
 		Credentials: []tooldef.PackageCredential{{
 			Name:     "github_token",
 			Type:     tooldef.CredentialTypeBearer,
-			Provider: "github",
+			Provider: tooldef.OAuth2ProviderRef{Name: "github"},
 			Inject: tooldef.CredentialInject{
 				Hosts:  []string{"api.github.com"},
 				Method: "bearer_header",
@@ -647,6 +647,197 @@ func TestCompilePreservesModuleAndCredentials(t *testing.T) {
 	}
 	if diff := cmp.Diff(dev.Credentials, got.Credentials); diff != "" {
 		t.Fatalf("Compile() credentials mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestOAuth2ProviderManifestValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("built-in provider survives compile and load round-trip", func(t *testing.T) {
+		t.Parallel()
+		dev, err := ParseDev([]byte(`{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "google_workspace",
+      "type": "oauth2",
+      "provider": "google",
+      "inject": { "hosts": ["www.googleapis.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts" }
+  ]
+}`))
+		if err != nil {
+			t.Fatalf("ParseDev() error: %v", err)
+		}
+		wantProvider := tooldef.OAuth2ProviderRef{Name: "google"}
+		if diff := cmp.Diff(wantProvider, dev.Credentials[0].Provider); diff != "" {
+			t.Fatalf("ParseDev() provider mismatch (-want +got):\n%s", diff)
+		}
+
+		compiled := Compile(dev)
+		raw, err := json.Marshal(compiled)
+		if err != nil {
+			t.Fatalf("json.Marshal(compiled) error: %v", err)
+		}
+		loaded, err := ParsePkg(raw)
+		if err != nil {
+			t.Fatalf("ParsePkg() error: %v", err)
+		}
+		if diff := cmp.Diff(wantProvider, loaded.Credentials[0].Provider); diff != "" {
+			t.Fatalf("ParsePkg() provider mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("explicit provider survives compile and load round-trip", func(t *testing.T) {
+		t.Parallel()
+		dev, err := ParseDev([]byte(`{
+  "module": "github.com/example/custom-oauth",
+  "name": "custom-oauth",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "custom_service",
+      "type": "oauth2",
+      "provider": {
+        "auth_url": "https://auth.custom.com/oauth/authorize",
+        "token_url": "https://auth.custom.com/oauth/token"
+      },
+      "inject": { "hosts": ["api.custom.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/things.list.ts" }
+  ]
+}`))
+		if err != nil {
+			t.Fatalf("ParseDev() error: %v", err)
+		}
+		wantProvider := explicitProviderRef("https://auth.custom.com/oauth/authorize", "https://auth.custom.com/oauth/token")
+		if diff := cmp.Diff(wantProvider, dev.Credentials[0].Provider); diff != "" {
+			t.Fatalf("ParseDev() provider mismatch (-want +got):\n%s", diff)
+		}
+
+		compiled := Compile(dev)
+		raw, err := json.Marshal(compiled)
+		if err != nil {
+			t.Fatalf("json.Marshal(compiled) error: %v", err)
+		}
+		loaded, err := ParsePkg(raw)
+		if err != nil {
+			t.Fatalf("ParsePkg() error: %v", err)
+		}
+		if diff := cmp.Diff(wantProvider, loaded.Credentials[0].Provider); diff != "" {
+			t.Fatalf("ParsePkg() provider mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	for _, tt := range []struct {
+		name    string
+		json    string
+		wantErr string
+	}{
+		{
+			name: "rejects missing oauth2 provider",
+			json: `{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "google_workspace",
+      "type": "oauth2",
+      "inject": { "hosts": ["www.googleapis.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts" }
+  ]
+}`,
+			wantErr: "credentials[0].provider: oauth2 provider is required",
+		},
+		{
+			name: "rejects unknown built-in provider",
+			json: `{
+  "module": "github.com/example/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "google_workspace",
+      "type": "oauth2",
+      "provider": "not-a-provider",
+      "inject": { "hosts": ["www.googleapis.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts" }
+  ]
+}`,
+			wantErr: `credentials[0].provider: unknown oauth2 provider "not-a-provider"`,
+		},
+		{
+			name: "rejects malformed explicit provider urls",
+			json: `{
+  "module": "github.com/example/custom-oauth",
+  "name": "custom-oauth",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "custom_service",
+      "type": "oauth2",
+      "provider": {
+        "auth_url": "http://auth.custom.com/oauth/authorize",
+        "token_url": "https://auth.custom.com/oauth/token"
+      },
+      "inject": { "hosts": ["api.custom.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/things.list.ts" }
+  ]
+}`,
+			wantErr: `credentials[0].provider: auth_url "http://auth.custom.com/oauth/authorize" must use https`,
+		},
+		{
+			name: "rejects explicit provider object on non oauth credential",
+			json: `{
+  "module": "github.com/example/custom-oauth",
+  "name": "custom-oauth",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "bearer",
+      "provider": {
+        "auth_url": "https://auth.custom.com/oauth/authorize",
+        "token_url": "https://auth.custom.com/oauth/token"
+      },
+      "inject": { "hosts": ["api.custom.com"], "method": "bearer_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/things.list.ts" }
+  ]
+}`,
+			wantErr: "credentials[0].provider explicit oauth2 endpoints are only allowed when type is oauth2",
+		},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseDev([]byte(tt.json))
+			if err == nil {
+				t.Fatalf("ParseDev() error = nil, want %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseDev() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -1053,7 +1244,7 @@ func TestToolCredentialOverrideSemantics(t *testing.T) {
 	if diff := cmp.Diff([]tooldef.PackageCredential{{
 		Name:     "google_calendar",
 		Type:     tooldef.CredentialTypeOAuth2,
-		Provider: "google",
+		Provider: tooldef.OAuth2ProviderRef{Name: "google"},
 		Inject: tooldef.CredentialInject{
 			Hosts:  []string{"www.googleapis.com"},
 			Method: "bearer_header",
@@ -1222,6 +1413,13 @@ func TestManifestToolCredentialValidation(t *testing.T) {
 			t.Fatalf("ValidateCompiled() error = %v, want nested tool credential field mention", err)
 		}
 	})
+}
+
+func explicitProviderRef(authURL, tokenURL string) tooldef.OAuth2ProviderRef {
+	return tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+		AuthURL:  authURL,
+		TokenURL: tokenURL,
+	}}
 }
 
 func boolPtr(v bool) *bool {

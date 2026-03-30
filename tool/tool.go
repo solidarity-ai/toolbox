@@ -2,7 +2,10 @@ package tool
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
+	"net/url"
+	"strings"
 
 	"github.com/microsoft/typescript-go/toolbox"
 )
@@ -53,14 +56,159 @@ type CredentialInject struct {
 	QueryName  string   `json:"queryName,omitempty"`
 }
 
+type OAuth2ProviderEndpoints struct {
+	AuthURL  string `json:"auth_url"`
+	TokenURL string `json:"token_url"`
+}
+
+type OAuth2ProviderRef struct {
+	Name      string
+	Endpoints *OAuth2ProviderEndpoints
+}
+
+func (r OAuth2ProviderRef) IsZero() bool {
+	return strings.TrimSpace(r.Name) == "" && r.Endpoints == nil
+}
+
+func (r OAuth2ProviderRef) BuiltInName() string {
+	return strings.TrimSpace(r.Name)
+}
+
+func (r OAuth2ProviderRef) ExplicitEndpoints() (OAuth2ProviderEndpoints, bool) {
+	if r.Endpoints == nil {
+		return OAuth2ProviderEndpoints{}, false
+	}
+	return *r.Endpoints, true
+}
+
+func (r OAuth2ProviderRef) MarshalJSON() ([]byte, error) {
+	if endpoints, ok := r.ExplicitEndpoints(); ok {
+		return json.Marshal(endpoints)
+	}
+	if name := r.BuiltInName(); name != "" {
+		return json.Marshal(name)
+	}
+	return json.Marshal(nil)
+}
+
+func (r *OAuth2ProviderRef) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*r = OAuth2ProviderRef{}
+		return nil
+	}
+
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var name string
+		if err := json.Unmarshal(data, &name); err != nil {
+			return err
+		}
+		*r = OAuth2ProviderRef{Name: name}
+		return nil
+	}
+
+	var endpoints OAuth2ProviderEndpoints
+	if err := json.Unmarshal(data, &endpoints); err != nil {
+		return fmt.Errorf("oauth2 provider must be a built-in name or {auth_url, token_url} object: %w", err)
+	}
+	*r = OAuth2ProviderRef{Endpoints: &endpoints}
+	return nil
+}
+
+type OAuth2ProviderConfig struct {
+	Name     string `json:"name,omitempty"`
+	AuthURL  string `json:"auth_url"`
+	TokenURL string `json:"token_url"`
+}
+
+var knownOAuth2Providers = map[string]OAuth2ProviderConfig{
+	"google": {
+		Name:     "google",
+		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL: "https://oauth2.googleapis.com/token",
+	},
+	"slack": {
+		Name:     "slack",
+		AuthURL:  "https://slack.com/oauth/v2/authorize",
+		TokenURL: "https://slack.com/api/oauth.v2.access",
+	},
+	"microsoft": {
+		Name:     "microsoft",
+		AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+		TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+	},
+}
+
+func KnownOAuth2Provider(name string) (OAuth2ProviderConfig, bool) {
+	provider, ok := knownOAuth2Providers[strings.TrimSpace(name)]
+	return provider, ok
+}
+
+func ResolveOAuth2Provider(ref OAuth2ProviderRef) (OAuth2ProviderConfig, error) {
+	if endpoints, ok := ref.ExplicitEndpoints(); ok {
+		config := OAuth2ProviderConfig{AuthURL: strings.TrimSpace(endpoints.AuthURL), TokenURL: strings.TrimSpace(endpoints.TokenURL)}
+		if err := validateOAuth2ProviderConfig(config); err != nil {
+			return OAuth2ProviderConfig{}, err
+		}
+		return config, nil
+	}
+
+	name := ref.BuiltInName()
+	if name == "" {
+		return OAuth2ProviderConfig{}, fmt.Errorf("oauth2 provider is required")
+	}
+	provider, ok := KnownOAuth2Provider(name)
+	if !ok {
+		return OAuth2ProviderConfig{}, fmt.Errorf("unknown oauth2 provider %q", name)
+	}
+	if err := validateOAuth2ProviderConfig(provider); err != nil {
+		return OAuth2ProviderConfig{}, fmt.Errorf("oauth2 provider %q is invalid: %w", name, err)
+	}
+	return provider, nil
+}
+
+func validateOAuth2ProviderConfig(config OAuth2ProviderConfig) error {
+	authURL := strings.TrimSpace(config.AuthURL)
+	if authURL == "" {
+		return fmt.Errorf("auth_url is required")
+	}
+	if err := validateAbsoluteHTTPSURL("auth_url", authURL); err != nil {
+		return err
+	}
+
+	tokenURL := strings.TrimSpace(config.TokenURL)
+	if tokenURL == "" {
+		return fmt.Errorf("token_url is required")
+	}
+	if err := validateAbsoluteHTTPSURL("token_url", tokenURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAbsoluteHTTPSURL(field, raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s %q is invalid: %w", field, raw, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("%s %q must be an absolute url", field, raw)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("%s %q must use https", field, raw)
+	}
+	return nil
+}
+
 type PackageCredential struct {
-	Name      string           `json:"name"`
-	Type      CredentialType   `json:"type"`
-	Provider  string           `json:"provider,omitempty"`
-	Scopes    []string         `json:"scopes,omitempty"`
-	Inject    CredentialInject `json:"inject"`
-	Strategy  string           `json:"strategy,omitempty"`
-	AuthHosts []string         `json:"authHosts,omitempty"`
+	Name      string            `json:"name"`
+	Type      CredentialType    `json:"type"`
+	Provider  OAuth2ProviderRef `json:"provider,omitempty"`
+	Scopes    []string          `json:"scopes,omitempty"`
+	Inject    CredentialInject  `json:"inject"`
+	Strategy  string            `json:"strategy,omitempty"`
+	AuthHosts []string          `json:"authHosts,omitempty"`
 }
 
 // ResourceParam describes one inferred resource parameter and its canonical binding name.

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -45,8 +46,9 @@ func TestResolveToolAuthUsesReservedAccessTokenFamilyKeyForOAuth2(t *testing.T) 
 			Runtime: tooldef.RuntimeTypeScriptSandbox,
 		},
 		EffectiveCredentials: []tooldef.PackageCredential{{
-			Name: "github_oauth",
-			Type: tooldef.CredentialTypeOAuth2,
+			Name:     "github_oauth",
+			Type:     tooldef.CredentialTypeOAuth2,
+			Provider: tooldef.OAuth2ProviderRef{Name: "google"},
 			Inject: tooldef.CredentialInject{
 				Hosts:  []string{"api.github.com"},
 				Method: "bearer_header",
@@ -67,6 +69,146 @@ func TestResolveToolAuthUsesReservedAccessTokenFamilyKeyForOAuth2(t *testing.T) 
 	}
 	if rules[0].SecretKey != "github.com/example/github-issues/github_oauth/access_token" {
 		t.Fatalf("secret key = %q, want oauth2 access token family key", rules[0].SecretKey)
+	}
+	if rules[0].OAuth2Provider == nil {
+		t.Fatal("expected oauth2 provider config on runtime rule")
+	}
+	if diff := cmp.Diff(tooldef.OAuth2ProviderConfig{
+		Name:     "google",
+		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL: "https://oauth2.googleapis.com/token",
+	}, *rules[0].OAuth2Provider); diff != "" {
+		t.Fatalf("oauth2 provider mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestResolveToolAuthResolvesOAuth2ProvidersDeterministically(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		provider tooldef.OAuth2ProviderRef
+		want     tooldef.OAuth2ProviderConfig
+	}{
+		{
+			name:     "google built-in",
+			provider: tooldef.OAuth2ProviderRef{Name: "google"},
+			want: tooldef.OAuth2ProviderConfig{
+				Name:     "google",
+				AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+				TokenURL: "https://oauth2.googleapis.com/token",
+			},
+		},
+		{
+			name:     "slack built-in",
+			provider: tooldef.OAuth2ProviderRef{Name: "slack"},
+			want: tooldef.OAuth2ProviderConfig{
+				Name:     "slack",
+				AuthURL:  "https://slack.com/oauth/v2/authorize",
+				TokenURL: "https://slack.com/api/oauth.v2.access",
+			},
+		},
+		{
+			name:     "microsoft built-in",
+			provider: tooldef.OAuth2ProviderRef{Name: "microsoft"},
+			want: tooldef.OAuth2ProviderConfig{
+				Name:     "microsoft",
+				AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+				TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+			},
+		},
+		{
+			name: "explicit endpoints",
+			provider: tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+				AuthURL:  "https://auth.custom.com/oauth/authorize",
+				TokenURL: "https://auth.custom.com/oauth/token",
+			}},
+			want: tooldef.OAuth2ProviderConfig{
+				AuthURL:  "https://auth.custom.com/oauth/authorize",
+				TokenURL: "https://auth.custom.com/oauth/token",
+			},
+		},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resolved, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+				Name:        "oauth.tool",
+				Description: "OAuth tool",
+				Package:     &tooldef.Package{Module: "github.com/example/oauth-tool", Name: "oauth-tool", Runtime: tooldef.RuntimeTypeScriptSandbox},
+				EffectiveCredentials: []tooldef.PackageCredential{{
+					Name:     "oauth_credential",
+					Type:     tooldef.CredentialTypeOAuth2,
+					Provider: tt.provider,
+					Inject:   tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
+				}},
+			}}, toolset.Config{})
+			if err != nil {
+				t.Fatalf("ResolveTools: %v", err)
+			}
+			policy, ok := resolved.ToolTransportPolicy("oauth.tool")
+			if !ok {
+				t.Fatal("expected runtime transport policy for tool")
+			}
+			rules := policy.Rules()
+			if len(rules) != 1 || rules[0].OAuth2Provider == nil {
+				t.Fatalf("rules = %+v, want one oauth2 rule with provider config", rules)
+			}
+			if diff := cmp.Diff(tt.want, *rules[0].OAuth2Provider); diff != "" {
+				t.Fatalf("oauth2 provider mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestResolveToolAuthFailsClosedForInvalidOAuth2ProviderConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		provider tooldef.OAuth2ProviderRef
+		wantErr  string
+	}{
+		{
+			name:     "unknown built-in provider",
+			provider: tooldef.OAuth2ProviderRef{Name: "unknown-provider"},
+			wantErr:  `credential "oauth_credential" provider: unknown oauth2 provider "unknown-provider"`,
+		},
+		{
+			name:     "missing provider",
+			provider: tooldef.OAuth2ProviderRef{},
+			wantErr:  `credential "oauth_credential" provider: oauth2 provider is required`,
+		},
+		{
+			name: "malformed explicit provider",
+			provider: tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+				AuthURL:  "https://auth.custom.com/oauth/authorize",
+				TokenURL: "http://auth.custom.com/oauth/token",
+			}},
+			wantErr: `credential "oauth_credential" provider: token_url "http://auth.custom.com/oauth/token" must use https`,
+		},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+				Name:        "oauth.tool",
+				Description: "OAuth tool",
+				Package:     &tooldef.Package{Module: "github.com/example/oauth-tool", Name: "oauth-tool", Runtime: tooldef.RuntimeTypeScriptSandbox},
+				EffectiveCredentials: []tooldef.PackageCredential{{
+					Name:     "oauth_credential",
+					Type:     tooldef.CredentialTypeOAuth2,
+					Provider: tt.provider,
+					Inject:   tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
+				}},
+			}}, toolset.Config{})
+			if err == nil {
+				t.Fatalf("ResolveTools() error = nil, want %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ResolveTools() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

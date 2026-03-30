@@ -19,12 +19,12 @@ const exactHostBonus = 1000
 // Rule is the transport-owned runtime rule for simple credential injection.
 // It contains only runtime metadata needed for matching and request mutation.
 type Rule struct {
-	Name      string
-	SecretKey string
-	Type      tooldef.CredentialType
-	Provider  string
-	Scopes    []string
-	Inject    tooldef.CredentialInject
+	Name           string
+	SecretKey      string
+	Type           tooldef.CredentialType
+	OAuth2Provider *tooldef.OAuth2ProviderConfig
+	Scopes         []string
+	Inject         tooldef.CredentialInject
 
 	hostMatchers []hostMatcher
 	pathPrefix   string
@@ -80,6 +80,10 @@ func (i *Injector) Rules() []Rule {
 	for idx := range out {
 		out[idx].Scopes = append([]string(nil), out[idx].Scopes...)
 		out[idx].Inject.Hosts = append([]string(nil), out[idx].Inject.Hosts...)
+		if out[idx].OAuth2Provider != nil {
+			provider := *out[idx].OAuth2Provider
+			out[idx].OAuth2Provider = &provider
+		}
 		out[idx].hostMatchers = nil
 	}
 	return out

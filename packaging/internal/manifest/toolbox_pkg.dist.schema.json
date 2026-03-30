@@ -80,8 +80,30 @@
             ]
           },
           "provider": {
-            "type": "string",
-            "minLength": 1
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "auth_url",
+                  "token_url"
+                ],
+                "properties": {
+                  "auth_url": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "token_url": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
           },
           "scopes": {
             "type": "array",
@@ -208,8 +230,30 @@
                   ]
                 },
                 "provider": {
-                  "type": "string",
-                  "minLength": 1
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "auth_url",
+                        "token_url"
+                      ],
+                      "properties": {
+                        "auth_url": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "token_url": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  ]
                 },
                 "scopes": {
                   "type": "array",

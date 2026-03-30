@@ -171,7 +171,7 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 	if err := json.Unmarshal(data, &instance); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
-	if err := resolvedToolboxPkgDevSchema.Validate(instance); err != nil {
+	if err := resolvedToolboxPkgDistSchema.Validate(instance); err != nil {
 		return tooldef.Package{}, fmt.Errorf("validate pkg manifest: %w", err)
 	}
 
@@ -335,6 +335,10 @@ func validateCredentialList(field string, module tooldef.ModulePath, credentials
 			return fmt.Errorf("%s.type %q is invalid", prefix, cred.Type)
 		}
 
+		if err := validateCredentialProvider(prefix, cred); err != nil {
+			return err
+		}
+
 		method := strings.TrimSpace(cred.Inject.Method)
 		if method == "" {
 			method = "bearer_header"
@@ -353,6 +357,20 @@ func validateCredentialList(field string, module tooldef.ModulePath, credentials
 			if strings.TrimSpace(host) == "" {
 				return fmt.Errorf("%s.inject.hosts[%d] must not be empty", prefix, j)
 			}
+		}
+	}
+	return nil
+}
+
+func validateCredentialProvider(prefix string, cred tooldef.PackageCredential) error {
+	switch cred.Type {
+	case tooldef.CredentialTypeOAuth2:
+		if _, err := tooldef.ResolveOAuth2Provider(cred.Provider); err != nil {
+			return fmt.Errorf("%s.provider: %w", prefix, err)
+		}
+	case tooldef.CredentialTypeAPIKey, tooldef.CredentialTypeBearer, tooldef.CredentialTypeCustom:
+		if _, ok := cred.Provider.ExplicitEndpoints(); ok {
+			return fmt.Errorf("%s.provider explicit oauth2 endpoints are only allowed when type is oauth2", prefix)
 		}
 	}
 	return nil

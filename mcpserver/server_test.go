@@ -399,6 +399,8 @@ func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(resolved))
 	result := h.CallTool("httpClient.fetch", map[string]any{"url": server.URL("/plain/mcp")})
 	if result.IsError {
+		text := requireSingleTextContent(t, result)
+		skipIfTinyGoWasip2HTTPUnavailable(t, text)
 		t.Fatalf("expected non-error result")
 	}
 

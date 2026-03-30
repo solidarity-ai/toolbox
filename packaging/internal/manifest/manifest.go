@@ -50,6 +50,7 @@ type DevManifest struct {
 	Runtime                   tooldef.ToolRuntime         `json:"runtime"`
 	AdditionalTypeScriptGlobs []string                    `json:"additionalTypeScriptGlobs"`
 	Executables               map[string]string           `json:"executables"`
+	AllowedHosts              []string                    `json:"allowed_hosts,omitempty"`
 	Credentials               []tooldef.PackageCredential `json:"credentials,omitempty"`
 	Tools                     []DevManifestTool           `json:"tools"`
 }
@@ -61,10 +62,12 @@ type DevManifestToolResource struct {
 }
 
 type DevManifestTool struct {
-	EntryTS    string                   `json:"entry_ts"`
-	Idempotent *bool                    `json:"idempotent"`
-	Effect     *tooldef.Effect          `json:"effect"`
-	Resource   *DevManifestToolResource `json:"resource,omitempty"`
+	EntryTS            string                   `json:"entry_ts"`
+	Idempotent         *bool                    `json:"idempotent"`
+	Effect             *tooldef.Effect          `json:"effect"`
+	Resource           *DevManifestToolResource `json:"resource,omitempty"`
+	AllowedHosts       []string                 `json:"allowed_hosts,omitempty"`
+	AllowedHostsExtend []string                 `json:"allowed_hosts_extend,omitempty"`
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -93,12 +96,15 @@ func ParseDev(data []byte) (DevManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
 	}
-	if err := validatePackageMetadata(manifest.Module, manifest.Credentials); err != nil {
+	if err := validatePackageMetadata(manifest.Module, manifest.AllowedHosts, manifest.Credentials); err != nil {
 		return DevManifest{}, fmt.Errorf("validate dev manifest metadata: %w", err)
 	}
-	for _, tool := range manifest.Tools {
+	for i, tool := range manifest.Tools {
 		if err := validateEntryName(tool.EntryTS); err != nil {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
+		}
+		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+			return DevManifest{}, fmt.Errorf("validate dev manifest metadata: %w", err)
 		}
 	}
 	return manifest, nil
@@ -118,8 +124,13 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
-	if err := validatePackageMetadata(pkg.Module, pkg.Credentials); err != nil {
+	if err := validatePackageMetadata(pkg.Module, pkg.AllowedHosts, pkg.Credentials); err != nil {
 		return tooldef.Package{}, fmt.Errorf("validate pkg manifest metadata: %w", err)
+	}
+	for i, tool := range pkg.Tools {
+		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+			return tooldef.Package{}, fmt.Errorf("validate pkg manifest metadata: %w", err)
+		}
 	}
 	return pkg, nil
 }
@@ -133,6 +144,7 @@ func Compile(dev DevManifest) tooldef.Package {
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
 		Executables:               dev.Executables,
+		AllowedHosts:              append([]string(nil), dev.AllowedHosts...),
 		Credentials:               append([]tooldef.PackageCredential(nil), dev.Credentials...),
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
 	}
@@ -157,10 +169,12 @@ func Compile(dev DevManifest) tooldef.Package {
 		}
 
 		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:        tool.EntryTS,
-			Idempotent:     tool.Idempotent,
-			Effect:         effect,
-			ResourceParams: resourceParams,
+			EntryTS:            tool.EntryTS,
+			Idempotent:         tool.Idempotent,
+			Effect:             effect,
+			ResourceParams:     resourceParams,
+			AllowedHosts:       append([]string(nil), tool.AllowedHosts...),
+			AllowedHostsExtend: append([]string(nil), tool.AllowedHostsExtend...),
 		}
 	}
 	return pkg
@@ -170,8 +184,13 @@ func Compile(dev DevManifest) tooldef.Package {
 // and dist (strict) schemas. In dev mode, dist violations are returned as
 // warnings. In dist mode, they are errors.
 func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, error) {
-	if err := validatePackageMetadata(pkg.Module, pkg.Credentials); err != nil {
+	if err := validatePackageMetadata(pkg.Module, pkg.AllowedHosts, pkg.Credentials); err != nil {
 		return nil, fmt.Errorf("validate compiled package metadata: %w", err)
+	}
+	for i, tool := range pkg.Tools {
+		if err := validateToolAllowedHosts(fmt.Sprintf("tools[%d]", i), tool.AllowedHosts, tool.AllowedHostsExtend); err != nil {
+			return nil, fmt.Errorf("validate compiled package metadata: %w", err)
+		}
 	}
 
 	raw, err := json.Marshal(pkg)
@@ -197,11 +216,14 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 	return warnings, nil
 }
 
-func validatePackageMetadata(module tooldef.ModulePath, credentials []tooldef.PackageCredential) error {
+func validatePackageMetadata(module tooldef.ModulePath, allowedHosts []string, credentials []tooldef.PackageCredential) error {
 	if module != "" {
 		if _, err := tooldef.ParseModulePath(module.String()); err != nil {
 			return fmt.Errorf("invalid module %q: %w", module, err)
 		}
+	}
+	if err := validateHostList("allowed_hosts", allowedHosts); err != nil {
+		return err
 	}
 	if len(credentials) == 0 {
 		return nil
@@ -236,6 +258,28 @@ func validatePackageMetadata(module tooldef.ModulePath, credentials []tooldef.Pa
 			if strings.TrimSpace(host) == "" {
 				return fmt.Errorf("%s.inject.hosts[%d] must not be empty", prefix, j)
 			}
+		}
+	}
+	return nil
+}
+
+func validateToolAllowedHosts(prefix string, allowedHosts []string, allowedHostsExtend []string) error {
+	if err := validateHostList(prefix+".allowed_hosts", allowedHosts); err != nil {
+		return err
+	}
+	if err := validateHostList(prefix+".allowed_hosts_extend", allowedHostsExtend); err != nil {
+		return err
+	}
+	if len(allowedHosts) > 0 && len(allowedHostsExtend) > 0 {
+		return fmt.Errorf("%s must not declare both allowed_hosts and allowed_hosts_extend", prefix)
+	}
+	return nil
+}
+
+func validateHostList(field string, hosts []string) error {
+	for i, host := range hosts {
+		if strings.TrimSpace(host) == "" {
+			return fmt.Errorf("%s[%d] must not be empty", field, i)
 		}
 	}
 	return nil

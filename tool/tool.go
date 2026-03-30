@@ -14,6 +14,7 @@ type Package struct {
 	SHA256                    string              `json:"sha256,omitempty"`
 	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs,omitempty"`
 	Executables               map[string]string   `json:"executables,omitempty"`
+	AllowedHosts              []string            `json:"allowed_hosts,omitempty"`
 	Credentials               []PackageCredential `json:"credentials,omitempty"`
 	Tools                     []PackageTool       `json:"tools"`
 }
@@ -66,13 +67,15 @@ type ResourceParam struct {
 }
 
 type PackageTool struct {
-	EntryTS        string                 `json:"entry_ts"`
-	Idempotent     *bool                  `json:"idempotent,omitempty"`
-	Effect         Effect                 `json:"effect,omitempty"`
-	Description    string                 `json:"description,omitempty"`
-	ParamsSchema   map[string]any         `json:"paramsSchema,omitempty"`
-	Sig            *toolbox.FuncSignature `json:"-"`
-	ResourceParams []ResourceParam        `json:"resourceParams,omitempty"`
+	EntryTS            string                 `json:"entry_ts"`
+	Idempotent         *bool                  `json:"idempotent,omitempty"`
+	Effect             Effect                 `json:"effect,omitempty"`
+	Description        string                 `json:"description,omitempty"`
+	ParamsSchema       map[string]any         `json:"paramsSchema,omitempty"`
+	Sig                *toolbox.FuncSignature `json:"-"`
+	ResourceParams     []ResourceParam        `json:"resourceParams,omitempty"`
+	AllowedHosts       []string               `json:"allowed_hosts,omitempty"`
+	AllowedHostsExtend []string               `json:"allowed_hosts_extend,omitempty"`
 }
 
 // ResolvedTool is the smallest useful selected tool shape for the current
@@ -85,6 +88,7 @@ type ResolvedTool struct {
 	Effect         Effect
 	Idempotent     *bool
 	ResourceParams []ResourceParam
+	AllowedHosts   []string
 	Package        *Package
 	TS             *TSToolDef
 	TSWasm         *TSWasmToolDef

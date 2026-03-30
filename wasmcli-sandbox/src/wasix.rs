@@ -99,7 +99,7 @@ fn load_or_compile(
 
 fn cache_path_for(module_hash: &ModuleHash) -> PathBuf {
     let cache_dir = env::temp_dir().join("toolbox-wasm-cache");
-    cache_dir.join(format!("{}.compiled", module_hash))
+    cache_dir.join(format!("{module_hash}.compiled"))
 }
 
 fn try_load_cached(engine: &wasmer::Engine, cache_path: &PathBuf) -> Option<Module> {

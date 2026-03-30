@@ -83,6 +83,7 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			Effect:         pkgTool.Effect,
 			Idempotent:     pkgTool.Idempotent,
 			ResourceParams: pkgTool.ResourceParams,
+			AllowedHosts:   resolveAllowedHosts(p.Package.AllowedHosts, pkgTool.AllowedHosts, pkgTool.AllowedHostsExtend),
 			Package:        &p.Package,
 		}
 		resolved.SetParamsSchema(pkgTool.ParamsSchema)
@@ -188,4 +189,18 @@ func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 			}
 		}
 	}
+}
+
+func resolveAllowedHosts(packageAllowedHosts []string, toolAllowedHosts []string, toolAllowedHostsExtend []string) []string {
+	combined := make([]string, 0, len(packageAllowedHosts)+len(toolAllowedHosts)+len(toolAllowedHostsExtend))
+	if len(toolAllowedHosts) > 0 {
+		combined = append(combined, toolAllowedHosts...)
+	} else {
+		combined = append(combined, packageAllowedHosts...)
+		combined = append(combined, toolAllowedHostsExtend...)
+	}
+	if len(combined) == 0 {
+		return nil
+	}
+	return append([]string(nil), combined...)
 }

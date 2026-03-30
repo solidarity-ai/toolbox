@@ -755,6 +755,142 @@ func TestCredentialMetadataValidation(t *testing.T) {
 	})
 }
 
+func TestManifestAllowedHostsMetadata(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parse dev manifest preserves package and tool allowlist fields", func(t *testing.T) {
+		t.Parallel()
+		got, err := ParseDev([]byte(`{
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": ["*.googleapis.com", "oauth2.googleapis.com"],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts" },
+    { "entry_ts": "tools/admin.list.ts", "allowed_hosts": ["admin.googleapis.com"] },
+    { "entry_ts": "tools/notifications.send.ts", "allowed_hosts_extend": ["hooks.slack.com"] }
+  ]
+}`))
+		if err != nil {
+			t.Fatalf("ParseDev() error: %v", err)
+		}
+		if diff := cmp.Diff([]string{"*.googleapis.com", "oauth2.googleapis.com"}, got.AllowedHosts); diff != "" {
+			t.Fatalf("package allowed hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"admin.googleapis.com"}, got.Tools[1].AllowedHosts); diff != "" {
+			t.Fatalf("tool allowed_hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"hooks.slack.com"}, got.Tools[2].AllowedHostsExtend); diff != "" {
+			t.Fatalf("tool allowed_hosts_extend mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("compile preserves allowlist metadata", func(t *testing.T) {
+		t.Parallel()
+		pkg := Compile(DevManifest{
+			Name:         "google-workspace",
+			Runtime:      tooldef.RuntimeTypeScriptSandbox,
+			AllowedHosts: []string{"*.googleapis.com", "oauth2.googleapis.com"},
+			Tools: []DevManifestTool{
+				{EntryTS: "tools/users.list.ts"},
+				{EntryTS: "tools/admin.list.ts", AllowedHosts: []string{"admin.googleapis.com"}},
+				{EntryTS: "tools/notifications.send.ts", AllowedHostsExtend: []string{"hooks.slack.com"}},
+			},
+		})
+		if diff := cmp.Diff([]string{"*.googleapis.com", "oauth2.googleapis.com"}, pkg.AllowedHosts); diff != "" {
+			t.Fatalf("package allowed hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"admin.googleapis.com"}, pkg.Tools[1].AllowedHosts); diff != "" {
+			t.Fatalf("tool allowed_hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"hooks.slack.com"}, pkg.Tools[2].AllowedHostsExtend); diff != "" {
+			t.Fatalf("tool allowed_hosts_extend mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("parse compiled package preserves allowlist metadata", func(t *testing.T) {
+		t.Parallel()
+		got, err := ParsePkg([]byte(`{
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": ["*.googleapis.com"],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "effect": "readOnly" },
+    { "entry_ts": "tools/admin.list.ts", "effect": "readOnly", "allowed_hosts": ["admin.googleapis.com"] },
+    { "entry_ts": "tools/notifications.send.ts", "effect": "irreversible", "allowed_hosts_extend": ["hooks.slack.com"] }
+  ]
+}`))
+		if err != nil {
+			t.Fatalf("ParsePkg() error: %v", err)
+		}
+		if diff := cmp.Diff([]string{"*.googleapis.com"}, got.AllowedHosts); diff != "" {
+			t.Fatalf("package allowed hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"admin.googleapis.com"}, got.Tools[1].AllowedHosts); diff != "" {
+			t.Fatalf("tool allowed_hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]string{"hooks.slack.com"}, got.Tools[2].AllowedHostsExtend); diff != "" {
+			t.Fatalf("tool allowed_hosts_extend mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+func TestManifestAllowedHostsValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejects empty package host entry", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": [""],
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "allowed_hosts") {
+			t.Fatalf("ParseDev() error = %v, want allowed_hosts field mention", err)
+		}
+	})
+
+	t.Run("rejects tool replace plus extend combination", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/calc.add.ts",
+      "allowed_hosts": ["api.example.com"],
+      "allowed_hosts_extend": ["hooks.example.com"]
+    }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "allowed_hosts") || !strings.Contains(err.Error(), "allowed_hosts_extend") {
+			t.Fatalf("ParseDev() error = %v, want both allowlist fields mentioned", err)
+		}
+	})
+
+	t.Run("schema rejects wrong allowed_hosts type", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": "api.example.com",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "allowed_hosts") {
+			t.Fatalf("ParseDev() error = %v, want allowed_hosts field mention", err)
+		}
+	})
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

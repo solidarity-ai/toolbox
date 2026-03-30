@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/solidarity-ai/toolbox/packaging"
@@ -21,6 +22,7 @@ type ResolvedToolset struct {
 	bindings     map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
 	hiddenParams map[string]map[string]bool            // tool name -> set of hidden param names
 	auth         map[string]ResolvedAuth               // tool name -> runtime-only auth context
+	allowedHosts map[string][]string                   // tool name -> effective runtime-only host allowlist
 	context      map[string]any
 	celEnv       *cel.Env
 }
@@ -134,6 +136,7 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 	allCompiled := make(map[string]map[string]compiledBinding, len(toolBindings))
 	allHidden := make(map[string]map[string]bool)
 	allAuth := make(map[string]ResolvedAuth)
+	allAllowedHosts := make(map[string][]string)
 
 	for _, tool := range tools {
 		// Start with explicit per-tool bindings
@@ -178,6 +181,9 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 		if auth := resolveToolAuth(tool, cfg); len(auth.Credentials) > 0 {
 			allAuth[tool.Name] = auth
 		}
+		if allowedHosts := resolveToolAllowedHosts(tool); len(allowedHosts) > 0 {
+			allAllowedHosts[tool.Name] = allowedHosts
+		}
 	}
 
 	out := make([]tooldef.ResolvedTool, len(tools))
@@ -187,6 +193,7 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 		bindings:     allCompiled,
 		hiddenParams: allHidden,
 		auth:         allAuth,
+		allowedHosts: allAllowedHosts,
 		context:      cfg.Context,
 		celEnv:       env,
 	}, nil
@@ -210,6 +217,33 @@ func resolveToolAuth(tool tooldef.ResolvedTool, cfg Config) ResolvedAuth {
 	return ResolvedAuth{Store: cfg.SecretStore, Credentials: credentials}
 }
 
+func resolveToolAllowedHosts(tool tooldef.ResolvedTool) []string {
+	if len(tool.AllowedHosts) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(tool.AllowedHosts))
+	resolved := make([]string, 0, len(tool.AllowedHosts))
+	for _, host := range tool.AllowedHosts {
+		normalized := normalizeAllowedHost(host)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		resolved = append(resolved, normalized)
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
+func normalizeAllowedHost(host string) string {
+	return strings.ToLower(strings.TrimSpace(host))
+}
+
 // ResolveTools resolves a pre-built list of tools with the given config.
 // This is useful for testing with synthetic tool definitions.
 func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
@@ -223,7 +257,13 @@ func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, er
 func NewResolvedToolset(tools []tooldef.ResolvedTool) ResolvedToolset {
 	out := make([]tooldef.ResolvedTool, len(tools))
 	copy(out, tools)
-	return ResolvedToolset{tools: out}
+	allowedHosts := make(map[string][]string)
+	for _, tool := range out {
+		if hosts := resolveToolAllowedHosts(tool); len(hosts) > 0 {
+			allowedHosts[tool.Name] = hosts
+		}
+	}
+	return ResolvedToolset{tools: out, allowedHosts: allowedHosts}
 }
 
 // Tools returns a shallow copy of the visible tools for this resolved toolset.
@@ -237,4 +277,13 @@ func (r ResolvedToolset) Tools() []tooldef.ResolvedTool {
 func (r ResolvedToolset) ToolAuth(toolName string) (ResolvedAuth, bool) {
 	auth, ok := r.auth[toolName]
 	return auth, ok
+}
+
+// ToolAllowedHosts returns the effective runtime-only host allowlist for a resolved tool.
+func (r ResolvedToolset) ToolAllowedHosts(toolName string) ([]string, bool) {
+	allowedHosts, ok := r.allowedHosts[toolName]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), allowedHosts...), true
 }

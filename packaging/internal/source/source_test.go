@@ -352,6 +352,81 @@ func TestResolvedToolsPreservePackageIdentity(t *testing.T) {
 	}
 }
 
+func TestResolvedToolsAllowedHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		manifest  string
+		wantHosts map[string][]string
+	}{
+		{
+			name: "inherit replace extend and deny by default",
+			manifest: `{
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": ["*.googleapis.com", "oauth2.googleapis.com"],
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "effect": "readOnly" },
+    { "entry_ts": "tools/admin.list.ts", "effect": "readOnly", "allowed_hosts": ["admin.googleapis.com"] },
+    { "entry_ts": "tools/notifications.send.ts", "effect": "irreversible", "allowed_hosts_extend": ["hooks.slack.com"] }
+  ]
+}`,
+			wantHosts: map[string][]string{
+				"users.list":         {"*.googleapis.com", "oauth2.googleapis.com"},
+				"admin.list":         {"admin.googleapis.com"},
+				"notifications.send": {"*.googleapis.com", "oauth2.googleapis.com", "hooks.slack.com"},
+			},
+		},
+		{
+			name: "tool override works without package allowlist and missing policy denies by default",
+			manifest: `{
+  "name": "webhooks",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/status.get.ts", "effect": "readOnly" },
+    { "entry_ts": "tools/hooks.send.ts", "effect": "irreversible", "allowed_hosts": ["hooks.slack.com"] },
+    { "entry_ts": "tools/hooks.extend.ts", "effect": "irreversible", "allowed_hosts_extend": ["api.example.com"] }
+  ]
+}`,
+			wantHosts: map[string][]string{
+				"status.get":   nil,
+				"hooks.send":   {"hooks.slack.com"},
+				"hooks.extend": {"api.example.com"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), tt.manifest)
+			dev, err := manifest.ParseDev([]byte(tt.manifest))
+			if err != nil {
+				t.Fatalf("ParseDev() error: %v", err)
+			}
+			for _, tool := range dev.Tools {
+				mustWriteFile(t, filepath.Join(dir, tool.EntryTS), "export default function() {}")
+			}
+
+			loaded, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir() error: %v", err)
+			}
+			resolved := loaded.ResolvedTools()
+			gotHosts := make(map[string][]string, len(resolved))
+			for _, tool := range resolved {
+				gotHosts[tool.Name] = tool.AllowedHosts
+			}
+			if diff := cmp.Diff(tt.wantHosts, gotHosts); diff != "" {
+				t.Fatalf("ResolvedTools() allowed hosts mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

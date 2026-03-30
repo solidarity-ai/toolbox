@@ -38,6 +38,14 @@
         "minLength": 1
       }
     },
+    "allowed_hosts": {
+      "type": "array",
+      "description": "Default outbound host allowlist for all tools in the package.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "credentials": {
       "type": "array",
       "description": "Declarative credential metadata only. Live secret values never appear here.",
@@ -131,6 +139,22 @@
           "paramsSchema": {
             "type": "object",
             "description": "JSON Schema for the tool's input parameters."
+          },
+          "allowed_hosts": {
+            "type": "array",
+            "description": "Tool-specific outbound host allowlist that replaces the package default.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "allowed_hosts_extend": {
+            "type": "array",
+            "description": "Additional outbound hosts appended to the inherited package allowlist for this tool.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }

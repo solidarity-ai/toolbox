@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{Context as _, Result};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -204,7 +206,7 @@ pub(crate) struct Conn {
 impl Conn {
     pub(crate) fn new(path: &str) -> Result<Self> {
         let stream = UnixStream::connect(path)
-            .with_context(|| format!("connect to VFS socket {}", path))?;
+            .with_context(|| format!("connect to VFS socket {path}"))?;
         Ok(Self {
             stream: Mutex::new(stream),
         })
@@ -216,9 +218,9 @@ impl Conn {
 
     pub(crate) fn raw_call(&self, req: &WireRequest) -> std::io::Result<WireResponse> {
         let data = rmp_serde::to_vec_named(req)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let mut stream = self.stream.lock()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "lock poisoned"))?;
+            .map_err(|_| std::io::Error::other("lock poisoned"))?;
 
         // Write length-prefixed frame.
         let len_bytes = (data.len() as u32).to_be_bytes();
@@ -233,7 +235,7 @@ impl Conn {
         stream.read_exact(&mut resp_buf)?;
 
         let resp: WireResponse = rmp_serde::from_slice(&resp_buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         if resp.err != ERR_OK {
             return Err(wire_io_err(resp.err));
         }

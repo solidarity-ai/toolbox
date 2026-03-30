@@ -1,9 +1,10 @@
+#![allow(dead_code)]
+
 //! Mock VFS server for Rust-side testing.
 //!
 //! Implements the same msgpack-over-UDS protocol as the Go VFS server,
 //! backed by an in-memory HashMap filesystem.
 
-use rmp_serde;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -156,7 +157,11 @@ impl MockState {
                 let dir_path = if req.path.is_empty() { "/" } else { &req.path };
                 match self.nodes.get(dir_path) {
                     Some(FsNode::Dir) => {
-                        let prefix = if dir_path == "/" { "/".to_string() } else { format!("{}/", dir_path) };
+                        let prefix = if dir_path == "/" {
+                            "/".to_string()
+                        } else {
+                            format!("{dir_path}/")
+                        };
                         let entries: Vec<MockDirEntry> = self.nodes.iter()
                             .filter(|(p, _)| {
                                 if *p == dir_path { return false; }
@@ -181,11 +186,11 @@ impl MockState {
                 }
             }
             OP_CREATE_DIR => {
-                if self.nodes.contains_key(&req.path) {
-                    MockResponse { err: ERR_ALREADY_EXISTS, ..Default::default() }
-                } else {
-                    self.nodes.insert(req.path, FsNode::Dir);
+                if let std::collections::hash_map::Entry::Vacant(entry) = self.nodes.entry(req.path) {
+                    entry.insert(FsNode::Dir);
                     MockResponse::default()
+                } else {
+                    MockResponse { err: ERR_ALREADY_EXISTS, ..Default::default() }
                 }
             }
             OP_REMOVE_DIR => {
@@ -234,10 +239,10 @@ impl MockState {
             }
             OP_OPEN => {
                 let opts = req.open_opts.as_ref();
-                let create = opts.map_or(false, |o| o.create);
-                let create_new = opts.map_or(false, |o| o.create_new);
-                let truncate = opts.map_or(false, |o| o.truncate);
-                let writable = opts.map_or(false, |o| o.write || o.append);
+                let create = opts.is_some_and(|o| o.create);
+                let create_new = opts.is_some_and(|o| o.create_new);
+                let truncate = opts.is_some_and(|o| o.truncate);
+                let writable = opts.is_some_and(|o| o.write || o.append);
 
                 match self.nodes.get(&req.path) {
                     Some(FsNode::File(_)) if create_new => {
@@ -457,7 +462,11 @@ fn handle_conn(mut stream: std::os::unix::net::UnixStream, state: Arc<Mutex<Mock
 
         let resp_data = rmp_serde::to_vec_named(&resp).expect("serialize response");
         let resp_len = (resp_data.len() as u32).to_be_bytes();
-        if stream.write_all(&resp_len).is_err() { return; }
-        if stream.write_all(&resp_data).is_err() { return; }
+        if stream.write_all(&resp_len).is_err() {
+            return;
+        }
+        if stream.write_all(&resp_data).is_err() {
+            return;
+        }
     }
 }

@@ -311,7 +311,7 @@ mod dir_ops_tests {
         assert_eq!(resp["err"], 0);
         // entries may be missing or empty
         let entries = resp.get("entries").and_then(|v| v.as_array());
-        assert!(entries.map_or(true, |e| e.is_empty()));
+        assert!(entries.is_none_or(|e| e.is_empty()));
     }
 
     #[test]
@@ -372,6 +372,7 @@ mod file_ops_tests {
     use std::os::unix::net::UnixStream;
 
     /// Typed response for file ops (handles binary data field).
+    #[allow(dead_code)]
     #[derive(Deserialize, Debug)]
     struct Resp {
         #[serde(default)]

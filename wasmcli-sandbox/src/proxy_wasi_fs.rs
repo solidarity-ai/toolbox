@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! WASI P2 filesystem backed by the VFS proxy socket.
 //!
 //! Provides a `ProxyDir` that can be stored in Wasmtime's resource table
@@ -110,7 +112,7 @@ impl ProxyDescriptor {
     pub fn read_file(&self, len: usize) -> std::io::Result<(Vec<u8>, bool)> {
         let (handle, conn) = match self {
             ProxyDescriptor::File { handle, conn } => (*handle, conn),
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "not a file")),
+            _ => return Err(std::io::Error::other("not a file")),
         };
         let mut req = WireRequest::handle_op(OP_FILE_READ, handle);
         req.len = len as i64;
@@ -122,7 +124,7 @@ impl ProxyDescriptor {
     pub fn write_file(&self, data: &[u8]) -> std::io::Result<usize> {
         let (handle, conn) = match self {
             ProxyDescriptor::File { handle, conn } => (*handle, conn),
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "not a file")),
+            _ => return Err(std::io::Error::other("not a file")),
         };
         let mut req = WireRequest::handle_op(OP_FILE_WRITE, handle);
         req.data = Some(data.to_vec());
@@ -133,7 +135,7 @@ impl ProxyDescriptor {
     pub fn flush_file(&self) -> std::io::Result<()> {
         let (handle, conn) = match self {
             ProxyDescriptor::File { handle, conn } => (*handle, conn),
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "not a file")),
+            _ => return Err(std::io::Error::other("not a file")),
         };
         conn.raw_call(&WireRequest::handle_op(OP_FILE_FLUSH, handle))?;
         Ok(())
@@ -150,7 +152,7 @@ impl ProxyDescriptor {
                 len: m.len,
                 modified: m.modified,
             }),
-            None => Err(std::io::Error::new(std::io::ErrorKind::Other, "no metadata")),
+            None => Err(std::io::Error::other("no metadata")),
         }
     }
 
@@ -159,7 +161,7 @@ impl ProxyDescriptor {
             ProxyDescriptor::Dir { path, .. } => {
                 if path.is_empty() { "/" } else { path.as_str() }
             }
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "not a directory")),
+            _ => return Err(std::io::Error::other("not a directory")),
         };
         let conn = self.conn();
         let resp = conn.raw_call(&WireRequest::path_op(OP_READ_DIR, std::path::Path::new(path)))?;

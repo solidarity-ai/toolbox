@@ -1,7 +1,24 @@
 {
+  "module": "github.com/example/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript-sandbox",
   "allowed_hosts": ["admin.googleapis.com"],
+  "credentials": [
+    {
+      "name": "workspace",
+      "type": "oauth2",
+      "provider": "google",
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/admin.directory.user.readonly"
+      ],
+      "inject": {
+        "hosts": ["admin.googleapis.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
   "tools": [
     {
       "entry_ts": "tools/users.list.ts",

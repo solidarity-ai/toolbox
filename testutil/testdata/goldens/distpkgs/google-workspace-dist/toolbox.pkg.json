@@ -1,10 +1,29 @@
 {
+  "module": "github.com/example/google-workspace",
   "name": "google-workspace",
-  "runtime": "typescript+wasix-sandbox",
-  "sha256": "f3339f40016359fe19b8b3bd62fcc27561597f4c804b8970498d16cf8620f6c5",
-  "executables": {
-    "gwc": "dist/gwc.wasm"
-  },
+  "runtime": "typescript-sandbox",
+  "sha256": "05c4b9114f91259dea50ac050663ccf435eaa7b7417eb9ad1fcb58dac694662b",
+  "allowed_hosts": [
+    "admin.googleapis.com"
+  ],
+  "credentials": [
+    {
+      "name": "workspace",
+      "type": "oauth2",
+      "provider": "google",
+      "scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/admin.directory.user.readonly"
+      ],
+      "inject": {
+        "hosts": [
+          "admin.googleapis.com"
+        ],
+        "method": "bearer_header"
+      }
+    }
+  ],
   "tools": [
     {
       "entry_ts": "tools/users.list.ts",

@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -514,8 +515,8 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
 		want := map[string][]tooldef.PackageCredential{
 			"issues.list": {
 				{
-					Name: "github_token",
-					Type: tooldef.CredentialTypeBearer,
+					Name:   "github_token",
+					Type:   tooldef.CredentialTypeBearer,
 					Inject: tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "bearer_header"},
 				},
 				{
@@ -528,8 +529,8 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
 			"status.get": nil,
 			"calendar.list": {
 				{
-					Name: "calendar_token",
-					Type: tooldef.CredentialTypeBearer,
+					Name:   "calendar_token",
+					Type:   tooldef.CredentialTypeBearer,
 					Inject: tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
 				},
 			},
@@ -551,8 +552,8 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
 
 		if diff := cmp.Diff([]tooldef.PackageCredential{
 			{
-				Name: "github_token",
-				Type: tooldef.CredentialTypeBearer,
+				Name:   "github_token",
+				Type:   tooldef.CredentialTypeBearer,
 				Inject: tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "bearer_header"},
 			},
 			{
@@ -565,6 +566,110 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
 			t.Fatalf("package credentials changed unexpectedly (-want +got):\n%s", diff)
 		}
 	})
+}
+
+func TestLoadDevGoogleWorkspaceFixtureAuthMetadata(t *testing.T) {
+	t.Parallel()
+
+	fixtureDir := googleWorkspaceFixtureDir(t)
+
+	t.Run("loads one package-scoped oauth credential with stable module and inject metadata", func(t *testing.T) {
+		t.Parallel()
+
+		loaded, err := LoadDir(fixtureDir)
+		if err != nil {
+			t.Fatalf("LoadDir() error: %v", err)
+		}
+		if got := loaded.Package.Module; got != tooldef.ModulePath("github.com/example/google-workspace") {
+			t.Fatalf("module = %q, want %q", got, "github.com/example/google-workspace")
+		}
+		if diff := cmp.Diff([]string{"admin.googleapis.com"}, loaded.Package.AllowedHosts); diff != "" {
+			t.Fatalf("allowed_hosts mismatch (-want +got):\n%s", diff)
+		}
+		if len(loaded.Package.Credentials) != 1 {
+			t.Fatalf("credentials = %d, want 1", len(loaded.Package.Credentials))
+		}
+
+		wantCredential := tooldef.PackageCredential{
+			Name:     "workspace",
+			Type:     tooldef.CredentialTypeOAuth2,
+			Provider: tooldef.OAuth2ProviderRef{Name: "google"},
+			Scopes: []string{
+				"openid",
+				"email",
+				"https://www.googleapis.com/auth/admin.directory.user.readonly",
+			},
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"admin.googleapis.com"},
+				Method: "bearer_header",
+			},
+		}
+		if diff := cmp.Diff(wantCredential, loaded.Package.Credentials[0]); diff != "" {
+			t.Fatalf("credential mismatch (-want +got):\n%s", diff)
+		}
+
+		resolved := loaded.ResolvedTools()
+		if len(resolved) != 1 {
+			t.Fatalf("resolved tools = %d, want 1", len(resolved))
+		}
+		if diff := cmp.Diff([]string{"admin.googleapis.com"}, resolved[0].AllowedHosts); diff != "" {
+			t.Fatalf("resolved allowed_hosts mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff([]tooldef.PackageCredential{wantCredential}, resolved[0].EffectiveCredentials); diff != "" {
+			t.Fatalf("resolved credentials mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	for _, tt := range []struct {
+		name    string
+		mutate  func(string) string
+		wantErr string
+	}{
+		{
+			name: "rejects missing module",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "  \"module\": \"github.com/example/google-workspace\",\n", "", 1)
+			},
+			wantErr: "module is required",
+		},
+		{
+			name: "rejects empty allowed host entry",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "\"allowed_hosts\": [\"admin.googleapis.com\"]", "\"allowed_hosts\": [\"\"]", 1)
+			},
+			wantErr: "allowed_hosts",
+		},
+		{
+			name: "rejects malformed provider shape",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "\"provider\": \"google\"", "\"provider\": {\"auth_url\": \"https://accounts.google.com/o/oauth2/v2/auth\"}", 1)
+			},
+			wantErr: "provider",
+		},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			raw, err := os.ReadFile(filepath.Join(fixtureDir, manifest.DevManifestFilename))
+			if err != nil {
+				t.Fatalf("ReadFile(): %v", err)
+			}
+			dir := t.TempDir()
+			mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), tt.mutate(string(raw)))
+			if _, err := LoadDir(dir); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadDir() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func googleWorkspaceFixtureDir(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
 }
 
 func boolPtr(v bool) *bool {

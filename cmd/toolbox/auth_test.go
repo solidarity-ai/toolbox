@@ -16,6 +16,7 @@ import (
 	"github.com/solidarity-ai/toolbox/oauthbootstrap"
 	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
 	"github.com/solidarity-ai/toolbox/secrets"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 )
 
 func TestRunAuthHelpIncludesUsage(t *testing.T) {
@@ -380,6 +381,102 @@ func TestRunAuthLocalSecretStoreUnlockFailure(t *testing.T) {
 	if strings.Contains(stdout.String(), "authorized oauth2 credential") {
 		t.Fatalf("stdout = %q, want no success output on store failure", stdout.String())
 	}
+}
+
+func TestRunAuthGoogleWorkspaceFixtureSelectsSingleCredential(t *testing.T) {
+	packageDir := tooltest.GoogleWorkspaceFixtureDir(t)
+	var gotReq oauthbootstrap.Request
+
+	deps := authDeps{
+		prompt: promptSecret,
+		newStore: func() (secrets.SecretStore, error) {
+			return &stubSecretStore{}, nil
+		},
+		openBrowser: func(context.Context, string) error { return nil },
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			return func(ctx context.Context, req oauthbootstrap.Request) (oauthbootstrap.Result, error) {
+				gotReq = req
+				return oauthbootstrap.Result{
+					CredentialName:  req.CredentialName,
+					SecretNamespace: "github.com/example/google-workspace/workspace",
+					PersistedKeys:   []string{"client_id", "refresh_token"},
+					UsedPKCE:        req.ClientSecret == "",
+				}, nil
+			}
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithDeps([]string{packageDir}, strings.NewReader("client-google\n\n"), &stdout, &stderr, deps)
+	if err != nil {
+		t.Fatalf("runAuthWithDeps() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if gotReq.Package.Dir != packageDir {
+		t.Fatalf("package dir = %q, want %q", gotReq.Package.Dir, packageDir)
+	}
+	if gotReq.Package.Package.Module.String() != "github.com/example/google-workspace" {
+		t.Fatalf("module = %q, want %q", gotReq.Package.Package.Module, "github.com/example/google-workspace")
+	}
+	if gotReq.CredentialName != "workspace" {
+		t.Fatalf("credential = %q, want workspace", gotReq.CredentialName)
+	}
+	if gotReq.ClientSecret != "" {
+		t.Fatalf("client secret = %q, want blank PKCE secret", gotReq.ClientSecret)
+	}
+	if !strings.Contains(stdout.String(), `authorized oauth2 credential "workspace"`) {
+		t.Fatalf("stdout = %q, want auth success output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `module "github.com/example/google-workspace"`) {
+		t.Fatalf("stdout = %q, want module identity in output", stdout.String())
+	}
+}
+
+func TestRunAuthGoogleWorkspaceFixtureGoogleEmulatePersistsTenantRefreshState(t *testing.T) {
+	srv := emulatetest.StartGoogle(t)
+	provider, err := srv.GoogleProviderRef(context.Background())
+	if err != nil {
+		t.Fatalf("GoogleProviderRef(): %v", err)
+	}
+	packageDir := tooltest.PrepareGoogleWorkspaceFixture(t, srv.AuthBaseURL(), provider)
+	storePath := filepath.Join(t.TempDir(), "secrets.age")
+	identityPath := writeAuthIdentityFile(t, t.TempDir())
+
+	deps := authDeps{
+		prompt:      promptSecret,
+		newStore:    func() (secrets.SecretStore, error) { return secrets.NewLocalSecretStore(storePath, identityPath), nil },
+		openBrowser: func(ctx context.Context, authURL string) error { return srv.CompleteGoogleAuthorization(ctx, authURL) },
+		newBootstrap: func(store secrets.SecretStore, opener oauthbootstrap.BrowserOpener) authBootstrapFunc {
+			bootstrapper := oauthbootstrap.New(oauthbootstrap.Options{Store: store, HTTPClient: srv.SecureClient(), OpenBrowser: opener, CallbackTimeout: 5 * time.Second, ExchangeTimeout: 5 * time.Second})
+			return bootstrapper.Run
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = runAuthWithDeps([]string{"--tenant", "acme", packageDir}, strings.NewReader("client-google\n\n"), &stdout, &stderr, deps)
+	if err != nil {
+		t.Fatalf("runAuthWithDeps() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `authorized oauth2 credential "workspace"`) {
+		t.Fatalf("stdout = %q, want auth success output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `module "github.com/example/google-workspace"`) {
+		t.Fatalf("stdout = %q, want module identity in output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `tenant "acme" scope`) {
+		t.Fatalf("stdout = %q, want tenant scope output", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "public-client PKCE flow") {
+		t.Fatalf("stdout = %q, want PKCE output", stdout.String())
+	}
+
+	store := secrets.NewLocalSecretStore(storePath, identityPath)
+	assertAuthStoredValue(t, store, "github.com/example/google-workspace/tenant/acme/workspace/client_id", "client-google")
+	refreshToken := assertAuthStoredNonEmpty(t, store, "github.com/example/google-workspace/tenant/acme/workspace/refresh_token")
+	if !strings.HasPrefix(refreshToken, "google_refresh_") {
+		t.Fatalf("refresh_token = %q, want emulate google refresh token prefix", refreshToken)
+	}
+	assertAuthSecretMissing(t, store, "github.com/example/google-workspace/tenant/acme/workspace/client_secret")
+	assertAuthSecretMissing(t, store, "github.com/example/google-workspace/tenant/acme/workspace/access_token")
 }
 
 type authPackageOptions struct {

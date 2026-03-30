@@ -198,7 +198,7 @@ func TestMCPServerRunsGoogleWorkspaceFixtureFromCopiedDir(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	dir := prepareGoogleWorkspaceFixtureWithoutCredentials(t, server.URL)
 	h := googleWorkspaceHarness(t, dir)
 	assertGoogleWorkspaceSchemaHasNoCredentialInputs(t, h.ListTools())
 	assertGoogleWorkspaceFixtureResult(t, h.CallTool("users.list", map[string]any{}), "copy-ada@example.com")
@@ -211,7 +211,7 @@ func TestMCPServerRunsGoogleWorkspaceFixtureRejectsMalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	dir := prepareGoogleWorkspaceFixtureWithoutCredentials(t, server.URL)
 	h := googleWorkspaceHarness(t, dir)
 	assertGoogleWorkspaceFixtureError(t, h.CallTool("users.list", map[string]any{}), "google workspace response was not valid JSON")
 }
@@ -223,7 +223,7 @@ func TestMCPServerRunsGoogleWorkspaceFixtureRejectsMissingPrimaryEmail(t *testin
 	}))
 	defer server.Close()
 
-	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	dir := prepareGoogleWorkspaceFixtureWithoutCredentials(t, server.URL)
 	h := googleWorkspaceHarness(t, dir)
 	assertGoogleWorkspaceFixtureError(t, h.CallTool("users.list", map[string]any{}), "google workspace response missing users[0].primaryEmail")
 }
@@ -235,7 +235,7 @@ func TestMCPServerRunsGoogleWorkspaceFixtureRejectsUpstreamError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	dir := prepareGoogleWorkspaceFixtureWithoutCredentials(t, server.URL)
 	h := googleWorkspaceHarness(t, dir)
 	result := h.CallTool("users.list", map[string]any{})
 	assertGoogleWorkspaceFixtureError(t, result, "Google Workspace API 502")
@@ -247,35 +247,36 @@ func TestMCPServerRunsGoogleWorkspaceFixtureRejectsUpstreamError(t *testing.T) {
 
 func rewriteGoogleWorkspaceSourceFixtureForTest(t *testing.T, baseURL string) string {
 	t.Helper()
+	return prepareGoogleWorkspaceFixtureWithoutCredentials(t, baseURL)
+}
 
-	dir := tooltest.GoogleWorkspaceFixtureDir(t)
-	toolPath := filepath.Join(dir, "tools", "users.list.ts")
+func prepareGoogleWorkspaceFixtureWithoutCredentials(t testing.TB, baseURL string) string {
+	t.Helper()
+	dir := tooltest.PrepareGoogleWorkspaceFixture(t, baseURL, tooldef.OAuth2ProviderRef{})
 	manifestPath := filepath.Join(dir, "toolbox.devpkg.json")
-	toolRaw, err := os.ReadFile(toolPath)
-	if err != nil {
-		t.Fatalf("read source google-workspace tool: %v", err)
-	}
 	manifestRaw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("read source google-workspace manifest: %v", err)
+		t.Fatalf("read google-workspace manifest: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := os.WriteFile(toolPath, toolRaw, 0o644); err != nil {
-			t.Fatalf("restore source google-workspace tool: %v", err)
-		}
-		if err := os.WriteFile(manifestPath, manifestRaw, 0o644); err != nil {
-			t.Fatalf("restore source google-workspace manifest: %v", err)
-		}
-	})
-
-	tooltest.RewriteGoogleWorkspaceFixtureBaseURL(t, dir, baseURL, tooldef.OAuth2ProviderRef{})
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatalf("decode google-workspace manifest: %v", err)
+	}
+	delete(manifest, "credentials")
+	updatedManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("encode google-workspace manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, append(updatedManifest, '\n'), 0o644); err != nil {
+		t.Fatalf("write google-workspace manifest: %v", err)
+	}
 	return dir
 }
 
 func googleWorkspaceHarness(t testing.TB, dir string) *mcptest.Harness {
 	t.Helper()
 	builder := tooltest.GoogleWorkspaceBuilderFromDir(t, dir)
-	return mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
+	return mcptest.NewHarness(t, mcpserver.New(mustResolveWithConfig(t, builder, toolset.Config{})))
 }
 
 func assertGoogleWorkspaceSchemaHasNoCredentialInputs(t testing.TB, tools *mcp.ListToolsResult) {
@@ -427,7 +428,12 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 
 func mustResolve(t testing.TB, builder *toolset.Builder) toolset.ResolvedToolset {
 	t.Helper()
-	resolved, err := builder.Resolve(toolset.Config{})
+	return mustResolveWithConfig(t, builder, toolset.Config{})
+}
+
+func mustResolveWithConfig(t testing.TB, builder *toolset.Builder, cfg toolset.Config) toolset.ResolvedToolset {
+	t.Helper()
+	resolved, err := builder.Resolve(cfg)
 	if err != nil {
 		t.Fatalf("resolve toolset: %v", err)
 	}

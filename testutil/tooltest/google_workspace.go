@@ -1,6 +1,7 @@
 package tooltest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -9,9 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+	"github.com/google/go-cmp/cmp"
+	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
+	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -24,6 +30,22 @@ const (
 )
 
 var googleWorkspaceEndpointRe = regexp.MustCompile(`const USERS_ENDPOINT = ".*";`)
+
+type GoogleAuthHarness struct {
+	Server        *emulatetest.Server
+	Provider      tooldef.OAuth2ProviderRef
+	FixtureDir    string
+	StorePath     string
+	IdentityPath  string
+	RuntimeCAPath string
+	Store         *secrets.LocalSecretStore
+}
+
+type GoogleDurableOAuthState struct {
+	Namespace     string
+	PersistedKeys []string
+	RefreshToken  string
+}
 
 func googleWorkspaceFixtureDir() string {
 	_, file, _, ok := runtime.Caller(0)
@@ -201,26 +223,201 @@ func PrepareGoogleWorkspaceFixture(t testing.TB, baseURL string, provider toolde
 	return dir
 }
 
-// GoogleWorkspaceOAuthSecretFamily returns the durable secret namespace used by
+// NewGoogleAuthHarness prepares a copied google-workspace fixture, a real local
+// secret store, and the Google emulate provider endpoints for end-to-end auth tests.
+func NewGoogleAuthHarness(t *testing.T) *GoogleAuthHarness {
+	t.Helper()
+
+	srv := emulatetest.StartGoogle(t)
+	provider, err := srv.GoogleProviderRef(context.Background())
+	if err != nil {
+		t.Fatalf("GoogleProviderRef(): %v", err)
+	}
+	identityPath := writeAgeIdentityFile(t, t.TempDir())
+	storePath := filepath.Join(t.TempDir(), "secrets.age")
+	runtimeCAPath := writeRuntimeCertFile(t, t.TempDir(), srv.SecureProxyCertificatePEM())
+	return &GoogleAuthHarness{
+		Server:        srv,
+		Provider:      provider,
+		FixtureDir:    PrepareGoogleWorkspaceFixture(t, srv.AuthBaseURL(), provider),
+		StorePath:     storePath,
+		IdentityPath:  identityPath,
+		RuntimeCAPath: runtimeCAPath,
+		Store:         secrets.NewLocalSecretStore(storePath, identityPath),
+	}
+}
+
+func writeAgeIdentityFile(t testing.TB, dir string) string {
+	t.Helper()
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("GenerateX25519Identity(): %v", err)
+	}
+	path := filepath.Join(dir, "keys.txt")
+	if err := os.WriteFile(path, []byte(identity.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	return path
+}
+
+func writeRuntimeCertFile(t testing.TB, dir string, certPEM []byte) string {
+	t.Helper()
+	if len(certPEM) == 0 {
+		t.Fatal("runtime cert PEM is required")
+	}
+	path := filepath.Join(dir, "emulate-root.pem")
+	if err := os.WriteFile(path, certPEM, 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	return path
+}
+
+// UseRuntimeTLSRoots configures the process to trust the emulate HTTPS façade for runtime refreshes.
+func (h *GoogleAuthHarness) UseRuntimeTLSRoots(t testing.TB) {
+	t.Helper()
+	if h == nil || strings.TrimSpace(h.RuntimeCAPath) == "" {
+		t.Fatal("google auth harness runtime CA path is required")
+	}
+	t.Setenv("SSL_CERT_FILE", h.RuntimeCAPath)
+}
+
+// GoogleWorkspaceOAuthSecretFamily returns the package-scope durable secret namespace used by
 // the google-workspace fixture's OAuth credential.
 func GoogleWorkspaceOAuthSecretFamily(t testing.TB) string {
 	t.Helper()
-	family, err := tooldef.CredentialFamilyNamespace(googleWorkspaceModulePath, "", googleWorkspaceCredentialName)
+	return GoogleWorkspaceOAuthSecretFamilyForTenant(t, "")
+}
+
+// GoogleWorkspaceOAuthSecretFamilyForTenant returns the durable secret namespace used by
+// the google-workspace fixture's OAuth credential for the given tenant scope.
+func GoogleWorkspaceOAuthSecretFamilyForTenant(t testing.TB, tenant string) string {
+	t.Helper()
+	family, err := tooldef.CredentialFamilyNamespace(googleWorkspaceModulePath, tenant, googleWorkspaceCredentialName)
 	if err != nil {
 		t.Fatalf("google-workspace oauth secret family: %v", err)
 	}
 	return family
 }
 
-// GoogleWorkspaceOAuthSecretKey returns one durable secret key under the
+// GoogleWorkspaceOAuthSecretKey returns one package-scope durable secret key under the
 // google-workspace fixture's OAuth credential namespace.
 func GoogleWorkspaceOAuthSecretKey(t testing.TB, member string) string {
 	t.Helper()
-	key, err := tooldef.CredentialFamilyMemberKey(GoogleWorkspaceOAuthSecretFamily(t), member)
+	return GoogleWorkspaceOAuthSecretKeyForTenant(t, "", member)
+}
+
+// GoogleWorkspaceOAuthSecretKeyForTenant returns one durable secret key under the
+// google-workspace fixture's OAuth credential namespace for the given tenant scope.
+func GoogleWorkspaceOAuthSecretKeyForTenant(t testing.TB, tenant, member string) string {
+	t.Helper()
+	key, err := tooldef.CredentialFamilyMemberKey(GoogleWorkspaceOAuthSecretFamilyForTenant(t, tenant), member)
 	if err != nil {
 		t.Fatalf("google-workspace oauth secret key %q: %v", member, err)
 	}
 	return key
+}
+
+// AssertDurableOAuthState verifies the persisted google-workspace durable secret family shape.
+func (h *GoogleAuthHarness) AssertDurableOAuthState(t testing.TB, tenant, clientID, clientSecret string) GoogleDurableOAuthState {
+	t.Helper()
+	if h == nil || h.Store == nil {
+		t.Fatal("google auth harness store is required")
+	}
+	ctx := context.Background()
+	namespace := GoogleWorkspaceOAuthSecretFamilyForTenant(t, tenant)
+	gotKeys, err := h.Store.List(ctx, namespace)
+	if err != nil {
+		t.Fatalf("List(%q): %v", namespace, err)
+	}
+	wantKeys := []string{
+		GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "client_id"),
+		GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "refresh_token"),
+	}
+	if strings.TrimSpace(clientSecret) != "" {
+		wantKeys = append(wantKeys, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "client_secret"))
+	}
+	sort.Strings(wantKeys)
+	if diff := cmp.Diff(wantKeys, gotKeys); diff != "" {
+		t.Fatalf("durable secret keys mismatch for %q (-want +got):\n%s", namespace, diff)
+	}
+	assertLocalStoreValue(t, h.Store, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "client_id"), clientID)
+	refreshToken := assertLocalStoreNonEmpty(t, h.Store, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "refresh_token"))
+	if !strings.HasPrefix(refreshToken, "google_refresh_") {
+		t.Fatalf("refresh_token = %q, want emulate google refresh token prefix", refreshToken)
+	}
+	if strings.TrimSpace(clientSecret) == "" {
+		assertLocalStoreMissing(t, h.Store, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "client_secret"))
+	} else {
+		assertLocalStoreValue(t, h.Store, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "client_secret"), clientSecret)
+	}
+	assertLocalStoreMissing(t, h.Store, GoogleWorkspaceOAuthSecretKeyForTenant(t, tenant, "access_token"))
+	return GoogleDurableOAuthState{
+		Namespace:     namespace,
+		PersistedKeys: gotKeys,
+		RefreshToken:  refreshToken,
+	}
+}
+
+func assertLocalStoreValue(t testing.TB, store *secrets.LocalSecretStore, key string, want string) {
+	t.Helper()
+	got, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", key, err)
+	}
+	if string(got) != want {
+		t.Fatalf("Get(%q) = %q, want %q", key, string(got), want)
+	}
+}
+
+func assertLocalStoreNonEmpty(t testing.TB, store *secrets.LocalSecretStore, key string) string {
+	t.Helper()
+	got, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", key, err)
+	}
+	if strings.TrimSpace(string(got)) == "" {
+		t.Fatalf("Get(%q) returned empty value", key)
+	}
+	return string(got)
+}
+
+func assertLocalStoreMissing(t testing.TB, store *secrets.LocalSecretStore, key string) {
+	t.Helper()
+	_, err := store.Get(context.Background(), key)
+	if err == nil {
+		t.Fatalf("Get(%q) unexpectedly succeeded", key)
+	}
+	if err != secrets.ErrNotFound {
+		t.Fatalf("Get(%q) error = %v, want ErrNotFound", key, err)
+	}
+}
+
+// AssertGoogleWorkspaceAgentViewHidden verifies the agent-visible schema stays free of credential-shaped inputs.
+func AssertGoogleWorkspaceAgentViewHidden(t testing.TB, resolved toolset.ResolvedToolset) {
+	t.Helper()
+	view := resolved.AgentView()
+	if len(view.Tools) != 1 {
+		t.Fatalf("agent view tool count = %d, want 1", len(view.Tools))
+	}
+	if view.Tools[0].Name != "users.list" {
+		t.Fatalf("agent view tool name = %q, want users.list", view.Tools[0].Name)
+	}
+	propsAny, hasProps := view.Tools[0].ParamsSchema["properties"]
+	if !hasProps || propsAny == nil {
+		return
+	}
+	props, ok := propsAny.(map[string]any)
+	if !ok {
+		t.Fatalf("params schema properties malformed: %#v", view.Tools[0].ParamsSchema)
+	}
+	if len(props) != 0 {
+		t.Fatalf("users.list params schema properties = %#v, want none", props)
+	}
+	for _, forbidden := range []string{"token", "access_token", "refresh_token", "workspace", "client_secret"} {
+		if _, ok := props[forbidden]; ok {
+			t.Fatalf("credential-shaped param %q should not appear in AgentView schema", forbidden)
+		}
+	}
 }
 
 // GoogleWorkspaceBuilder returns a *toolset.Builder loaded with the

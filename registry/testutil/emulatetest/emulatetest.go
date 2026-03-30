@@ -2,6 +2,7 @@ package emulatetest
 
 import (
 	"bytes"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -132,6 +133,14 @@ func (s *Server) SecureClient() *http.Client {
 		return s.rawClient
 	}
 	return s.secureClient
+}
+
+// SecureProxyCertificatePEM returns the HTTPS façade certificate in PEM form.
+func (s *Server) SecureProxyCertificatePEM() []byte {
+	if s == nil || s.secureProxy == nil || s.secureProxy.Certificate() == nil {
+		return nil
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.secureProxy.Certificate().Raw})
 }
 
 // Token returns the shared test token accepted by the auth-gated façade.

@@ -1,6 +1,7 @@
 package invoke
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -218,4 +219,192 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 			t.Fatalf("body = %q, want JSON response", result.Body)
 		}
 	})
+}
+
+func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("refreshes before outbound fetch and reuses cached access token", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{
+			"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+			"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+			"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+		})
+
+		var tokenCalls atomic.Int32
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenCalls.Add(1)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Fatalf("ParseQuery: %v", err)
+			}
+			if got := values.Get("grant_type"); got != "refresh_token" {
+				t.Fatalf("grant_type = %q, want refresh_token", got)
+			}
+			if got := values.Get("client_id"); got != "client-123" {
+				t.Fatalf("client_id = %q, want client-123", got)
+			}
+			if got := values.Get("client_secret"); got != "secret-123" {
+				t.Fatalf("client_secret = %q, want secret-123", got)
+			}
+			if got := values.Get("refresh_token"); got != "refresh-123" {
+				t.Fatalf("refresh_token = %q, want refresh-123", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"refreshed-token","expires_in":3600}`))
+		}))
+		defer tokenServer.Close()
+
+		var apiHits atomic.Int32
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer refreshed-token" {
+				t.Fatalf("Authorization header = %q, want refreshed bearer token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer apiServer.Close()
+
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+
+		for attempt := range 2 {
+			result, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+			if err != nil {
+				t.Fatalf("attempt %d goFetchWithTransportPolicy: %v", attempt+1, err)
+			}
+			if result.Status != http.StatusOK {
+				t.Fatalf("attempt %d status = %d, want %d", attempt+1, result.Status, http.StatusOK)
+			}
+		}
+
+		if got := apiHits.Load(); got != 2 {
+			t.Fatalf("protected upstream hits = %d, want 2", got)
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1 cached refresh", got)
+		}
+	})
+
+	t.Run("refresh failure aborts before protected upstream fetch and stays redacted", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{
+			"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+			"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+			"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+		})
+
+		var tokenCalls atomic.Int32
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenCalls.Add(1)
+			http.Error(w, "upstream denied", http.StatusBadGateway)
+		}))
+		defer tokenServer.Close()
+
+		var apiHits atomic.Int32
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer apiServer.Close()
+
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+		_, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected refresh failure before protected upstream fetch")
+		}
+		if !strings.Contains(err.Error(), "during token request") || !strings.Contains(err.Error(), "status 502") {
+			t.Fatalf("error = %v, want token-request failure context", err)
+		}
+		if strings.Contains(err.Error(), "refreshed-token") || strings.Contains(err.Error(), "secret-123") {
+			t.Fatalf("error leaked auth material: %v", err)
+		}
+		if got := apiHits.Load(); got != 0 {
+			t.Fatalf("protected upstream hits = %d, want 0", got)
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+	})
+
+	t.Run("malformed refresh response aborts before protected upstream fetch", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{
+			"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+			"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+			"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+		})
+
+		var tokenCalls atomic.Int32
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"expires_in":3600}`))
+		}))
+		defer tokenServer.Close()
+
+		var apiHits atomic.Int32
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer apiServer.Close()
+
+		fetchFn := goFetchWithTransportPolicy(mustOAuth2FetchPolicy(t, store, tokenServer.URL, apiServer.URL))
+		_, err := fetchFn(apiServer.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected malformed refresh payload to fail")
+		}
+		if !strings.Contains(err.Error(), "response parse") || !strings.Contains(err.Error(), "access_token is required") {
+			t.Fatalf("error = %v, want parse failure context", err)
+		}
+		if got := apiHits.Load(); got != 0 {
+			t.Fatalf("protected upstream hits = %d, want 0", got)
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+	})
+}
+
+func mustOAuth2FetchPolicy(t *testing.T, store *testutil.TestSecretStore, tokenURL string, protectedURL string) *transport.Policy {
+	t.Helper()
+
+	parsedProtectedURL, err := url.Parse(protectedURL)
+	if err != nil {
+		t.Fatalf("parse protected url: %v", err)
+	}
+
+	policy, err := transport.NewPolicy(store, []transport.Rule{{
+		Name:               "github_oauth",
+		SecretKey:          "github.com/example/github-issues/github_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://accounts.example.com/oauth/authorize", TokenURL: tokenURL},
+		OAuth2SecretFamily: "github.com/example/github-issues/github_oauth",
+		OAuth2CacheKey:     "github.com/example/github-issues:github_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{parsedProtectedURL.Hostname()},
+			Method: "bearer_header",
+		},
+	}}, []string{parsedProtectedURL.Hostname()}, false)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected runtime policy")
+	}
+	return policy
 }

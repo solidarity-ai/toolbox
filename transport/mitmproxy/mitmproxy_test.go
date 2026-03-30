@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -27,8 +28,217 @@ import (
 	"github.com/solidarity-ai/toolbox/transport"
 )
 
-func TestMITMProxyPolicyParity(t *testing.T) {
+func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 	t.Parallel()
+
+	t.Run("OAuth2 refresh reuses one cached token across repeated proxy requests", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{
+			"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+			"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+			"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+		})
+
+		var tokenCalls atomic.Int32
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenCalls.Add(1)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Fatalf("ParseQuery: %v", err)
+			}
+			if got := values.Get("grant_type"); got != "refresh_token" {
+				t.Fatalf("grant_type = %q, want refresh_token", got)
+			}
+			if got := values.Get("client_id"); got != "client-123" {
+				t.Fatalf("client_id = %q, want client-123", got)
+			}
+			if got := values.Get("client_secret"); got != "secret-123" {
+				t.Fatalf("client_secret = %q, want secret-123", got)
+			}
+			if got := values.Get("refresh_token"); got != "refresh-123" {
+				t.Fatalf("refresh_token = %q, want refresh-123", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"refreshed-token","expires_in":3600}`))
+		}))
+		defer tokenServer.Close()
+
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"127.0.0.1"},
+			rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+		})
+
+		for attempt := range 2 {
+			resp := harness.mustGet(t, "/oauth2")
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				t.Fatalf("attempt %d status = %d, want 200 (body=%q)", attempt+1, resp.StatusCode, string(body))
+			}
+			resp.Body.Close()
+		}
+
+		obs := harness.observations(t)
+		if len(obs) != 2 {
+			t.Fatalf("observations = %d, want 2", len(obs))
+		}
+		for idx, exchange := range obs {
+			if got := exchange.RequestHeader.Get("Authorization"); got != "Bearer refreshed-token" {
+				t.Fatalf("observation %d authorization = %q, want refreshed bearer token", idx+1, got)
+			}
+		}
+		if got := harness.upstreamHitCount(); got != 2 {
+			t.Fatalf("protected upstream hits = %d, want 2", got)
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1 cached refresh", got)
+		}
+	})
+
+	t.Run("OAuth2 refresh failures return proxy-visible errors before any upstream dial", func(t *testing.T) {
+		t.Parallel()
+
+		store := testutil.NewTestSecretStore()
+		store.SeedStrings(map[string]string{
+			"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+			"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+			"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+		})
+
+		var tokenCalls atomic.Int32
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenCalls.Add(1)
+			http.Error(w, "upstream denied", http.StatusBadGateway)
+		}))
+		defer tokenServer.Close()
+
+		harness := newProxyHarness(t, proxyHarnessConfig{
+			store:        store,
+			allowedHosts: []string{"127.0.0.1"},
+			rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+		})
+
+		resp := harness.mustGet(t, "/oauth2-failure")
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", resp.StatusCode)
+		}
+		if !strings.Contains(string(body), "during token request") || !strings.Contains(string(body), "status 502") {
+			t.Fatalf("body = %q, want token-request failure context", string(body))
+		}
+		if strings.Contains(string(body), "secret-123") || strings.Contains(string(body), "refreshed-token") {
+			t.Fatalf("body leaked auth material: %q", string(body))
+		}
+		if got := harness.upstreamHitCount(); got != 0 {
+			t.Fatalf("protected upstream hits = %d, want 0", got)
+		}
+		if got := harness.upstreamDialCount(); got != 0 {
+			t.Fatalf("protected upstream dials = %d, want 0", got)
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+	})
+
+	t.Run("OAuth2 malformed refresh payload and invalid provider config fail closed", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("OAuth2 malformed refresh payload", func(t *testing.T) {
+			t.Parallel()
+
+			store := testutil.NewTestSecretStore()
+			store.SeedStrings(map[string]string{
+				"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+				"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+				"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+			})
+
+			var tokenCalls atomic.Int32
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tokenCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"expires_in":3600}`))
+			}))
+			defer tokenServer.Close()
+
+			harness := newProxyHarness(t, proxyHarnessConfig{
+				store:        store,
+				allowedHosts: []string{"127.0.0.1"},
+				rules:        []transport.Rule{oauth2ProxyRule(tokenServer.URL, "127.0.0.1")},
+			})
+
+			resp := harness.mustGet(t, "/oauth2-malformed")
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502", resp.StatusCode)
+			}
+			if !strings.Contains(string(body), "response parse") || !strings.Contains(string(body), "access_token is required") {
+				t.Fatalf("body = %q, want parse failure context", string(body))
+			}
+			if got := harness.upstreamHitCount(); got != 0 {
+				t.Fatalf("protected upstream hits = %d, want 0", got)
+			}
+			if got := harness.upstreamDialCount(); got != 0 {
+				t.Fatalf("protected upstream dials = %d, want 0", got)
+			}
+			if got := tokenCalls.Load(); got != 1 {
+				t.Fatalf("token endpoint calls = %d, want 1", got)
+			}
+		})
+
+		t.Run("OAuth2 invalid provider config", func(t *testing.T) {
+			t.Parallel()
+
+			store := testutil.NewTestSecretStore()
+			store.SeedStrings(map[string]string{
+				"github.com/example/github-issues/github_oauth/client_id":     "client-123",
+				"github.com/example/github-issues/github_oauth/client_secret": "secret-123",
+				"github.com/example/github-issues/github_oauth/refresh_token": "refresh-123",
+			})
+
+			harness := newProxyHarness(t, proxyHarnessConfig{
+				store:        store,
+				allowedHosts: []string{"127.0.0.1"},
+				rules: []transport.Rule{{
+					Name:               "github_oauth",
+					SecretKey:          "github.com/example/github-issues/github_oauth/access_token",
+					Type:               tooldef.CredentialTypeOAuth2,
+					OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://accounts.example.com/oauth/authorize"},
+					OAuth2SecretFamily: "github.com/example/github-issues/github_oauth",
+					OAuth2CacheKey:     "github.com/example/github-issues:github_oauth",
+					Inject: tooldef.CredentialInject{
+						Hosts:  []string{"127.0.0.1"},
+						Method: "bearer_header",
+					},
+				}},
+			})
+
+			resp := harness.mustGet(t, "/oauth2-invalid-provider")
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502", resp.StatusCode)
+			}
+			if !strings.Contains(string(body), "during provider config") || !strings.Contains(string(body), "token endpoint is required") {
+				t.Fatalf("body = %q, want provider config failure context", string(body))
+			}
+			if got := harness.upstreamHitCount(); got != 0 {
+				t.Fatalf("protected upstream hits = %d, want 0", got)
+			}
+			if got := harness.upstreamDialCount(); got != 0 {
+				t.Fatalf("protected upstream dials = %d, want 0", got)
+			}
+		})
+	})
 
 	t.Run("allows matching host without mutation", func(t *testing.T) {
 		t.Parallel()
@@ -304,8 +514,8 @@ type proxyHarness struct {
 	hitCount  *atomic.Int32
 	dialCount *atomic.Int32
 
-	obsMu        *sync.Mutex
-	observations *[]observedExchange
+	obsMu          *sync.Mutex
+	observationLog *[]observedExchange
 }
 
 func newProxyHarness(t *testing.T, cfg proxyHarnessConfig) *proxyHarness {
@@ -374,7 +584,7 @@ func newProxyHarness(t *testing.T, cfg proxyHarnessConfig) *proxyHarness {
 		hitCount:             hitCount,
 		dialCount:            dialCount,
 		obsMu:                observationsMu,
-		observations:         observations,
+		observationLog:       observations,
 	}
 }
 
@@ -402,12 +612,35 @@ func (h *proxyHarness) upstreamDialCount() int {
 
 func (h *proxyHarness) singleObservation(t *testing.T) observedExchange {
 	t.Helper()
+	observations := h.observations(t)
+	if len(observations) != 1 {
+		t.Fatalf("observations = %d, want 1", len(observations))
+	}
+	return observations[0]
+}
+
+func (h *proxyHarness) observations(t *testing.T) []observedExchange {
+	t.Helper()
 	h.obsMu.Lock()
 	defer h.obsMu.Unlock()
-	if len(*h.observations) != 1 {
-		t.Fatalf("observations = %d, want 1", len(*h.observations))
+	out := make([]observedExchange, len(*h.observationLog))
+	copy(out, *h.observationLog)
+	return out
+}
+
+func oauth2ProxyRule(tokenURL string, host string) transport.Rule {
+	return transport.Rule{
+		Name:               "github_oauth",
+		SecretKey:          "github.com/example/github-issues/github_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://accounts.example.com/oauth/authorize", TokenURL: tokenURL},
+		OAuth2SecretFamily: "github.com/example/github-issues/github_oauth",
+		OAuth2CacheKey:     "github.com/example/github-issues:github_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{host},
+			Method: "bearer_header",
+		},
 	}
-	return (*h.observations)[0]
 }
 
 func startCountingUpstream(t *testing.T, certPEM, keyPEM []byte) (*http.Server, string, *atomic.Int32, *atomic.Int32) {

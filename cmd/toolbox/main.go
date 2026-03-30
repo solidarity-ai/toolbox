@@ -41,6 +41,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runResolve(args[1:], stdout)
 	case "versions":
 		return runVersions(args[1:], stdout)
+	case "auth":
+		return runAuth(args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
@@ -244,5 +246,6 @@ func printUsage(f io.Writer) {
 	fmt.Fprintln(f, "usage:")
 	fmt.Fprintln(f, "  toolbox resolve [--file FILE] [--upgrade MODULE]")
 	fmt.Fprintln(f, "  toolbox versions [--file FILE] <module>")
+	fmt.Fprintln(f, "  toolbox auth [--tenant TENANT] [PACKAGE_DIR]")
 	fmt.Fprintln(f, "  toolbox mcp serve [--file FILE]")
 }

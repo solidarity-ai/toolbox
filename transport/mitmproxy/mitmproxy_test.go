@@ -581,10 +581,124 @@ func TestMITMProxyPolicyParityOAuth2(t *testing.T) {
 	})
 }
 
+func TestMITMProxyPolicyParityMultiProvider(t *testing.T) {
+	t.Parallel()
+
+	var inheritTokenCalls atomic.Int32
+	inheritTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inheritTokenCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"inherit-access","expires_in":3600}`))
+	}))
+	defer inheritTokenServer.Close()
+
+	var overrideTokenCalls atomic.Int32
+	overrideTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		overrideTokenCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"override-access","expires_in":3600}`))
+	}))
+	defer overrideTokenServer.Close()
+
+	store := seedMixedProxyPolicyStore()
+	inheritPolicy, overridePolicy := mixedOAuth2ProxyPolicies(t, store, "api.example.test", inheritTokenServer, overrideTokenServer)
+
+	inheritHarness := newProxyHarness(t, proxyHarnessConfig{
+		policy:               inheritPolicy,
+		upstreamHostOverride: "api.example.test",
+	})
+	resp := inheritHarness.mustGet(t, "/inherit")
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("inherit status = %d, want 200 (body=%q)", resp.StatusCode, string(body))
+	}
+	resp.Body.Close()
+
+	overrideHarness := newProxyHarness(t, proxyHarnessConfig{
+		policy:               overridePolicy,
+		upstreamHostOverride: "api.example.test",
+	})
+	resp = overrideHarness.mustGet(t, "/override")
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("override status = %d, want 200 (body=%q)", resp.StatusCode, string(body))
+	}
+	resp.Body.Close()
+
+	inheritObs := inheritHarness.singleObservation(t)
+	if inheritObs.RequestHeader.Get("Authorization") != "Bearer inherit-access" {
+		t.Fatalf("inherit authorization = %q, want Bearer inherit-access", inheritObs.RequestHeader.Get("Authorization"))
+	}
+	if inheritObs.RequestHeader.Get("X-Package-Key") != "" {
+		t.Fatalf("inherit X-Package-Key = %q, want empty", inheritObs.RequestHeader.Get("X-Package-Key"))
+	}
+	overrideObs := overrideHarness.singleObservation(t)
+	if overrideObs.RequestHeader.Get("Authorization") != "Bearer override-access" {
+		t.Fatalf("override authorization = %q, want Bearer override-access", overrideObs.RequestHeader.Get("Authorization"))
+	}
+	if overrideObs.RequestHeader.Get("X-Package-Key") != "" {
+		t.Fatalf("override X-Package-Key = %q, want empty to prove replace-not-merge", overrideObs.RequestHeader.Get("X-Package-Key"))
+	}
+	if got := inheritTokenCalls.Load(); got != 1 {
+		t.Fatalf("inherit token endpoint calls = %d, want 1", got)
+	}
+	if got := overrideTokenCalls.Load(); got != 1 {
+		t.Fatalf("override token endpoint calls = %d, want 1", got)
+	}
+}
+
+func TestMITMProxyPolicyParityNoAuth(t *testing.T) {
+	t.Parallel()
+
+	nonePolicy := mixedNoAuthProxyPolicy(t, "public.example.test")
+
+	publicHarness := newProxyHarness(t, proxyHarnessConfig{
+		policy:               nonePolicy,
+		upstreamHostOverride: "public.example.test",
+	})
+	resp := publicHarness.mustGet(t, "/public")
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("public status = %d, want 200 (body=%q)", resp.StatusCode, string(body))
+	}
+	resp.Body.Close()
+	publicObs := publicHarness.singleObservation(t)
+	if publicObs.RequestHeader.Get("Authorization") != "" {
+		t.Fatalf("public authorization = %q, want empty", publicObs.RequestHeader.Get("Authorization"))
+	}
+	if publicObs.RequestHeader.Get("X-Package-Key") != "" {
+		t.Fatalf("public X-Package-Key = %q, want empty", publicObs.RequestHeader.Get("X-Package-Key"))
+	}
+
+	privateHarness := newProxyHarness(t, proxyHarnessConfig{
+		policy:               nonePolicy,
+		upstreamHostOverride: "api.example.test",
+	})
+	resp = privateHarness.mustGet(t, "/private")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("private status = %d, want 403", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `transport denied request to host "api.example.test": not allowed by policy`) {
+		t.Fatalf("body = %q, want explicit allowlist failure", string(body))
+	}
+	if got := privateHarness.upstreamHitCount(); got != 0 {
+		t.Fatalf("private upstream hits = %d, want 0", got)
+	}
+	if got := privateHarness.upstreamDialCount(); got != 0 {
+		t.Fatalf("private upstream dials = %d, want 0", got)
+	}
+}
+
 type proxyHarnessConfig struct {
 	store                secrets.SecretStore
 	allowedHosts         []string
 	rules                []transport.Rule
+	policy               *transport.Policy
 	auditSink            audit.Sink
 	upstreamHostOverride string
 }
@@ -635,9 +749,13 @@ func newProxyHarness(t *testing.T, cfg proxyHarnessConfig) *proxyHarness {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	policy, err := transport.NewPolicyWithOptions(cfg.store, cfg.rules, cfg.allowedHosts, true, transport.WithAuditSink(cfg.auditSink))
-	if err != nil {
-		t.Fatalf("NewPolicy: %v", err)
+	policy := cfg.policy
+	if policy == nil {
+		var err error
+		policy, err = transport.NewPolicyWithOptions(cfg.store, cfg.rules, cfg.allowedHosts, true, transport.WithAuditSink(cfg.auditSink))
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
 	}
 	proxy.Policy = policy
 	proxy.UpstreamTLSConfig = &tls.Config{RootCAs: upstreamPool}
@@ -715,6 +833,69 @@ func (h *proxyHarness) observations(t *testing.T) []observedExchange {
 	out := make([]observedExchange, len(*h.observationLog))
 	copy(out, *h.observationLog)
 	return out
+}
+
+func seedMixedProxyPolicyStore() *testutil.TestSecretStore {
+	store := testutil.NewTestSecretStore()
+	store.SeedStrings(map[string]string{
+		"github.com/example/mixed-auth/shared_oauth/client_id":       "client-123",
+		"github.com/example/mixed-auth/shared_oauth/client_secret":   "secret-123",
+		"github.com/example/mixed-auth/shared_oauth/refresh_token":   "refresh-123",
+		"github.com/example/mixed-auth/override_oauth/client_id":     "client-456",
+		"github.com/example/mixed-auth/override_oauth/client_secret": "secret-456",
+		"github.com/example/mixed-auth/override_oauth/refresh_token": "refresh-456",
+	})
+	return store
+}
+
+func mixedOAuth2ProxyPolicies(t *testing.T, store *testutil.TestSecretStore, protectedHost string, inheritTokenServer, overrideTokenServer *httptest.Server) (*transport.Policy, *transport.Policy) {
+	t.Helper()
+
+	inheritPolicy, err := transport.NewPolicyWithOptions(store, []transport.Rule{{
+		Name:               "shared_oauth",
+		SecretKey:          "github.com/example/mixed-auth/shared_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://auth.example.com/oauth/authorize", TokenURL: inheritTokenServer.URL},
+		OAuth2SecretFamily: "github.com/example/mixed-auth/shared_oauth",
+		OAuth2CacheKey:     "github.com/example/mixed-auth:shared_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{protectedHost},
+			Method: "bearer_header",
+		},
+	}}, []string{protectedHost}, true, transport.WithRefreshHTTPClient(inheritTokenServer.Client()))
+	if err != nil {
+		t.Fatalf("inherit NewPolicyWithOptions: %v", err)
+	}
+
+	overridePolicy, err := transport.NewPolicyWithOptions(store, []transport.Rule{{
+		Name:               "override_oauth",
+		SecretKey:          "github.com/example/mixed-auth/override_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://auth.example.com/oauth/authorize", TokenURL: overrideTokenServer.URL},
+		OAuth2SecretFamily: "github.com/example/mixed-auth/override_oauth",
+		OAuth2CacheKey:     "github.com/example/mixed-auth:override_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{protectedHost},
+			Method: "bearer_header",
+		},
+	}}, []string{protectedHost}, true, transport.WithRefreshHTTPClient(overrideTokenServer.Client()))
+	if err != nil {
+		t.Fatalf("override NewPolicyWithOptions: %v", err)
+	}
+	return inheritPolicy, overridePolicy
+}
+
+func mixedNoAuthProxyPolicy(t *testing.T, publicHost string) *transport.Policy {
+	t.Helper()
+
+	policy, err := transport.NewPolicy(nil, nil, []string{publicHost}, true)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected no-auth runtime policy")
+	}
+	return policy
 }
 
 func oauth2ProxyRule(tokenURL string, host string) transport.Rule {

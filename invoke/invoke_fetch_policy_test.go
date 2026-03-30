@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -449,6 +450,236 @@ func TestGoFetchWithTransportPolicyOAuth2RefreshParity(t *testing.T) {
 			t.Fatalf("collector events mismatch (-want +got):\n%s", diff)
 		}
 	})
+}
+
+func TestGoFetchWithTransportPolicyOAuth2MultiProviderSelectionStaysIsolated(t *testing.T) {
+	t.Parallel()
+
+	t.Run("override provider refreshes through its own policy instead of reusing inherited cache", func(t *testing.T) {
+		t.Parallel()
+
+		var requestMu sync.Mutex
+		requests := make([]fetchPolicyObservation, 0, 2)
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestMu.Lock()
+			requests = append(requests, fetchPolicyObservation{
+				Path:          r.URL.Path,
+				Authorization: r.Header.Get("Authorization"),
+				PackageKey:    r.Header.Get("X-Package-Key"),
+			})
+			requestMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer apiServer.Close()
+
+		var inheritTokenCalls atomic.Int32
+		inheritTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			inheritTokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"inherit-access","expires_in":3600}`))
+		}))
+		defer inheritTokenServer.Close()
+
+		var overrideTokenCalls atomic.Int32
+		overrideTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			overrideTokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"override-access","expires_in":3600}`))
+		}))
+		defer overrideTokenServer.Close()
+
+		protectedHost := mustParseFetchHostname(t, apiServer.URL)
+		inheritPolicy, overridePolicy := mixedOAuth2FetchPolicies(t, seedMixedFetchPolicyStore(), protectedHost, inheritTokenServer, overrideTokenServer)
+
+		if _, err := goFetchWithTransportPolicy(inheritPolicy)(apiServer.URL+"/inherit", "GET", "[]", ""); err != nil {
+			t.Fatalf("inherit goFetchWithTransportPolicy: %v", err)
+		}
+		if _, err := goFetchWithTransportPolicy(overridePolicy)(apiServer.URL+"/override", "GET", "[]", ""); err != nil {
+			t.Fatalf("override goFetchWithTransportPolicy: %v", err)
+		}
+
+		if got := inheritTokenCalls.Load(); got != 1 {
+			t.Fatalf("inherit token endpoint calls = %d, want 1", got)
+		}
+		if got := overrideTokenCalls.Load(); got != 1 {
+			t.Fatalf("override token endpoint calls = %d, want 1", got)
+		}
+
+		requestMu.Lock()
+		defer requestMu.Unlock()
+		if len(requests) != 2 {
+			t.Fatalf("request count = %d, want 2", len(requests))
+		}
+		if requests[0].Path != "/inherit" || requests[0].Authorization != "Bearer inherit-access" || requests[0].PackageKey != "" {
+			t.Fatalf("inherit request = %+v, want bearer from inherit policy only", requests[0])
+		}
+		if requests[1].Path != "/override" || requests[1].Authorization != "Bearer override-access" {
+			t.Fatalf("override request = %+v, want override bearer token", requests[1])
+		}
+		if requests[1].PackageKey != "" {
+			t.Fatalf("override package key = %q, want empty to prove replace-not-merge", requests[1].PackageKey)
+		}
+	})
+
+	t.Run("override malformed refresh fails closed without falling back to inherited policy", func(t *testing.T) {
+		t.Parallel()
+
+		var apiHits atomic.Int32
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer apiServer.Close()
+
+		var inheritTokenCalls atomic.Int32
+		inheritTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			inheritTokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"inherit-access","expires_in":3600}`))
+		}))
+		defer inheritTokenServer.Close()
+
+		var overrideTokenCalls atomic.Int32
+		overrideTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			overrideTokenCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"expires_in":3600}`))
+		}))
+		defer overrideTokenServer.Close()
+
+		protectedHost := mustParseFetchHostname(t, apiServer.URL)
+		inheritPolicy, overridePolicy := mixedOAuth2FetchPolicies(t, seedMixedFetchPolicyStore(), protectedHost, inheritTokenServer, overrideTokenServer)
+
+		if _, err := goFetchWithTransportPolicy(inheritPolicy)(apiServer.URL+"/inherit", "GET", "[]", ""); err != nil {
+			t.Fatalf("inherit goFetchWithTransportPolicy: %v", err)
+		}
+		_, err := goFetchWithTransportPolicy(overridePolicy)(apiServer.URL+"/override", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected override malformed refresh to fail before outbound fetch")
+		}
+		if !strings.Contains(err.Error(), "response parse") || !strings.Contains(err.Error(), "access_token is required") {
+			t.Fatalf("error = %v, want malformed refresh failure context", err)
+		}
+		if got := apiHits.Load(); got != 1 {
+			t.Fatalf("protected upstream hits = %d, want 1 successful inherit request only", got)
+		}
+		if got := inheritTokenCalls.Load(); got != 1 {
+			t.Fatalf("inherit token endpoint calls = %d, want 1", got)
+		}
+		if got := overrideTokenCalls.Load(); got != 1 {
+			t.Fatalf("override token endpoint calls = %d, want 1", got)
+		}
+	})
+}
+
+func TestGoFetchWithTransportPolicyNoAuthPublicHostStaysUnauthenticated(t *testing.T) {
+	t.Parallel()
+
+	var publicHits atomic.Int32
+	publicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		publicHits.Add(1)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization header = %q, want empty for no-auth tool", got)
+		}
+		if got := r.Header.Get("X-Package-Key"); got != "" {
+			t.Fatalf("X-Package-Key header = %q, want empty for no-auth tool", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"surface":"public"}`))
+	}))
+	defer publicServer.Close()
+
+	nonePolicy := mixedNoAuthFetchPolicy(t, mustParseFetchHostname(t, publicServer.URL))
+
+	result, err := goFetchWithTransportPolicy(nonePolicy)(publicServer.URL+"/public", "GET", "[]", "")
+	if err != nil {
+		t.Fatalf("goFetchWithTransportPolicy public no-auth: %v", err)
+	}
+	if result.Status != http.StatusOK || !strings.Contains(result.Body, `"surface":"public"`) {
+		t.Fatalf("public result = %+v, want successful unauthenticated public fetch", result)
+	}
+	if got := publicHits.Load(); got != 1 {
+		t.Fatalf("public upstream hits = %d, want 1", got)
+	}
+
+	_, err = goFetchWithTransportPolicy(nonePolicy)("https://example.invalid/private", "GET", "[]", "")
+	if err == nil {
+		t.Fatal("expected unmatched host to stay fail-closed for no-auth tool")
+	}
+	if !strings.Contains(err.Error(), "not allowed by policy") {
+		t.Fatalf("error = %v, want not allowed by policy", err)
+	}
+}
+
+type fetchPolicyObservation struct {
+	Path          string
+	Authorization string
+	PackageKey    string
+}
+
+func seedMixedFetchPolicyStore() *testutil.TestSecretStore {
+	store := testutil.NewTestSecretStore()
+	store.SeedStrings(map[string]string{
+		"github.com/example/mixed-auth/shared_oauth/client_id":       "client-123",
+		"github.com/example/mixed-auth/shared_oauth/client_secret":   "secret-123",
+		"github.com/example/mixed-auth/shared_oauth/refresh_token":   "refresh-123",
+		"github.com/example/mixed-auth/override_oauth/client_id":     "client-456",
+		"github.com/example/mixed-auth/override_oauth/client_secret": "secret-456",
+		"github.com/example/mixed-auth/override_oauth/refresh_token": "refresh-456",
+	})
+	return store
+}
+
+func mixedOAuth2FetchPolicies(t *testing.T, store *testutil.TestSecretStore, protectedHost string, inheritTokenServer, overrideTokenServer *httptest.Server) (*transport.Policy, *transport.Policy) {
+	t.Helper()
+
+	inheritPolicy, err := transport.NewPolicyWithOptions(store, []transport.Rule{{
+		Name:               "shared_oauth",
+		SecretKey:          "github.com/example/mixed-auth/shared_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://auth.example.com/oauth/authorize", TokenURL: inheritTokenServer.URL},
+		OAuth2SecretFamily: "github.com/example/mixed-auth/shared_oauth",
+		OAuth2CacheKey:     "github.com/example/mixed-auth:shared_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{protectedHost},
+			Method: "bearer_header",
+		},
+	}}, []string{protectedHost}, true, transport.WithRefreshHTTPClient(inheritTokenServer.Client()))
+	if err != nil {
+		t.Fatalf("inherit NewPolicyWithOptions: %v", err)
+	}
+
+	overridePolicy, err := transport.NewPolicyWithOptions(store, []transport.Rule{{
+		Name:               "override_oauth",
+		SecretKey:          "github.com/example/mixed-auth/override_oauth/access_token",
+		Type:               tooldef.CredentialTypeOAuth2,
+		OAuth2Provider:     &tooldef.OAuth2ProviderConfig{AuthURL: "https://auth.example.com/oauth/authorize", TokenURL: overrideTokenServer.URL},
+		OAuth2SecretFamily: "github.com/example/mixed-auth/override_oauth",
+		OAuth2CacheKey:     "github.com/example/mixed-auth:override_oauth",
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{protectedHost},
+			Method: "bearer_header",
+		},
+	}}, []string{protectedHost}, true, transport.WithRefreshHTTPClient(overrideTokenServer.Client()))
+	if err != nil {
+		t.Fatalf("override NewPolicyWithOptions: %v", err)
+	}
+	return inheritPolicy, overridePolicy
+}
+
+func mixedNoAuthFetchPolicy(t *testing.T, publicHost string) *transport.Policy {
+	t.Helper()
+
+	policy, err := transport.NewPolicy(nil, nil, []string{publicHost}, true)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected no-auth runtime policy")
+	}
+	return policy
 }
 
 func mustParseFetchHostname(t *testing.T, raw string) string {

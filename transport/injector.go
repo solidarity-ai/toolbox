@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	pathpkg "path"
@@ -19,6 +20,7 @@ import (
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -78,6 +80,12 @@ type oauth2CachedToken struct {
 type oauth2TokenResponse struct {
 	AccessToken string          `json:"access_token"`
 	ExpiresIn   json.RawMessage `json:"expires_in"`
+}
+
+type oauth2CaptureTransport struct {
+	base       http.RoundTripper
+	lastStatus int
+	lastBody   []byte
 }
 
 // WithClock injects a deterministic clock for cache-expiry testing.
@@ -286,40 +294,37 @@ func (i *Injector) refreshOAuth2Token(ctx context.Context, rule Rule) (oauth2Cac
 		return oauth2CachedToken{}, err
 	}
 
-	form := url.Values{}
-	form.Set("grant_type", "refresh_token")
-	form.Set("client_id", refreshSecrets.clientID)
-	form.Set("refresh_token", refreshSecrets.refreshToken)
-	if refreshSecrets.clientSecret != "" {
-		form.Set("client_secret", refreshSecrets.clientSecret)
+	refreshClient := *i.refreshClient
+	captureTransport := &oauth2CaptureTransport{base: refreshClient.Transport}
+	refreshClient.Transport = captureTransport
+	refreshCtx := context.WithValue(ctx, oauth2.HTTPClient, &refreshClient)
+	config := &oauth2.Config{
+		ClientID:     refreshSecrets.clientID,
+		ClientSecret: refreshSecrets.clientSecret,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   rule.OAuth2Provider.AuthURL,
+			TokenURL:  rule.OAuth2Provider.TokenURL,
+			AuthStyle: oauth2.AuthStyleInParams,
+		},
+		Scopes: append([]string(nil), rule.Scopes...),
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rule.OAuth2Provider.TokenURL, bytes.NewBufferString(form.Encode()))
+	refreshed, err := config.TokenSource(refreshCtx, &oauth2.Token{RefreshToken: refreshSecrets.refreshToken}).Token()
 	if err != nil {
-		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := i.refreshClient.Do(req)
-	if err != nil {
-		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "token request", fmt.Errorf("provider returned status %d", resp.StatusCode))
+		if captureTransport.lastStatus >= 200 && captureTransport.lastStatus < 300 {
+			if parseErr := oauth2ResponseParseError(captureTransport.lastBody); parseErr != nil {
+				return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", parseErr)
+			}
+		}
+		stage, cause := sanitizeOAuth2TokenSourceError(err)
+		return oauth2CachedToken{}, i.oauth2RefreshError(rule, stage, cause)
 	}
 
-	var payload oauth2TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", err)
-	}
-	accessToken := strings.TrimSpace(payload.AccessToken)
+	accessToken := strings.TrimSpace(refreshed.AccessToken)
 	if accessToken == "" {
 		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", fmt.Errorf("access_token is required"))
 	}
-	expiresIn, err := parseOAuth2ExpiresIn(payload.ExpiresIn)
+	expiresIn, err := oauth2ExpiresIn(captureTransport.lastBody)
 	if err != nil {
 		return oauth2CachedToken{}, i.oauth2RefreshError(rule, "response parse", err)
 	}
@@ -328,6 +333,77 @@ func (i *Injector) refreshOAuth2Token(ctx context.Context, rule Rule) (oauth2Cac
 		accessToken: accessToken,
 		expiresAt:   i.now().Add(time.Duration(expiresIn) * time.Second),
 	}, nil
+}
+
+func sanitizeOAuth2TokenSourceError(err error) (stage string, cause error) {
+	var retrieveErr *oauth2.RetrieveError
+	switch {
+	case errors.As(err, &retrieveErr):
+		if retrieveErr.Response != nil {
+			return "token request", fmt.Errorf("provider returned status %d", retrieveErr.Response.StatusCode)
+		}
+		return "response parse", fmt.Errorf("oauth2 token retrieval failed")
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "token request", err
+	default:
+		msg := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(msg, "access_token"):
+			return "response parse", fmt.Errorf("access_token is required")
+		case strings.Contains(msg, "expires_in"):
+			return "response parse", fmt.Errorf("expires_in is required")
+		case strings.Contains(msg, "parse") || strings.Contains(msg, "decode") || strings.Contains(msg, "json"):
+			return "response parse", fmt.Errorf("oauth2 response parse failed")
+		default:
+			return "token request", err
+		}
+	}
+}
+
+func (t *oauth2CaptureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	t.lastStatus = resp.StatusCode
+	t.lastBody = append(t.lastBody[:0], body...)
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	return resp, nil
+}
+
+func oauth2ResponseParseError(body []byte) error {
+	if len(body) == 0 {
+		return nil
+	}
+	var payload oauth2TokenResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return fmt.Errorf("oauth2 response parse failed")
+	}
+	if strings.TrimSpace(payload.AccessToken) == "" {
+		return fmt.Errorf("access_token is required")
+	}
+	_, err := parseOAuth2ExpiresIn(payload.ExpiresIn)
+	return err
+}
+
+func oauth2ExpiresIn(body []byte) (int64, error) {
+	var payload oauth2TokenResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, fmt.Errorf("oauth2 response parse failed")
+	}
+	if strings.TrimSpace(payload.AccessToken) == "" {
+		return 0, fmt.Errorf("access_token is required")
+	}
+	return parseOAuth2ExpiresIn(payload.ExpiresIn)
 }
 
 type oauth2RefreshSecrets struct {

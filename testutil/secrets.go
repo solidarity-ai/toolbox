@@ -33,6 +33,16 @@ func (s *TestSecretStore) Seed(entries map[string][]byte) {
 	}
 }
 
+// SeedStrings prepopulates the store from string values without exposing test
+// code to repeated []byte conversions.
+func (s *TestSecretStore) SeedStrings(entries map[string]string) {
+	converted := make(map[string][]byte, len(entries))
+	for k, v := range entries {
+		converted[k] = []byte(v)
+	}
+	s.Seed(converted)
+}
+
 func (s *TestSecretStore) Get(_ context.Context, key string) ([]byte, error) {
 	if key == "" {
 		return nil, secrets.ErrInvalidKey

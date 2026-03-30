@@ -2,72 +2,59 @@ package invoke_test
 
 import (
 	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/solidarity-ai/toolbox/invoke"
+	"github.com/solidarity-ai/toolbox/packaging"
+	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
-func TestRunFetchInjectsTransportManagedBearerToken(t *testing.T) {
-	t.Parallel()
+func TestGoFetchAuthEmulateRouteReturns401WithoutInjectedAuth(t *testing.T) {
+	srv := emulatetest.Start(t)
+	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-unauth")
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesCredentialHost(t, workDir, "example.invalid")
 
-	secretStore := testutil.NewTestSecretStore()
-	secretStore.Seed(map[string][]byte{
-		"github.com/example/github-issues/github_token": []byte("secret-token"),
+	resolved := resolveGithubIssuesToolset(t, workDir, nil)
+	_, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
+		"owner":  owner,
+		"repo":   repo,
+		"number": issueNumber,
 	})
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {
-			http.Error(w, "missing transport auth", http.StatusUnauthorized)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"ok":true}`)
-	}))
-	defer server.Close()
-
-	resolved := authFetchToolset(t, secretStore, server.URL)
-	result, err := invoke.Run(resolved, "github.issues.fetch", map[string]any{"url": server.URL})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	if err == nil {
+		t.Fatal("expected auth-gated emulate route to reject unauthenticated fetch")
 	}
-
-	var payload struct {
-		Status int    `json:"status"`
-		Body   string `json:"body"`
+	if !strings.Contains(err.Error(), "GitHub API 401") {
+		t.Fatalf("error = %v, want GitHub API 401", err)
 	}
-	if err := json.Unmarshal([]byte(result), &payload); err != nil {
-		t.Fatalf("unmarshal result: %v; raw=%s", err, result)
+	if !strings.Contains(err.Error(), "Authorization: Bearer <redacted>") {
+		t.Fatalf("error = %v, want auth-gate diagnostic", err)
 	}
-	if payload.Status != 200 {
-		t.Fatalf("status = %d, want 200; raw=%s", payload.Status, result)
-	}
-	if payload.Body != `{"ok":true}` {
-		t.Fatalf("body = %q, want {\"ok\":true}", payload.Body)
+	if strings.Contains(err.Error(), wantTitle) {
+		t.Fatalf("error leaked upstream issue payload instead of failing at auth gate: %v", err)
 	}
 }
 
-func TestRunFetchMissingTransportCredentialReturnsHelpfulError(t *testing.T) {
-	t.Parallel()
+func TestGoFetchAuthMissingTransportCredentialReturnsHelpfulError(t *testing.T) {
+	srv := emulatetest.Start(t)
+	owner, repo, issueNumber, _ := seedGithubIssueCanary(t, srv, "go-fetch-missing-secret")
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "should not be reached", http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	resolved := authFetchToolset(t, nil, server.URL)
-	_, err := invoke.Run(resolved, "github.issues.fetch", map[string]any{"url": server.URL})
+	resolved := resolveGithubIssuesToolset(t, workDir, nil)
+	_, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
+		"owner":  owner,
+		"repo":   repo,
+		"number": issueNumber,
+	})
 	if err == nil {
-		t.Fatal("expected missing secret store error")
+		t.Fatal("expected missing transport secret error")
 	}
 	if !strings.Contains(err.Error(), "no secret store") {
 		t.Fatalf("error = %v, want missing secret store context", err)
@@ -77,54 +64,119 @@ func TestRunFetchMissingTransportCredentialReturnsHelpfulError(t *testing.T) {
 	}
 }
 
-func authFetchToolset(t testing.TB, secretStore secrets.SecretStore, serverURL string) toolset.ResolvedToolset {
+func TestGoFetchAuthEmulateRouteSucceedsWithResolvedTransportAuth(t *testing.T) {
+	srv := emulatetest.Start(t)
+	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-auth")
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+
+	secretStore := testutil.NewTestSecretStore()
+	secretStore.SeedStrings(map[string]string{
+		"github.com/example/github-issues/github_token": srv.Token(),
+	})
+
+	resolved := resolveGithubIssuesToolset(t, workDir, secretStore)
+	result, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
+		"owner":  owner,
+		"repo":   repo,
+		"number": issueNumber,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var issue struct {
+		Number int      `json:"number"`
+		Title  string   `json:"title"`
+		State  string   `json:"state"`
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(result), &issue); err != nil {
+		t.Fatalf("unmarshal result: %v; raw=%s", err, result)
+	}
+	if issue.Number != issueNumber {
+		t.Fatalf("issue number = %d, want %d", issue.Number, issueNumber)
+	}
+	if issue.Title != wantTitle {
+		t.Fatalf("issue title = %q, want %q", issue.Title, wantTitle)
+	}
+	if issue.State != "open" {
+		t.Fatalf("issue state = %q, want open", issue.State)
+	}
+}
+
+func resolveGithubIssuesToolset(t testing.TB, workDir string, secretStore secrets.SecretStore) toolset.ResolvedToolset {
 	t.Helper()
 
-	parsedURL, err := url.Parse(serverURL)
+	loaded, err := packaging.LoadDev(workDir)
 	if err != nil {
-		t.Fatalf("parse server url: %v", err)
+		t.Fatalf("LoadDev: %v", err)
 	}
 
-	pkg := tooldef.Package{
-		Module:  "github.com/example/github-issues",
-		Name:    "github-issues",
-		Runtime: tooldef.RuntimeTypeScriptSandbox,
-		Credentials: []tooldef.PackageCredential{{
-			Name: "github_token",
-			Type: tooldef.CredentialTypeBearer,
-			Inject: tooldef.CredentialInject{
-				Hosts:  []string{parsedURL.Hostname()},
-				Method: "bearer_header",
-			},
-		}},
-	}
-
-	toolFS := fstest.MapFS{
-		"tools/fetch.ts": &fstest.MapFile{Data: []byte(`
-export default async function tool(params: { url: string }, _ctx: unknown) {
-  const resp = await fetch(params.url, {
-    headers: {
-      "Accept": "application/json"
-    }
-  });
-  return { status: resp.status, body: await resp.text() };
-}
-`)},
-	}
-
-	rt := tooldef.ResolvedTool{
-		Name:        "github.issues.fetch",
-		Description: "Fetch an authenticated issue endpoint",
-		Package:     &pkg,
-		TS: &tooldef.TSToolDef{
-			Entry: "tools/fetch.ts",
-			Files: toolFS,
-		},
-	}
-
-	resolved, err := toolset.ResolveTools([]tooldef.ResolvedTool{rt}, toolset.Config{SecretStore: secretStore})
+	resolved, err := toolset.ResolveTools(loaded.ResolvedTools(), toolset.Config{SecretStore: secretStore})
 	if err != nil {
 		t.Fatalf("ResolveTools: %v", err)
 	}
 	return resolved
+}
+
+func seedGithubIssueCanary(t testing.TB, srv *emulatetest.Server, prefix string) (owner, repo string, issueNumber int, title string) {
+	t.Helper()
+
+	seed := srv.Seed()
+	repo = fmt.Sprintf("%s-%s", prefix, strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")))
+	owner = "admin"
+
+	createdRepo, err := seed.CreateRepo(owner, repo)
+	if err != nil && !strings.Contains(err.Error(), "Repository already exists") {
+		t.Fatalf("CreateRepo(%s/%s): %v", owner, repo, err)
+	}
+	if createdRepo != nil && createdRepo.FullName != "" {
+		parts := strings.SplitN(createdRepo.FullName, "/", 2)
+		if len(parts) == 2 {
+			owner = parts[0]
+			repo = parts[1]
+		}
+	}
+
+	title = fmt.Sprintf("auth canary %s", prefix)
+	issue, err := seed.CreateIssue(owner, repo, title)
+	if err != nil {
+		t.Fatalf("CreateIssue(%s/%s): %v", owner, repo, err)
+	}
+	return owner, repo, issue.Number, title
+}
+
+func rewriteGithubIssuesCredentialHost(t testing.TB, workDir, host string) {
+	t.Helper()
+	manifestPath := workDir + "/toolbox.devpkg.json"
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest for host rewrite: %v", err)
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode manifest for host rewrite: %v", err)
+	}
+	credentials, ok := manifest["credentials"].([]any)
+	if !ok || len(credentials) != 1 {
+		t.Fatalf("credentials malformed in %s: %#v", manifestPath, manifest["credentials"])
+	}
+	credential, ok := credentials[0].(map[string]any)
+	if !ok {
+		t.Fatalf("credential malformed in %s: %#v", manifestPath, credentials[0])
+	}
+	inject, ok := credential["inject"].(map[string]any)
+	if !ok {
+		t.Fatalf("inject config malformed in %s: %#v", manifestPath, credential["inject"])
+	}
+	inject["hosts"] = []string{host}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("encode manifest for host rewrite: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, append(updated, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest for host rewrite: %v", err)
+	}
 }

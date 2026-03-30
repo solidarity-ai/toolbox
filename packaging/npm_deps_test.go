@@ -2,6 +2,7 @@ package packaging_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,9 +11,11 @@ import (
 
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
+	"github.com/solidarity-ai/toolbox/registry/testutil/emulatetest"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -189,28 +192,47 @@ func npmInstall(t *testing.T, dir string) {
 	}
 }
 
-// TestNpmDepsE2E runs the github-issues tool against the real GitHub API.
-// Uses GITHUB_TOKEN env var, or falls back to `gh auth token`, but injects it
-// through the package-declared transport credential instead of a tool param.
-func TestNpmDepsE2E(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping E2E test in short mode")
-	}
-	token := githubToken(t)
+// TestFixtureRepairGithubIssuesFixtureSetup proves the copied fixture can be
+// rewritten toward the auth-gated emulate façade and still install npm deps.
+func TestFixtureRepairGithubIssuesFixtureSetup(t *testing.T) {
+	srv := emulatetest.Start(t)
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
 
-	fixtureDir := findFixture(t, "github-issues")
-	workDir := copyFixtureToTempDir(t, fixtureDir)
-	npmInstall(t, workDir)
+	if _, err := os.Stat(filepath.Join(workDir, "node_modules")); err != nil {
+		t.Fatalf("node_modules not found after fixture prep: %v", err)
+	}
 
 	loaded, err := packaging.LoadDev(workDir)
 	if err != nil {
 		t.Fatalf("LoadDev: %v", err)
 	}
-	assertGithubIssuesAuthContract(t, loaded.Package)
+	assertGithubIssuesAuthContractForHost(t, loaded.Package, "127.0.0.1")
+
+	toolSource, err := os.ReadFile(filepath.Join(workDir, "tools", "github-issues.get.ts"))
+	if err != nil {
+		t.Fatalf("read rewritten tool source: %v", err)
+	}
+	if !strings.Contains(string(toolSource), strings.TrimRight(srv.AuthBaseURL(), "/")+"/repos/") {
+		t.Fatalf("rewritten tool source did not target auth-gated emulate URL %q", srv.AuthBaseURL())
+	}
+}
+
+// TestNpmDepsE2E runs the github-issues tool against an auth-gated emulate
+// façade, with transport auth injected from the package-scoped secret key.
+func TestNpmDepsE2E(t *testing.T) {
+	srv := emulatetest.Start(t)
+	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "packaging-e2e")
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+
+	loaded, err := packaging.LoadDev(workDir)
+	if err != nil {
+		t.Fatalf("LoadDev: %v", err)
+	}
+	assertGithubIssuesAuthContractForHost(t, loaded.Package, "127.0.0.1")
 
 	secretStore := testutil.NewTestSecretStore()
-	secretStore.Seed(map[string][]byte{
-		"github.com/example/github-issues/github_token": []byte(token),
+	secretStore.SeedStrings(map[string]string{
+		"github.com/example/github-issues/github_token": srv.Token(),
 	})
 
 	resolved, err := toolset.ResolveTools(loaded.ResolvedTools(), toolset.Config{SecretStore: secretStore})
@@ -219,11 +241,10 @@ func TestNpmDepsE2E(t *testing.T) {
 	}
 	assertToolAuthHiddenFromAgentView(t, resolved)
 
-	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
 	result, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
-		"owner":  "octocat",
-		"repo":   "Hello-World",
-		"number": 1,
+		"owner":  owner,
+		"repo":   repo,
+		"number": issueNumber,
 	})
 	if err != nil {
 		t.Fatalf("invoke.Run: %v", err)
@@ -239,28 +260,24 @@ func TestNpmDepsE2E(t *testing.T) {
 		t.Fatalf("unmarshal result: %v\nraw: %s", err, result)
 	}
 
-	if issue.Number != 1 {
-		t.Errorf("expected issue #1, got #%d", issue.Number)
+	if issue.Number != issueNumber {
+		t.Fatalf("expected issue #%d, got #%d", issueNumber, issue.Number)
 	}
-	if issue.Title == "" {
-		t.Error("expected non-empty title")
+	if issue.Title != wantTitle {
+		t.Fatalf("expected issue title %q, got %q", wantTitle, issue.Title)
 	}
-	t.Logf("fetched issue #%d: %q (state=%s)", issue.Number, issue.Title, issue.State)
-}
-
-func githubToken(t *testing.T) string {
-	t.Helper()
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
+	if issue.State != "open" {
+		t.Fatalf("expected open issue state, got %q", issue.State)
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
-	if err != nil {
-		t.Skip("GITHUB_TOKEN not set and `gh auth token` failed — set GITHUB_TOKEN to enable this test")
-	}
-	return strings.TrimSpace(string(out))
+	t.Logf("fetched issue #%d through auth-gated emulate façade: %q (state=%s)", issue.Number, issue.Title, issue.State)
 }
 
 func assertGithubIssuesAuthContract(t *testing.T, pkg tooldef.Package) {
+	t.Helper()
+	assertGithubIssuesAuthContractForHost(t, pkg, "api.github.com")
+}
+
+func assertGithubIssuesAuthContractForHost(t *testing.T, pkg tooldef.Package, wantHost string) {
 	t.Helper()
 	if got := pkg.Module.String(); got != "github.com/example/github-issues" {
 		t.Fatalf("package module = %q, want github.com/example/github-issues", got)
@@ -275,8 +292,8 @@ func assertGithubIssuesAuthContract(t *testing.T, pkg tooldef.Package) {
 	if cred.Type != tooldef.CredentialTypeBearer {
 		t.Fatalf("credential type = %q, want bearer", cred.Type)
 	}
-	if len(cred.Inject.Hosts) != 1 || cred.Inject.Hosts[0] != "api.github.com" {
-		t.Fatalf("credential hosts = %v, want [api.github.com]", cred.Inject.Hosts)
+	if len(cred.Inject.Hosts) != 1 || cred.Inject.Hosts[0] != wantHost {
+		t.Fatalf("credential hosts = %v, want [%s]", cred.Inject.Hosts, wantHost)
 	}
 	if cred.Inject.Method != "bearer_header" {
 		t.Fatalf("credential inject method = %q, want bearer_header", cred.Inject.Method)
@@ -308,6 +325,33 @@ func assertToolAuthHiddenFromAgentView(t *testing.T, resolved toolset.ResolvedTo
 	if _, ok := props["github_token"]; ok {
 		t.Fatal("transport credential should not appear in AgentView schema")
 	}
+}
+
+func seedGithubIssueCanary(t testing.TB, srv *emulatetest.Server, prefix string) (owner, repo string, issueNumber int, title string) {
+	t.Helper()
+
+	seed := srv.Seed()
+	owner = "admin"
+	repo = fmt.Sprintf("%s-%s", prefix, strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")))
+
+	createdRepo, err := seed.CreateRepo(owner, repo)
+	if err != nil && !strings.Contains(err.Error(), "Repository already exists") {
+		t.Fatalf("CreateRepo(%s/%s): %v", owner, repo, err)
+	}
+	if createdRepo != nil && createdRepo.FullName != "" {
+		parts := strings.SplitN(createdRepo.FullName, "/", 2)
+		if len(parts) == 2 {
+			owner = parts[0]
+			repo = parts[1]
+		}
+	}
+
+	title = fmt.Sprintf("auth canary %s", prefix)
+	issue, err := seed.CreateIssue(owner, repo, title)
+	if err != nil {
+		t.Fatalf("CreateIssue(%s/%s): %v", owner, repo, err)
+	}
+	return owner, repo, issue.Number, title
 }
 
 // Ensure quickts is used (imported for EmitBundle).

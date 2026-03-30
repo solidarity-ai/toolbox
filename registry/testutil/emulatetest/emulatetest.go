@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -33,12 +34,15 @@ var (
 
 // Server manages a shared emulate subprocess for integration tests.
 type Server struct {
-	baseURL string
-	port    int
-	cmd     *exec.Cmd
-	output  *bytes.Buffer
-	waitCh  <-chan error
-	client  *http.Client
+	baseURL     string
+	authBaseURL string
+	port        int
+	cmd         *exec.Cmd
+	output      *bytes.Buffer
+	waitCh      <-chan error
+	client      *http.Client
+	rawClient   *http.Client
+	authProxy   *httptest.Server
 }
 
 // Start boots emulate exactly once per test binary and reuses the same server
@@ -60,14 +64,29 @@ func Start(t *testing.T) *Server {
 	return sharedServer
 }
 
-// BaseURL returns the local emulate base URL.
+// BaseURL returns the raw local emulate base URL.
 func (s *Server) BaseURL() string {
 	return s.baseURL
+}
+
+// AuthBaseURL returns the auth-gated façade URL backed by emulate.
+func (s *Server) AuthBaseURL() string {
+	return s.authBaseURL
 }
 
 // Client returns an HTTP client with the emulate admin auth header attached.
 func (s *Server) Client() *http.Client {
 	return s.client
+}
+
+// RawClient returns an HTTP client without implicit auth headers.
+func (s *Server) RawClient() *http.Client {
+	return s.rawClient
+}
+
+// Token returns the shared test token accepted by the auth-gated façade.
+func (s *Server) Token() string {
+	return testToken
 }
 
 // Port returns the TCP port emulate is listening on.
@@ -130,14 +149,18 @@ func startServer(t *testing.T) (*Server, string, error) {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				authProxy := newAuthProxy(t, baseURL)
 				t.Logf("emulatetest: emulate ready at %s", baseURL)
 				return &Server{
-					baseURL: baseURL,
-					port:    port,
-					cmd:     cmd,
-					output:  output,
-					waitCh:  waitCh,
-					client:  newAuthedClient(),
+					baseURL:     baseURL,
+					authBaseURL: authProxy.URL,
+					port:        port,
+					cmd:         cmd,
+					output:      output,
+					waitCh:      waitCh,
+					client:      newAuthedClient(),
+					rawClient:   &http.Client{Timeout: httpClientTimeout},
+					authProxy:   authProxy,
 				}, "", nil
 			}
 			lastErr = fmt.Errorf("GET %s/rate_limit returned %d", baseURL, resp.StatusCode)
@@ -159,7 +182,13 @@ func startServer(t *testing.T) (*Server, string, error) {
 
 func shutdownSharedServer() {
 	shutdownOnce.Do(func() {
-		if sharedServer == nil || sharedServer.cmd == nil {
+		if sharedServer == nil {
+			return
+		}
+		if sharedServer.authProxy != nil {
+			sharedServer.authProxy.Close()
+		}
+		if sharedServer.cmd == nil {
 			return
 		}
 		killProcess(sharedServer.cmd)
@@ -190,6 +219,52 @@ func newAuthedClient() *http.Client {
 			token: testToken,
 		},
 	}
+}
+
+func newAuthProxy(t *testing.T, upstreamBaseURL string) *httptest.Server {
+	t.Helper()
+	plainClient := &http.Client{Timeout: httpClientTimeout}
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authGatedPath(r) {
+			if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "Bearer "+testToken {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = io.WriteString(w, `{"message":"auth-gated emulate route requires Authorization: Bearer <redacted>"}`)
+				return
+			}
+		}
+
+		upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, strings.TrimRight(upstreamBaseURL, "/")+r.URL.RequestURI(), r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("build upstream request: %v", err), http.StatusBadGateway)
+			return
+		}
+		upstreamReq.Header = r.Header.Clone()
+
+		resp, err := plainClient.Do(upstreamReq)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("proxy emulate request: %v", err), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		for k, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(k, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+}
+
+func authGatedPath(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	return len(parts) == 5 && parts[0] == "repos" && parts[3] == "issues"
 }
 
 type authTransport struct {

@@ -31,6 +31,13 @@ type Release struct {
 	Assets    []Asset `json:"assets"`
 }
 
+// Issue is the small subset of issue metadata the tests care about.
+type Issue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+}
+
 // Asset is the small subset of release asset metadata the tests care about.
 type Asset struct {
 	ID          int    `json:"id"`
@@ -86,6 +93,16 @@ func (c *SeedClient) CreateRelease(owner, repo, tag string) (*Release, error) {
 		return nil, err
 	}
 	return &release, nil
+}
+
+// CreateIssue creates an issue for the given repository.
+func (c *SeedClient) CreateIssue(owner, repo, title string) (*Issue, error) {
+	var issue Issue
+	path := fmt.Sprintf("/repos/%s/%s/issues", url.PathEscape(owner), url.PathEscape(repo))
+	if err := c.doJSON(http.MethodPost, path, map[string]any{"title": title}, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
 }
 
 // UploadReleaseAsset uploads a binary asset to the release.

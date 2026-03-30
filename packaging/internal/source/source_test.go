@@ -430,8 +430,11 @@ func TestResolvedToolsAllowedHosts(t *testing.T) {
 func TestResolvedToolsEffectiveCredentials(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	manifestJSON := `{
+	t.Run("inherit replace and explicit none stay isolated", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		manifestJSON := `{
   "module": "github.com/example/github-tools",
   "name": "github-tools",
   "runtime": "typescript-sandbox",
@@ -441,6 +444,15 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
       "type": "bearer",
       "inject": {
         "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    },
+    {
+      "name": "slack_oauth",
+      "type": "oauth2",
+      "provider": "slack",
+      "inject": {
+        "hosts": ["slack.com"],
         "method": "bearer_header"
       }
     }
@@ -461,45 +473,98 @@ func TestResolvedToolsEffectiveCredentials(t *testing.T) {
           }
         }
       ]
+    },
+    {
+      "entry_ts": "tools/custom.sync.ts",
+      "effect": "readOnly",
+      "credentials": [
+        {
+          "name": "custom_oauth",
+          "type": "oauth2",
+          "provider": {
+            "auth_url": "https://auth.example.com/oauth/authorize",
+            "token_url": "https://auth.example.com/oauth/token"
+          },
+          "inject": {
+            "hosts": ["api.example.com"],
+            "method": "bearer_header"
+          }
+        }
+      ]
     }
   ]
 }`
-	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), manifestJSON)
-	mustWriteFile(t, filepath.Join(dir, "tools", "issues.list.ts"), "export default function() {}")
-	mustWriteFile(t, filepath.Join(dir, "tools", "status.get.ts"), "export default function() {}")
-	mustWriteFile(t, filepath.Join(dir, "tools", "calendar.list.ts"), "export default function() {}")
+		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), manifestJSON)
+		mustWriteFile(t, filepath.Join(dir, "tools", "issues.list.ts"), "export default function() {}")
+		mustWriteFile(t, filepath.Join(dir, "tools", "status.get.ts"), "export default function() {}")
+		mustWriteFile(t, filepath.Join(dir, "tools", "calendar.list.ts"), "export default function() {}")
+		mustWriteFile(t, filepath.Join(dir, "tools", "custom.sync.ts"), "export default function() {}")
 
-	loaded, err := LoadDir(dir)
-	if err != nil {
-		t.Fatalf("LoadDir() error: %v", err)
-	}
-
-	resolved := loaded.ResolvedTools()
-	got := make(map[string][]string, len(resolved))
-	for _, tool := range resolved {
-		if len(tool.EffectiveCredentials) == 0 {
-			got[tool.Name] = nil
-			continue
+		loaded, err := LoadDir(dir)
+		if err != nil {
+			t.Fatalf("LoadDir() error: %v", err)
 		}
-		names := make([]string, 0, len(tool.EffectiveCredentials))
-		for _, cred := range tool.EffectiveCredentials {
-			names = append(names, cred.Name)
+
+		resolved := loaded.ResolvedTools()
+		got := make(map[string][]tooldef.PackageCredential, len(resolved))
+		for _, resolvedTool := range resolved {
+			got[resolvedTool.Name] = resolvedTool.EffectiveCredentials
 		}
-		got[tool.Name] = names
-	}
 
-	want := map[string][]string{
-		"issues.list":   {"github_token"},
-		"status.get":    nil,
-		"calendar.list": {"calendar_token"},
-	}
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Fatalf("ResolvedTools() effective credentials mismatch (-want +got):\n%s", diff)
-	}
+		want := map[string][]tooldef.PackageCredential{
+			"issues.list": {
+				{
+					Name: "github_token",
+					Type: tooldef.CredentialTypeBearer,
+					Inject: tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "bearer_header"},
+				},
+				{
+					Name:     "slack_oauth",
+					Type:     tooldef.CredentialTypeOAuth2,
+					Provider: tooldef.OAuth2ProviderRef{Name: "slack"},
+					Inject:   tooldef.CredentialInject{Hosts: []string{"slack.com"}, Method: "bearer_header"},
+				},
+			},
+			"status.get": nil,
+			"calendar.list": {
+				{
+					Name: "calendar_token",
+					Type: tooldef.CredentialTypeBearer,
+					Inject: tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
+				},
+			},
+			"custom.sync": {
+				{
+					Name: "custom_oauth",
+					Type: tooldef.CredentialTypeOAuth2,
+					Provider: tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+						AuthURL:  "https://auth.example.com/oauth/authorize",
+						TokenURL: "https://auth.example.com/oauth/token",
+					}},
+					Inject: tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
+				},
+			},
+		}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("ResolvedTools() effective credentials mismatch (-want +got):\n%s", diff)
+		}
 
-	if diff := cmp.Diff([]string{"github_token"}, []string{loaded.Package.Credentials[0].Name}); diff != "" {
-		t.Fatalf("package credentials changed unexpectedly (-want +got):\n%s", diff)
-	}
+		if diff := cmp.Diff([]tooldef.PackageCredential{
+			{
+				Name: "github_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "bearer_header"},
+			},
+			{
+				Name:     "slack_oauth",
+				Type:     tooldef.CredentialTypeOAuth2,
+				Provider: tooldef.OAuth2ProviderRef{Name: "slack"},
+				Inject:   tooldef.CredentialInject{Hosts: []string{"slack.com"}, Method: "bearer_header"},
+			},
+		}, loaded.Package.Credentials); diff != "" {
+			t.Fatalf("package credentials changed unexpectedly (-want +got):\n%s", diff)
+		}
+	})
 }
 
 func boolPtr(v bool) *bool {

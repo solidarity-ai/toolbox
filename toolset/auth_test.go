@@ -11,6 +11,7 @@ import (
 	"github.com/solidarity-ai/toolbox/testutil"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
@@ -452,6 +453,137 @@ func TestResolveToolAuthKeepsPackageScopedKeysDistinctAcrossPackages(t *testing.
 	}
 }
 
+func TestResolveToolAuthMultiProviderIsolationAndOverrides(t *testing.T) {
+	t.Parallel()
+
+	resolved := mixedAuthResolvedToolset(t)
+
+	inheritPolicy, ok := resolved.ToolTransportPolicy("mixed.inherit")
+	if !ok {
+		t.Fatal("expected policy for mixed.inherit")
+	}
+	inheritRules := inheritPolicy.Rules()
+	if len(inheritRules) != 2 {
+		t.Fatalf("inherit rules = %+v, want 2 inherited rules", inheritRules)
+	}
+	inheritSlack := ruleByName(t, inheritRules, "shared_oauth")
+	if inheritSlack.SecretKey != "github.com/example/mixed-auth/shared_oauth/access_token" {
+		t.Fatalf("inherit slack secret key = %q", inheritSlack.SecretKey)
+	}
+	if inheritSlack.OAuth2SecretFamily != "github.com/example/mixed-auth/shared_oauth" {
+		t.Fatalf("inherit slack oauth2 family = %q", inheritSlack.OAuth2SecretFamily)
+	}
+	if inheritSlack.OAuth2CacheKey != "github.com/example/mixed-auth:shared_oauth" {
+		t.Fatalf("inherit slack oauth2 cache key = %q", inheritSlack.OAuth2CacheKey)
+	}
+	if inheritSlack.OAuth2Provider == nil {
+		t.Fatal("expected slack provider config on inherited oauth2 rule")
+	}
+	if diff := cmp.Diff(tooldef.OAuth2ProviderConfig{
+		Name:     "slack",
+		AuthURL:  "https://slack.com/oauth/v2/authorize",
+		TokenURL: "https://slack.com/api/oauth.v2.access",
+	}, *inheritSlack.OAuth2Provider); diff != "" {
+		t.Fatalf("inherit slack provider mismatch (-want +got):\n%s", diff)
+	}
+	inheritBearer := ruleByName(t, inheritRules, "package_token")
+	if inheritBearer.SecretKey != "github.com/example/mixed-auth/package_token" {
+		t.Fatalf("inherit bearer secret key = %q", inheritBearer.SecretKey)
+	}
+	if inheritBearer.OAuth2Provider != nil || inheritBearer.OAuth2SecretFamily != "" || inheritBearer.OAuth2CacheKey != "" {
+		t.Fatalf("inherit bearer rule unexpectedly carried oauth2 state: %+v", inheritBearer)
+	}
+
+	overridePolicy, ok := resolved.ToolTransportPolicy("mixed.override")
+	if !ok {
+		t.Fatal("expected policy for mixed.override")
+	}
+	overrideRules := overridePolicy.Rules()
+	if len(overrideRules) != 2 {
+		t.Fatalf("override rules = %+v, want exactly replacement rules", overrideRules)
+	}
+	if hasRuleNamed(overrideRules, "package_token") {
+		t.Fatalf("override rules unexpectedly merged package defaults: %+v", overrideRules)
+	}
+	overrideMicrosoft := ruleByName(t, overrideRules, "shared_oauth")
+	if overrideMicrosoft.OAuth2Provider == nil {
+		t.Fatal("expected microsoft provider config on override oauth2 rule")
+	}
+	if diff := cmp.Diff(tooldef.OAuth2ProviderConfig{
+		Name:     "microsoft",
+		AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+		TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+	}, *overrideMicrosoft.OAuth2Provider); diff != "" {
+		t.Fatalf("override microsoft provider mismatch (-want +got):\n%s", diff)
+	}
+	if overrideMicrosoft.SecretKey != "github.com/example/mixed-auth/shared_oauth/access_token" {
+		t.Fatalf("override oauth2 secret key = %q", overrideMicrosoft.SecretKey)
+	}
+	if overrideMicrosoft.OAuth2CacheKey != "github.com/example/mixed-auth:shared_oauth" {
+		t.Fatalf("override oauth2 cache key = %q", overrideMicrosoft.OAuth2CacheKey)
+	}
+	overrideAPIKey := ruleByName(t, overrideRules, "override_api_key")
+	if overrideAPIKey.SecretKey != "github.com/example/mixed-auth/override_api_key" {
+		t.Fatalf("override api key secret key = %q", overrideAPIKey.SecretKey)
+	}
+
+	nonePolicy, ok := resolved.ToolTransportPolicy("mixed.none")
+	if !ok {
+		t.Fatal("expected policy for mixed.none")
+	}
+	if rules := nonePolicy.Rules(); len(rules) != 0 {
+		t.Fatalf("explicit no-auth tool unexpectedly received rules: %+v", rules)
+	}
+
+	customPolicy, ok := resolved.ToolTransportPolicy("mixed.custom")
+	if !ok {
+		t.Fatal("expected policy for mixed.custom")
+	}
+	customRule := ruleByName(t, customPolicy.Rules(), "custom_oauth")
+	if customRule.OAuth2Provider == nil {
+		t.Fatal("expected explicit provider config on custom oauth2 rule")
+	}
+	if diff := cmp.Diff(tooldef.OAuth2ProviderConfig{
+		AuthURL:  "https://auth.example.com/oauth/authorize",
+		TokenURL: "https://auth.example.com/oauth/token",
+	}, *customRule.OAuth2Provider); diff != "" {
+		t.Fatalf("custom provider mismatch (-want +got):\n%s", diff)
+	}
+	if customRule.SecretKey != "github.com/example/mixed-auth/custom_oauth/access_token" {
+		t.Fatalf("custom oauth2 secret key = %q", customRule.SecretKey)
+	}
+	if customRule.OAuth2SecretFamily != "github.com/example/mixed-auth/custom_oauth" {
+		t.Fatalf("custom oauth2 family = %q", customRule.OAuth2SecretFamily)
+	}
+	if customRule.OAuth2CacheKey != "github.com/example/mixed-auth:custom_oauth" {
+		t.Fatalf("custom oauth2 cache key = %q", customRule.OAuth2CacheKey)
+	}
+
+	otherPolicy, ok := resolved.ToolTransportPolicy("other.shared")
+	if !ok {
+		t.Fatal("expected policy for other.shared")
+	}
+	otherRule := ruleByName(t, otherPolicy.Rules(), "shared_oauth")
+	if otherRule.SecretKey == inheritSlack.SecretKey {
+		t.Fatalf("same-named oauth2 secret keys collided across packages: %q", otherRule.SecretKey)
+	}
+	if otherRule.OAuth2SecretFamily == inheritSlack.OAuth2SecretFamily {
+		t.Fatalf("same-named oauth2 secret families collided across packages: %q", otherRule.OAuth2SecretFamily)
+	}
+	if otherRule.OAuth2CacheKey == inheritSlack.OAuth2CacheKey {
+		t.Fatalf("same-named oauth2 cache keys collided across packages: %q", otherRule.OAuth2CacheKey)
+	}
+	if otherRule.SecretKey != "github.com/example/other-auth/shared_oauth/access_token" {
+		t.Fatalf("other package oauth2 secret key = %q", otherRule.SecretKey)
+	}
+	if otherRule.OAuth2SecretFamily != "github.com/example/other-auth/shared_oauth" {
+		t.Fatalf("other package oauth2 family = %q", otherRule.OAuth2SecretFamily)
+	}
+	if otherRule.OAuth2CacheKey != "github.com/example/other-auth:shared_oauth" {
+		t.Fatalf("other package oauth2 cache key = %q", otherRule.OAuth2CacheKey)
+	}
+}
+
 func TestResolveToolAuthNamespaceHelpersReserveTenantAndCredentialFamilies(t *testing.T) {
 	t.Parallel()
 
@@ -612,6 +744,141 @@ func TestValidateCallDoesNotInjectCredentialShapedParams(t *testing.T) {
 	if _, ok := params["authorization"]; ok {
 		t.Fatal("authorization header state should not be injected into validated params")
 	}
+}
+
+func mixedAuthResolvedToolset(t testing.TB) toolset.ResolvedToolset {
+	t.Helper()
+
+	basePkg := tooldef.Package{
+		Module:  "github.com/example/mixed-auth",
+		Name:    "mixed-auth",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Credentials: []tooldef.PackageCredential{
+			{
+				Name:     "shared_oauth",
+				Type:     tooldef.CredentialTypeOAuth2,
+				Provider: tooldef.OAuth2ProviderRef{Name: "slack"},
+				Inject: tooldef.CredentialInject{
+					Hosts:  []string{"slack.com", "api.slack.com"},
+					Method: "bearer_header",
+				},
+			},
+			{
+				Name: "package_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{
+					Hosts:  []string{"api.github.com"},
+					Method: "bearer_header",
+				},
+			},
+		},
+	}
+	otherPkg := tooldef.Package{
+		Module:  "github.com/example/other-auth",
+		Name:    "other-auth",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+	}
+
+	tools := []tooldef.ResolvedTool{
+		{
+			Name:                 "mixed.inherit",
+			Description:          "Uses package defaults",
+			Package:              &basePkg,
+			EffectiveCredentials: basePkg.Credentials,
+		},
+		{
+			Name:        "mixed.override",
+			Description: "Uses replacement credentials",
+			Package:     &basePkg,
+			EffectiveCredentials: []tooldef.PackageCredential{
+				{
+					Name:     "shared_oauth",
+					Type:     tooldef.CredentialTypeOAuth2,
+					Provider: tooldef.OAuth2ProviderRef{Name: "microsoft"},
+					Inject: tooldef.CredentialInject{
+						Hosts:  []string{"graph.microsoft.com"},
+						Method: "bearer_header",
+					},
+				},
+				{
+					Name: "override_api_key",
+					Type: tooldef.CredentialTypeAPIKey,
+					Inject: tooldef.CredentialInject{
+						Hosts:      []string{"api.internal.example.com"},
+						Method:     "api_key_header",
+						HeaderName: "X-API-Key",
+					},
+				},
+			},
+		},
+		{
+			Name:        "mixed.none",
+			Description: "Explicit no auth",
+			Package:     &basePkg,
+		},
+		{
+			Name:        "mixed.custom",
+			Description: "Uses explicit oauth2 endpoints",
+			Package:     &basePkg,
+			EffectiveCredentials: []tooldef.PackageCredential{{
+				Name: "custom_oauth",
+				Type: tooldef.CredentialTypeOAuth2,
+				Provider: tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+					AuthURL:  "https://auth.example.com/oauth/authorize",
+					TokenURL: "https://auth.example.com/oauth/token",
+				}},
+				Inject: tooldef.CredentialInject{Hosts: []string{"api.example.com"}, Method: "bearer_header"},
+			}},
+		},
+		{
+			Name:        "other.shared",
+			Description: "Same credential name in a different package",
+			Package:     &otherPkg,
+			EffectiveCredentials: []tooldef.PackageCredential{{
+				Name:     "shared_oauth",
+				Type:     tooldef.CredentialTypeOAuth2,
+				Provider: tooldef.OAuth2ProviderRef{Name: "slack"},
+				Inject:   tooldef.CredentialInject{Hosts: []string{"slack.com"}, Method: "bearer_header"},
+			}},
+		},
+	}
+
+	for i := range tools {
+		tools[i].SetParamsSchema(map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"workspace": map[string]any{"type": "string"},
+				"query":     map[string]any{"type": "string"},
+			},
+			"required": []any{"workspace"},
+		})
+	}
+
+	resolved, err := toolset.ResolveTools(tools, toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+	return resolved
+}
+
+func ruleByName(t testing.TB, rules []transport.Rule, name string) transport.Rule {
+	t.Helper()
+	for _, rule := range rules {
+		if rule.Name == name {
+			return rule
+		}
+	}
+	t.Fatalf("rule %q not found in %+v", name, rules)
+	return transport.Rule{}
+}
+
+func hasRuleNamed(rules []transport.Rule, name string) bool {
+	for _, rule := range rules {
+		if rule.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func authResolvedToolset(t testing.TB) toolset.ResolvedToolset {

@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -145,6 +146,54 @@ func TestAgentViewEffectAndIdempotent(t *testing.T) {
 	}
 	if addTool.Idempotent == nil || !*addTool.Idempotent {
 		t.Fatal("expected calc.add idempotent=true")
+	}
+}
+
+func TestResolveToolAuthAgentViewOmitsMixedProviderRuntimeCredentials(t *testing.T) {
+	t.Parallel()
+
+	resolved := mixedAuthResolvedToolset(t)
+	view := resolved.AgentView()
+
+	inheritTool := findAgentTool(t, view, "mixed.inherit")
+	props, ok := inheritTool.ParamsSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in mixed.inherit ParamsSchema")
+	}
+	if _, ok := props["workspace"]; !ok {
+		t.Fatal("expected workspace param to remain visible")
+	}
+	if _, ok := props["query"]; !ok {
+		t.Fatal("expected query param to remain visible")
+		}
+	for _, hidden := range []string{"shared_oauth", "package_token", "override_api_key", "custom_oauth", "authorization", "x-api-key"} {
+		if _, ok := props[hidden]; ok {
+			t.Fatalf("runtime credential material %q should not appear in AgentView schema", hidden)
+		}
+	}
+}
+
+func TestResolveToolAuthAgentViewValidateCallOmitsMixedProviderRuntimeCredentials(t *testing.T) {
+	t.Parallel()
+
+	resolved := mixedAuthResolvedToolset(t)
+	params, err := resolved.ValidateCall("mixed.override", map[string]any{
+		"workspace": "acme",
+		"query":     "alerts",
+	})
+	if err != nil {
+		t.Fatalf("ValidateCall: %v", err)
+	}
+	if diff := cmp.Diff(map[string]any{
+		"workspace": "acme",
+		"query":     "alerts",
+	}, params); diff != "" {
+		t.Fatalf("validated params mismatch (-want +got):\n%s", diff)
+	}
+	for _, hidden := range []string{"shared_oauth", "package_token", "override_api_key", "custom_oauth", "authorization", "x-api-key"} {
+		if _, ok := params[hidden]; ok {
+			t.Fatalf("runtime credential material %q should not be injected into validated params", hidden)
+		}
 	}
 }
 

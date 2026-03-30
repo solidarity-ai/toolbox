@@ -2,6 +2,7 @@ package mcpserver_test
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -204,6 +206,160 @@ func TestMCPServerRunsGoogleWorkspaceFixtureFromCopiedDir(t *testing.T) {
 	assertGoogleWorkspaceFixtureResult(t, h.CallTool("users.list", map[string]any{}), "copy-ada@example.com")
 }
 
+func TestMCPServerRunsGoogleWorkspaceFixtureWithTransportManagedOAuth(t *testing.T) {
+	t.Run("happy path keeps oauth transport-owned and schema-clean", func(t *testing.T) {
+		provider, tokenServer, tokenCalls := newGoogleWorkspaceOAuthProviderHarness(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/oauth/token" {
+				t.Fatalf("token path = %q, want /oauth/token", r.URL.Path)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if got := r.Form.Get("grant_type"); got != "refresh_token" {
+				t.Fatalf("grant_type = %q, want refresh_token", got)
+			}
+			if got := r.Form.Get("client_id"); got != "client-google" {
+				t.Fatalf("client_id = %q, want client-google", got)
+			}
+			if got := r.Form.Get("refresh_token"); got != "refresh-google" {
+				t.Fatalf("refresh_token = %q, want refresh-google", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"google-access-token","expires_in":3600}`))
+		})
+		defer tokenServer.Close()
+
+		resourceHits := &atomic.Int32{}
+		resourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resourceHits.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer google-access-token" {
+				t.Fatalf("Authorization header = %q, want Bearer google-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"primaryEmail":"mcp-ada@example.com"}]}`))
+		}))
+		defer resourceServer.Close()
+
+		store := testutil.NewTestSecretStore()
+		seedGoogleWorkspaceOAuthFixtureSecrets(t, store, map[string]string{
+			"client_id":     "client-google",
+			"refresh_token": "refresh-google",
+		})
+
+		dir := tooltest.PrepareGoogleWorkspaceFixture(t, resourceServer.URL, provider)
+		h := googleWorkspaceHarnessWithSecretStore(t, dir, store)
+		assertGoogleWorkspaceSchemaHasNoCredentialInputs(t, h.ListTools())
+		assertGoogleWorkspaceFixtureResult(t, h.CallTool("users.list", map[string]any{}), "mcp-ada@example.com")
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+		if got := resourceHits.Load(); got != 1 {
+			t.Fatalf("protected resource hits = %d, want 1", got)
+		}
+	})
+
+	t.Run("missing durable secret family fails before refresh or upstream fetch", func(t *testing.T) {
+		provider, tokenServer, tokenCalls := newGoogleWorkspaceOAuthProviderHarness(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"should-not-be-used","expires_in":3600}`))
+		})
+		defer tokenServer.Close()
+
+		resourceHits := &atomic.Int32{}
+		resourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resourceHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"primaryEmail":"never@example.com"}]}`))
+		}))
+		defer resourceServer.Close()
+
+		h := googleWorkspaceHarnessWithSecretStore(t, tooltest.PrepareGoogleWorkspaceFixture(t, resourceServer.URL, provider), testutil.NewTestSecretStore())
+		result := h.CallTool("users.list", map[string]any{})
+		assertGoogleWorkspaceFixtureError(t, result, "failed during secret reread")
+		assertGoogleWorkspaceFixtureError(t, result, "re-authorize by updating client_id, client_secret, and refresh_token secrets")
+		if got := tokenCalls.Load(); got != 0 {
+			t.Fatalf("token endpoint calls = %d, want 0", got)
+		}
+		if got := resourceHits.Load(); got != 0 {
+			t.Fatalf("protected resource hits = %d, want 0", got)
+		}
+	})
+
+	t.Run("malformed protected-resource payload stays redacted after auth injection", func(t *testing.T) {
+		provider, tokenServer, tokenCalls := newGoogleWorkspaceOAuthProviderHarness(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"google-access-token","expires_in":3600}`))
+		})
+		defer tokenServer.Close()
+
+		resourceHits := &atomic.Int32{}
+		resourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resourceHits.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer google-access-token" {
+				t.Fatalf("Authorization header = %q, want Bearer google-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":`))
+		}))
+		defer resourceServer.Close()
+
+		store := testutil.NewTestSecretStore()
+		seedGoogleWorkspaceOAuthFixtureSecrets(t, store, map[string]string{
+			"client_id":     "client-google",
+			"refresh_token": "refresh-google",
+		})
+
+		h := googleWorkspaceHarnessWithSecretStore(t, tooltest.PrepareGoogleWorkspaceFixture(t, resourceServer.URL, provider), store)
+		result := h.CallTool("users.list", map[string]any{})
+		assertGoogleWorkspaceFixtureError(t, result, "google workspace response was not valid JSON")
+		text := requireSingleTextContent(t, result)
+		for _, forbidden := range []string{"google-access-token", "refresh-google", "Authorization:"} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("tool error leaked auth material %q: %s", forbidden, text)
+			}
+		}
+		if got := tokenCalls.Load(); got != 1 {
+			t.Fatalf("token endpoint calls = %d, want 1", got)
+		}
+		if got := resourceHits.Load(); got != 1 {
+			t.Fatalf("protected resource hits = %d, want 1", got)
+		}
+	})
+
+	t.Run("denied host fails before auth refresh", func(t *testing.T) {
+		provider, tokenServer, tokenCalls := newGoogleWorkspaceOAuthProviderHarness(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"should-not-be-used","expires_in":3600}`))
+		})
+		defer tokenServer.Close()
+
+		resourceHits := &atomic.Int32{}
+		resourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resourceHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"primaryEmail":"never@example.com"}]}`))
+		}))
+		defer resourceServer.Close()
+
+		store := testutil.NewTestSecretStore()
+		seedGoogleWorkspaceOAuthFixtureSecrets(t, store, map[string]string{
+			"client_id":     "client-google",
+			"refresh_token": "refresh-google",
+		})
+
+		dir := tooltest.PrepareGoogleWorkspaceFixture(t, resourceServer.URL, provider)
+		rewriteGoogleWorkspaceToolHostForTest(t, dir, "localhost")
+		result := googleWorkspaceHarnessWithSecretStore(t, dir, store).CallTool("users.list", map[string]any{})
+		assertGoogleWorkspaceFixtureError(t, result, `transport denied request to host "localhost": not allowed by policy`)
+		if got := tokenCalls.Load(); got != 0 {
+			t.Fatalf("token endpoint calls = %d, want 0", got)
+		}
+		if got := resourceHits.Load(); got != 0 {
+			t.Fatalf("protected resource hits = %d, want 0", got)
+		}
+	})
+}
+
 func TestMCPServerRunsGoogleWorkspaceFixtureRejectsMalformedJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -277,6 +433,78 @@ func googleWorkspaceHarness(t testing.TB, dir string) *mcptest.Harness {
 	t.Helper()
 	builder := tooltest.GoogleWorkspaceBuilderFromDir(t, dir)
 	return mcptest.NewHarness(t, mcpserver.New(mustResolveWithConfig(t, builder, toolset.Config{})))
+}
+
+func googleWorkspaceHarnessWithSecretStore(t testing.TB, dir string, store *testutil.TestSecretStore) *mcptest.Harness {
+	t.Helper()
+	builder := tooltest.GoogleWorkspaceBuilderFromDir(t, dir)
+	return mcptest.NewHarness(t, mcpserver.New(mustResolveWithConfig(t, builder, toolset.Config{SecretStore: store})))
+}
+
+func newGoogleWorkspaceOAuthProviderHarness(t testing.TB, tokenHandler http.HandlerFunc) (tooldef.OAuth2ProviderRef, *httptest.Server, *atomic.Int32) {
+	t.Helper()
+
+	tokenCalls := &atomic.Int32{}
+	tokenServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenCalls.Add(1)
+		tokenHandler(w, r)
+	}))
+	restore := trustOAuthProviderServerForDefaultTransport(t, tokenServer)
+	t.Cleanup(restore)
+
+	return tooldef.OAuth2ProviderRef{Endpoints: &tooldef.OAuth2ProviderEndpoints{
+		AuthURL:  tokenServer.URL + "/oauth/authorize",
+		TokenURL: tokenServer.URL + "/oauth/token",
+	}}, tokenServer, tokenCalls
+}
+
+func trustOAuthProviderServerForDefaultTransport(t testing.TB, server *httptest.Server) func() {
+	t.Helper()
+
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatalf("http.DefaultTransport = %T, want *http.Transport", http.DefaultTransport)
+	}
+	clone := baseTransport.Clone()
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	if clone.TLSClientConfig == nil {
+		clone.TLSClientConfig = &tls.Config{}
+	} else {
+		clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+	}
+	clone.TLSClientConfig.RootCAs = pool
+
+	previous := http.DefaultTransport
+	http.DefaultTransport = clone
+	return func() {
+		http.DefaultTransport = previous
+	}
+}
+
+func seedGoogleWorkspaceOAuthFixtureSecrets(t testing.TB, store *testutil.TestSecretStore, members map[string]string) {
+	t.Helper()
+	seed := make(map[string]string, len(members))
+	for member, value := range members {
+		seed[tooltest.GoogleWorkspaceOAuthSecretKey(t, member)] = value
+	}
+	store.SeedStrings(seed)
+}
+
+func rewriteGoogleWorkspaceToolHostForTest(t testing.TB, dir, host string) {
+	t.Helper()
+	toolPath := filepath.Join(dir, "tools", "users.list.ts")
+	raw, err := os.ReadFile(toolPath)
+	if err != nil {
+		t.Fatalf("read google-workspace tool for host rewrite: %v", err)
+	}
+	updated := strings.Replace(string(raw), "127.0.0.1", host, 1)
+	if updated == string(raw) {
+		t.Fatalf("google-workspace tool host rewrite found no 127.0.0.1 host in %s", toolPath)
+	}
+	if err := os.WriteFile(toolPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write google-workspace tool for host rewrite: %v", err)
+	}
 }
 
 func assertGoogleWorkspaceSchemaHasNoCredentialInputs(t testing.TB, tools *mcp.ListToolsResult) {

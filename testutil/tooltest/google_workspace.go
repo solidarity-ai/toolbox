@@ -17,6 +17,8 @@ import (
 )
 
 const (
+	googleWorkspaceModulePath      = tooldef.ModulePath("github.com/example/google-workspace")
+	googleWorkspaceCredentialName  = "workspace"
 	googleWorkspaceDefaultEndpoint = "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer&maxResults=1&orderBy=email"
 	googleWorkspaceEndpointPath    = "/admin/directory/v1/users?customer=my_customer&maxResults=1&orderBy=email"
 )
@@ -197,6 +199,28 @@ func PrepareGoogleWorkspaceFixture(t testing.TB, baseURL string, provider toolde
 	dir := CopyGoogleWorkspaceFixture(t)
 	RewriteGoogleWorkspaceFixtureBaseURL(t, dir, baseURL, provider)
 	return dir
+}
+
+// GoogleWorkspaceOAuthSecretFamily returns the durable secret namespace used by
+// the google-workspace fixture's OAuth credential.
+func GoogleWorkspaceOAuthSecretFamily(t testing.TB) string {
+	t.Helper()
+	family, err := tooldef.CredentialFamilyNamespace(googleWorkspaceModulePath, "", googleWorkspaceCredentialName)
+	if err != nil {
+		t.Fatalf("google-workspace oauth secret family: %v", err)
+	}
+	return family
+}
+
+// GoogleWorkspaceOAuthSecretKey returns one durable secret key under the
+// google-workspace fixture's OAuth credential namespace.
+func GoogleWorkspaceOAuthSecretKey(t testing.TB, member string) string {
+	t.Helper()
+	key, err := tooldef.CredentialFamilyMemberKey(GoogleWorkspaceOAuthSecretFamily(t), member)
+	if err != nil {
+		t.Fatalf("google-workspace oauth secret key %q: %v", member, err)
+	}
+	return key
 }
 
 // GoogleWorkspaceBuilder returns a *toolset.Builder loaded with the

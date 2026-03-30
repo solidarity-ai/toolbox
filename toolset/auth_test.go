@@ -1,6 +1,7 @@
 package toolset_test
 
 import (
+	"strings"
 	"testing"
 
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -15,15 +16,58 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 	if !ok {
 		t.Fatal("expected runtime auth for tool")
 	}
-	if len(auth.Credentials) != 1 {
-		t.Fatalf("expected 1 credential, got %d", len(auth.Credentials))
+	rules := auth.Rules()
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 runtime rule, got %d", len(rules))
 	}
-	cred := auth.Credentials[0]
-	if cred.SecretNamespace != "github.com/example/github-issues" {
-		t.Fatalf("secret namespace = %q, want package module", cred.SecretNamespace)
+	rule := rules[0]
+	if rule.SecretKey != "github.com/example/github-issues/github_token" {
+		t.Fatalf("secret key = %q, want package-scoped credential key", rule.SecretKey)
 	}
-	if cred.SecretKey() != "github.com/example/github-issues/github_token" {
-		t.Fatalf("secret key = %q, want package-scoped credential key", cred.SecretKey())
+	if got := auth.SecretKeys(); len(got) != 1 || got[0] != rule.SecretKey {
+		t.Fatalf("SecretKeys() = %v, want [%q]", got, rule.SecretKey)
+	}
+}
+
+func TestResolveToolAuthRejectsAmbiguousCanonicalRules(t *testing.T) {
+	t.Parallel()
+
+	pkg := tooldef.Package{
+		Module:  "github.com/example/github-issues",
+		Name:    "github-issues",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Credentials: []tooldef.PackageCredential{
+			{
+				Name: "primary_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{
+					Hosts:      []string{" API.GitHub.com "},
+					PathPrefix: "/repos/",
+					Method:     "bearer_header",
+				},
+			},
+			{
+				Name: "fallback_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{
+					Hosts:      []string{"api.github.com"},
+					PathPrefix: "/repos",
+					Method:     "bearer_header",
+				},
+			},
+		},
+	}
+
+	_, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+		Name:        "github.issues.get",
+		Description: "Get a GitHub issue",
+		Package:     &pkg,
+	}}, toolset.Config{})
+	if err == nil {
+		t.Fatal("expected ambiguous credential rules to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "ambiguous transport credential rules") {
+		t.Fatalf("ResolveTools error = %v, want ambiguity context", err)
 	}
 }
 

@@ -202,9 +202,11 @@ func goFetchWithAuth(auth toolset.ResolvedAuth) func(url, method, headersJSON, b
 		}
 
 		var err error
-		url, err = auth.InjectRequest(context.Background(), url, reqHeaders)
-		if err != nil {
-			return quickts.FetchResult{}, err
+		if auth.Injector != nil {
+			url, err = auth.Injector.InjectRequest(context.Background(), url, reqHeaders)
+			if err != nil {
+				return quickts.FetchResult{}, err
+			}
 		}
 
 		var bodyReader io.Reader

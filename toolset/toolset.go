@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 // ErrNoResolver is returned by AddFromRegistry when the Builder was created
@@ -178,7 +178,9 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 			}
 		}
 
-		if auth := resolveToolAuth(tool, cfg); len(auth.Credentials) > 0 {
+		if auth, err := resolveToolAuth(tool, cfg); err != nil {
+			return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
+		} else if auth.Injector != nil {
 			allAuth[tool.Name] = auth
 		}
 		if allowedHosts := resolveToolAllowedHosts(tool); len(allowedHosts) > 0 {
@@ -199,49 +201,34 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 	}, nil
 }
 
-func resolveToolAuth(tool tooldef.ResolvedTool, cfg Config) ResolvedAuth {
+func resolveToolAuth(tool tooldef.ResolvedTool, cfg Config) (ResolvedAuth, error) {
 	if tool.Package == nil || tool.Package.Module == "" || len(tool.Package.Credentials) == 0 {
-		return ResolvedAuth{}
+		return ResolvedAuth{}, nil
 	}
-	credentials := make([]ResolvedCredential, 0, len(tool.Package.Credentials))
+	secretNamespace := tool.Package.Module.String()
+	rules := make([]transport.Rule, 0, len(tool.Package.Credentials))
 	for _, declared := range tool.Package.Credentials {
-		credentials = append(credentials, ResolvedCredential{
-			Name:            declared.Name,
-			Type:            declared.Type,
-			Provider:        declared.Provider,
-			Scopes:          append([]string(nil), declared.Scopes...),
-			SecretNamespace: tool.Package.Module.String(),
-			Inject:          declared.Inject,
+		rules = append(rules, transport.Rule{
+			Name:      declared.Name,
+			Type:      declared.Type,
+			Provider:  declared.Provider,
+			Scopes:    append([]string(nil), declared.Scopes...),
+			SecretKey: resolveSecretKey(secretNamespace, declared.Name),
+			Inject:    declared.Inject,
 		})
 	}
-	return ResolvedAuth{Store: cfg.SecretStore, Credentials: credentials}
+	injector, err := transport.NewInjector(cfg.SecretStore, rules)
+	if err != nil {
+		return ResolvedAuth{}, err
+	}
+	if injector == nil || len(injector.Rules()) == 0 {
+		return ResolvedAuth{}, nil
+	}
+	return ResolvedAuth{Injector: injector}, nil
 }
 
 func resolveToolAllowedHosts(tool tooldef.ResolvedTool) []string {
-	if len(tool.AllowedHosts) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(tool.AllowedHosts))
-	resolved := make([]string, 0, len(tool.AllowedHosts))
-	for _, host := range tool.AllowedHosts {
-		normalized := normalizeAllowedHost(host)
-		if normalized == "" {
-			continue
-		}
-		if _, ok := seen[normalized]; ok {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		resolved = append(resolved, normalized)
-	}
-	if len(resolved) == 0 {
-		return nil
-	}
-	return resolved
-}
-
-func normalizeAllowedHost(host string) string {
-	return strings.ToLower(strings.TrimSpace(host))
+	return transport.NormalizeAllowedHosts(tool.AllowedHosts)
 }
 
 // ResolveTools resolves a pre-built list of tools with the given config.

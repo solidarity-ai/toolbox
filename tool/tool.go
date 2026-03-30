@@ -49,6 +49,8 @@ type CredentialInject struct {
 	Hosts      []string `json:"hosts,omitempty"`
 	PathPrefix string   `json:"pathPrefix,omitempty"`
 	Method     string   `json:"method,omitempty"`
+	HeaderName string   `json:"headerName,omitempty"`
+	QueryName  string   `json:"queryName,omitempty"`
 }
 
 type PackageCredential struct {

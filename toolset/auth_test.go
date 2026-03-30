@@ -33,6 +33,43 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 	}
 }
 
+func TestResolveToolAuthUsesReservedAccessTokenFamilyKeyForOAuth2(t *testing.T) {
+	t.Parallel()
+
+	resolved, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
+		Name:        "github.issues.get",
+		Description: "Get a GitHub issue",
+		Package: &tooldef.Package{
+			Module:  "github.com/example/github-issues",
+			Name:    "github-issues",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+		},
+		EffectiveCredentials: []tooldef.PackageCredential{{
+			Name: "github_oauth",
+			Type: tooldef.CredentialTypeOAuth2,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+	}}, toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+
+	policy, ok := resolved.ToolTransportPolicy("github.issues.get")
+	if !ok {
+		t.Fatal("expected runtime transport policy for tool")
+	}
+	rules := policy.Rules()
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 runtime rule, got %d", len(rules))
+	}
+	if rules[0].SecretKey != "github.com/example/github-issues/github_oauth/access_token" {
+		t.Fatalf("secret key = %q, want oauth2 access token family key", rules[0].SecretKey)
+	}
+}
+
 func TestResolveToolAuthRejectsAmbiguousCanonicalRules(t *testing.T) {
 	t.Parallel()
 

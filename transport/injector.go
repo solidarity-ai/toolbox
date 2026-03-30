@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	pathpkg "path"
@@ -107,40 +108,96 @@ func (i *Injector) InjectRequest(ctx context.Context, rawURL string, headers *fe
 		return rawURL, fmt.Errorf("transport auth configured for %q but no secret store is available", rule.SecretKey)
 	}
 
-	secret, err := i.store.Get(ctx, rule.SecretKey)
+	value, err := i.resolveSecretMaterial(ctx, rule)
 	if err != nil {
-		return rawURL, fmt.Errorf("resolve transport credential %q: %w", rule.SecretKey, err)
-	}
-	value := string(secret)
-	if strings.TrimSpace(value) == "" {
-		return rawURL, fmt.Errorf("transport credential %q resolved unusable secret material", rule.SecretKey)
+		return rawURL, err
 	}
 
 	switch rule.Inject.Method {
 	case "bearer_header":
-		if !hasHeader(headers, "authorization") {
-			if err := headers.Append("Authorization", "Bearer "+value); err != nil {
-				return rawURL, fmt.Errorf("inject authorization header for %q: %w", rule.Name, err)
-			}
-		}
-		return rawURL, nil
+		return injectBearerHeader(rawURL, headers, rule, value)
+	case "basic_auth":
+		return injectBasicAuth(rawURL, headers, rule, value)
 	case "api_key_header":
-		if !hasHeader(headers, "x-api-key") {
-			if err := headers.Append("X-API-Key", value); err != nil {
-				return rawURL, fmt.Errorf("inject api key header for %q: %w", rule.Name, err)
-			}
-		}
-		return rawURL, nil
+		return injectAPIKeyHeader(rawURL, headers, rule, value)
 	case "api_key_query":
-		query := parsed.Query()
-		if query.Get("key") == "" {
-			query.Set("key", value)
-			parsed.RawQuery = query.Encode()
-		}
-		return parsed.String(), nil
+		return injectAPIKeyQuery(parsed, rule, value)
 	default:
 		return rawURL, fmt.Errorf("credential %q uses unsupported injection method %q", rule.Name, rule.Inject.Method)
 	}
+}
+
+func (i *Injector) resolveSecretMaterial(ctx context.Context, rule Rule) (string, error) {
+	secret, err := i.store.Get(ctx, rule.SecretKey)
+	if err != nil {
+		return "", fmt.Errorf("resolve transport credential %q: %w", rule.SecretKey, err)
+	}
+	value := string(secret)
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("transport credential %q resolved unusable secret material", rule.SecretKey)
+	}
+	return value, nil
+}
+
+func injectBearerHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+	if hasHeader(headers, "authorization") {
+		return rawURL, nil
+	}
+	if headers == nil {
+		return rawURL, fmt.Errorf("inject authorization header for %q: headers are unavailable", rule.Name)
+	}
+	if err := headers.Append("Authorization", "Bearer "+value); err != nil {
+		return rawURL, fmt.Errorf("inject authorization header for %q: %w", rule.Name, err)
+	}
+	return rawURL, nil
+}
+
+func injectBasicAuth(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+	if hasHeader(headers, "authorization") {
+		return rawURL, nil
+	}
+	if headers == nil {
+		return rawURL, fmt.Errorf("inject authorization header for %q: headers are unavailable", rule.Name)
+	}
+	username, password, err := parseBasicAuthSecret(value)
+	if err != nil {
+		return rawURL, fmt.Errorf("transport credential %q resolved malformed basic_auth secret material", rule.SecretKey)
+	}
+	authorization := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	if err := headers.Append("Authorization", authorization); err != nil {
+		return rawURL, fmt.Errorf("inject authorization header for %q: %w", rule.Name, err)
+	}
+	return rawURL, nil
+}
+
+func injectAPIKeyHeader(rawURL string, headers *fetch.Headers, rule Rule, value string) (string, error) {
+	if hasHeader(headers, rule.Inject.HeaderName) {
+		return rawURL, nil
+	}
+	if headers == nil {
+		return rawURL, fmt.Errorf("inject api key header for %q: headers are unavailable", rule.Name)
+	}
+	if err := headers.Append(rule.Inject.HeaderName, value); err != nil {
+		return rawURL, fmt.Errorf("inject api key header for %q: %w", rule.Name, err)
+	}
+	return rawURL, nil
+}
+
+func injectAPIKeyQuery(parsed *url.URL, rule Rule, value string) (string, error) {
+	query := parsed.Query()
+	if query.Get(rule.Inject.QueryName) == "" {
+		query.Set(rule.Inject.QueryName, value)
+		parsed.RawQuery = query.Encode()
+	}
+	return parsed.String(), nil
+}
+
+func parseBasicAuthSecret(secret string) (string, string, error) {
+	username, password, ok := strings.Cut(secret, ":")
+	if !ok || username == "" || password == "" {
+		return "", "", fmt.Errorf("basic auth secret must be username:password")
+	}
+	return username, password, nil
 }
 
 // NormalizeAllowedHosts canonicalizes a resolved allowlist into a deterministic,
@@ -187,6 +244,11 @@ func normalizeRule(rule Rule) (Rule, error) {
 		return Rule{}, fmt.Errorf("credential %q uses unsupported injection method %q", rule.Name, rule.Inject.Method)
 	}
 
+	headerName, queryName, err := normalizeInjectConfig(method, rule.Inject)
+	if err != nil {
+		return Rule{}, fmt.Errorf("credential %q: %w", rule.Name, err)
+	}
+
 	hosts := make([]string, 0, len(rule.Inject.Hosts))
 	matchers := make([]hostMatcher, 0, len(rule.Inject.Hosts))
 	for idx, rawHost := range rule.Inject.Hosts {
@@ -205,6 +267,8 @@ func normalizeRule(rule Rule) (Rule, error) {
 	rule.Inject.Hosts = hosts
 	rule.Inject.Method = method
 	rule.Inject.PathPrefix = pathPrefix
+	rule.Inject.HeaderName = headerName
+	rule.Inject.QueryName = queryName
 	rule.pathPrefix = pathPrefix
 	rule.hostMatchers = matchers
 	rule.Scopes = append([]string(nil), rule.Scopes...)
@@ -398,13 +462,88 @@ func normalizePathPrefix(pathPrefix string) (string, error) {
 	return cleaned, nil
 }
 
+func normalizeInjectConfig(method string, inject tooldef.CredentialInject) (headerName string, queryName string, err error) {
+	headerName = strings.TrimSpace(inject.HeaderName)
+	queryName = strings.TrimSpace(inject.QueryName)
+
+	switch method {
+	case "bearer_header", "basic_auth":
+		if headerName != "" {
+			return "", "", fmt.Errorf("inject.headerName is only allowed for api_key_header")
+		}
+		if queryName != "" {
+			return "", "", fmt.Errorf("inject.queryName is only allowed for api_key_query")
+		}
+	case "api_key_header":
+		if headerName == "" {
+			return "", "", fmt.Errorf("inject.headerName must not be empty when method is api_key_header")
+		}
+		if !validHeaderName(headerName) {
+			return "", "", fmt.Errorf("inject.headerName %q is invalid", inject.HeaderName)
+		}
+		if queryName != "" {
+			return "", "", fmt.Errorf("inject.queryName is only allowed for api_key_query")
+		}
+	case "api_key_query":
+		if queryName == "" {
+			return "", "", fmt.Errorf("inject.queryName must not be empty when method is api_key_query")
+		}
+		if !validQueryName(queryName) {
+			return "", "", fmt.Errorf("inject.queryName %q is invalid", inject.QueryName)
+		}
+		if headerName != "" {
+			return "", "", fmt.Errorf("inject.headerName is only allowed for api_key_header")
+		}
+	}
+
+	return headerName, queryName, nil
+}
+
 func supportedMethod(method string) bool {
 	switch method {
-	case "bearer_header", "api_key_header", "api_key_query":
+	case "bearer_header", "basic_auth", "api_key_header", "api_key_query":
 		return true
 	default:
 		return false
 	}
+}
+
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if c > 127 {
+			return false
+		}
+		switch {
+		case c >= 'A' && c <= 'Z':
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '!' || c == '#' || c == '$' || c == '%' || c == '&' ||
+			c == '\'' || c == '*' || c == '+' || c == '-' || c == '.' ||
+			c == '^' || c == '_' || c == '`' || c == '|' || c == '~':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validQueryName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch r {
+		case '&', '=', '#', '?':
+			return false
+		}
+		if r <= 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func hasHeader(headers *fetch.Headers, name string) bool {

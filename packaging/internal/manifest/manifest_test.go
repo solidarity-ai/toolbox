@@ -754,6 +754,117 @@ func TestCredentialMetadataValidation(t *testing.T) {
 			t.Fatalf("ValidateCompiled() error = %v, want invalid module", err)
 		}
 	})
+
+	t.Run("dev manifest rejects missing api_key header name", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "api_key",
+      "inject": { "hosts": ["api.github.com"], "method": "api_key_header" }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "credentials[0].inject.headerName") {
+			t.Fatalf("ParseDev() error = %v, want headerName field mention", err)
+		}
+	})
+
+	t.Run("dev manifest rejects invalid api_key query name", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "api_key",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "api_key_query",
+        "queryName": "bad=name"
+      }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "credentials[0].inject.queryName") {
+			t.Fatalf("ParseDev() error = %v, want queryName field mention", err)
+		}
+	})
+
+	t.Run("dev manifest rejects stray inject metadata on bearer header rules", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "oauth",
+      "type": "oauth2",
+      "inject": {
+        "hosts": ["www.googleapis.com"],
+        "method": "bearer_header",
+        "headerName": "X-Should-Not-Exist"
+      }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "inject.headerName") {
+			t.Fatalf("ParseDev() error = %v, want stray headerName field mention", err)
+		}
+	})
+
+	t.Run("schema rejects unsupported inject method", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseDev([]byte(`{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "oauth",
+      "type": "oauth2",
+      "inject": {
+        "hosts": ["www.googleapis.com"],
+        "method": "digest_auth"
+      }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts" }
+  ]
+}`))
+		if err == nil {
+			t.Fatal("ParseDev() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "method") {
+			t.Fatalf("ParseDev() error = %v, want inject method mention", err)
+		}
+	})
 }
 
 func TestManifestAllowedHostsMetadata(t *testing.T) {
@@ -1032,8 +1143,8 @@ func TestManifestToolCredentialValidation(t *testing.T) {
 		if err == nil {
 			t.Fatal("ParseDev() error = nil, want non-nil")
 		}
-		if !strings.Contains(err.Error(), "credentials") || !strings.Contains(err.Error(), "hosts") {
-			t.Fatalf("ParseDev() error = %v, want credentials and nested hosts field mention", err)
+		if !strings.Contains(err.Error(), "credentials") {
+			t.Fatalf("ParseDev() error = %v, want credentials field mention", err)
 		}
 	})
 

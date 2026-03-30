@@ -2,7 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "runtime", "tools"],
+  "required": [
+    "name",
+    "runtime",
+    "tools"
+  ],
   "properties": {
     "module": {
       "type": "string",
@@ -16,7 +20,11 @@
     },
     "runtime": {
       "type": "string",
-      "enum": ["typescript-sandbox", "typescript+wasix-sandbox", "typescript+wasip2-sandbox"],
+      "enum": [
+        "typescript-sandbox",
+        "typescript+wasix-sandbox",
+        "typescript+wasip2-sandbox"
+      ],
       "description": "Execution runtime for the tool's TypeScript code."
     },
     "additionalTypeScriptGlobs": {
@@ -52,7 +60,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "type", "inject"],
+        "required": [
+          "name",
+          "type",
+          "inject"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -60,7 +72,12 @@
           },
           "type": {
             "type": "string",
-            "enum": ["oauth2", "api_key", "bearer", "custom"]
+            "enum": [
+              "oauth2",
+              "api_key",
+              "bearer",
+              "custom"
+            ]
           },
           "provider": {
             "type": "string",
@@ -87,7 +104,9 @@
           "inject": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["hosts"],
+            "required": [
+              "hosts"
+            ],
             "properties": {
               "hosts": {
                 "type": "array",
@@ -103,7 +122,23 @@
               },
               "method": {
                 "type": "string",
-                "minLength": 1
+                "enum": [
+                  "bearer_header",
+                  "basic_auth",
+                  "api_key_header",
+                  "api_key_query"
+                ],
+                "description": "Built-in transport injection method."
+              },
+              "headerName": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Header name used when method is api_key_header."
+              },
+              "queryName": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Query parameter name used when method is api_key_query."
               }
             }
           }
@@ -116,7 +151,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["entry_ts"],
+        "required": [
+          "entry_ts"
+        ],
         "properties": {
           "entry_ts": {
             "type": "string",
@@ -125,7 +162,11 @@
           },
           "effect": {
             "type": "string",
-            "enum": ["readOnly", "reversible", "irreversible"],
+            "enum": [
+              "readOnly",
+              "reversible",
+              "irreversible"
+            ],
             "description": "Data access level. readOnly: no side effects (e.g. list, get, search). reversible: creates data that can be undone (e.g. create draft, add tag). irreversible: may edit or delete data, or cause irreversible side effects (e.g. send message, update record, delete)."
           },
           "idempotent": {
@@ -146,7 +187,11 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "type", "inject"],
+              "required": [
+                "name",
+                "type",
+                "inject"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -154,7 +199,12 @@
                 },
                 "type": {
                   "type": "string",
-                  "enum": ["oauth2", "api_key", "bearer", "custom"]
+                  "enum": [
+                    "oauth2",
+                    "api_key",
+                    "bearer",
+                    "custom"
+                  ]
                 },
                 "provider": {
                   "type": "string",
@@ -181,7 +231,9 @@
                 "inject": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["hosts"],
+                  "required": [
+                    "hosts"
+                  ],
                   "properties": {
                     "hosts": {
                       "type": "array",
@@ -197,7 +249,23 @@
                     },
                     "method": {
                       "type": "string",
-                      "minLength": 1
+                      "enum": [
+                        "bearer_header",
+                        "basic_auth",
+                        "api_key_header",
+                        "api_key_query"
+                      ],
+                      "description": "Built-in transport injection method."
+                    },
+                    "headerName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Header name used when method is api_key_header."
+                    },
+                    "queryName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Query parameter name used when method is api_key_query."
                     }
                   }
                 }
@@ -228,12 +296,16 @@
     {
       "if": {
         "properties": {
-          "runtime": { "const": "typescript-sandbox" }
+          "runtime": {
+            "const": "typescript-sandbox"
+          }
         }
       },
       "then": {
         "not": {
-          "required": ["executables"]
+          "required": [
+            "executables"
+          ]
         }
       }
     }

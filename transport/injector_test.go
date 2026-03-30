@@ -2,6 +2,7 @@ package transport_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -117,6 +118,105 @@ func TestInjectorWildcardDoesNotMatchBareParentHost(t *testing.T) {
 	}
 }
 
+func TestInjectorBuiltInMethods(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic_auth emits one authorization header", func(t *testing.T) {
+		t.Parallel()
+		injector := newInjector(t, stubSecretStore{values: map[string][]byte{"pkg/basic": []byte("octocat:secret")}}, transport.Rule{
+			Name:      "basic",
+			SecretKey: "pkg/basic",
+			Type:      tooldef.CredentialTypeAPIKey,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "basic_auth",
+			},
+		})
+
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
+		if err != nil {
+			t.Fatalf("InjectRequest: %v", err)
+		}
+		want := "Basic " + base64.StdEncoding.EncodeToString([]byte("octocat:secret"))
+		if diff := cmp.Diff([][2]string{{"authorization", want}}, headers.Entries()); diff != "" {
+			t.Fatalf("headers mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("api_key_header uses configured header name", func(t *testing.T) {
+		t.Parallel()
+		injector := newInjector(t, stubSecretStore{values: map[string][]byte{"pkg/header": []byte("header-token")}}, transport.Rule{
+			Name:      "header",
+			SecretKey: "pkg/header",
+			Type:      tooldef.CredentialTypeAPIKey,
+			Inject: tooldef.CredentialInject{
+				Hosts:      []string{"api.example.com"},
+				Method:     "api_key_header",
+				HeaderName: "X-Custom-Key",
+			},
+		})
+
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.example.com/data", headers)
+		if err != nil {
+			t.Fatalf("InjectRequest: %v", err)
+		}
+		if diff := cmp.Diff([][2]string{{"x-custom-key", "header-token"}}, headers.Entries()); diff != "" {
+			t.Fatalf("headers mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("api_key_query uses configured query name", func(t *testing.T) {
+		t.Parallel()
+		injector := newInjector(t, stubSecretStore{values: map[string][]byte{"pkg/query": []byte("query-token")}}, transport.Rule{
+			Name:      "query",
+			SecretKey: "pkg/query",
+			Type:      tooldef.CredentialTypeAPIKey,
+			Inject: tooldef.CredentialInject{
+				Hosts:     []string{"api.example.com"},
+				Method:    "api_key_query",
+				QueryName: "api_key",
+			},
+		})
+
+		headers := fetch.NewHeaders()
+		gotURL, err := injector.InjectRequest(context.Background(), "https://api.example.com/data?existing=1", headers)
+		if err != nil {
+			t.Fatalf("InjectRequest: %v", err)
+		}
+		if gotURL != "https://api.example.com/data?api_key=query-token&existing=1" && gotURL != "https://api.example.com/data?existing=1&api_key=query-token" {
+			t.Fatalf("rewritten url = %q, want query injection", gotURL)
+		}
+		if len(headers.Entries()) != 0 {
+			t.Fatalf("headers = %v, want no header mutation", headers.Entries())
+		}
+	})
+
+	t.Run("oauth2 reads reserved access_token family key", func(t *testing.T) {
+		t.Parallel()
+		const accessTokenKey = "github.com/example/github-issues/github_oauth/access_token"
+		injector := newInjector(t, stubSecretStore{values: map[string][]byte{accessTokenKey: []byte("oauth-token")}}, transport.Rule{
+			Name:      "github_oauth",
+			SecretKey: accessTokenKey,
+			Type:      tooldef.CredentialTypeOAuth2,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		})
+
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
+		if err != nil {
+			t.Fatalf("InjectRequest: %v", err)
+		}
+		if diff := cmp.Diff([][2]string{{"authorization", "Bearer oauth-token"}}, headers.Entries()); diff != "" {
+			t.Fatalf("headers mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
 func TestInjectorRejectsMalformedInputsAtConstruction(t *testing.T) {
 	t.Parallel()
 
@@ -141,9 +241,29 @@ func TestInjectorRejectsMalformedInputsAtConstruction(t *testing.T) {
 				Name:      "bad",
 				SecretKey: "pkg/bad",
 				Type:      tooldef.CredentialTypeBearer,
-				Inject:    tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "basic_auth"},
+				Inject:    tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "digest_auth"},
 			},
 			want: "unsupported injection method",
+		},
+		{
+			name: "api key header requires header name",
+			rule: transport.Rule{
+				Name:      "bad",
+				SecretKey: "pkg/bad",
+				Type:      tooldef.CredentialTypeAPIKey,
+				Inject:    tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "api_key_header"},
+			},
+			want: "headerName must not be empty",
+		},
+		{
+			name: "api key query requires query name",
+			rule: transport.Rule{
+				Name:      "bad",
+				SecretKey: "pkg/bad",
+				Type:      tooldef.CredentialTypeAPIKey,
+				Inject:    tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "api_key_query"},
+			},
+			want: "queryName must not be empty",
 		},
 		{
 			name: "malformed path prefix",
@@ -252,7 +372,6 @@ func TestInjectorReportsMissingSecretStoreAndSecretValueFailures(t *testing.T) {
 	})
 
 	t.Run("unusable secret material", func(t *testing.T) {
-		t.Parallel()
 		injector := newInjector(t, stubSecretStore{values: map[string][]byte{"pkg/token": []byte("   ")}}, transport.Rule{
 			Name:      "token",
 			SecretKey: "pkg/token",
@@ -267,6 +386,28 @@ func TestInjectorReportsMissingSecretStoreAndSecretValueFailures(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "resolved unusable secret material") {
 			t.Fatalf("InjectRequest error = %v, want unusable secret context", err)
+		}
+		if len(headers.Entries()) != 0 {
+			t.Fatalf("headers = %v, want no mutation on error", headers.Entries())
+		}
+	})
+
+	t.Run("basic auth rejects malformed secret material", func(t *testing.T) {
+		t.Parallel()
+		injector := newInjector(t, stubSecretStore{values: map[string][]byte{"pkg/basic": []byte("missing-colon")}}, transport.Rule{
+			Name:      "basic",
+			SecretKey: "pkg/basic",
+			Type:      tooldef.CredentialTypeAPIKey,
+			Inject:    tooldef.CredentialInject{Hosts: []string{"api.github.com"}, Method: "basic_auth"},
+		})
+
+		headers := fetch.NewHeaders()
+		_, err := injector.InjectRequest(context.Background(), "https://api.github.com/user", headers)
+		if err == nil {
+			t.Fatal("expected malformed basic_auth secret error")
+		}
+		if !strings.Contains(err.Error(), "malformed basic_auth secret material") {
+			t.Fatalf("InjectRequest error = %v, want malformed basic_auth context", err)
 		}
 		if len(headers.Entries()) != 0 {
 			t.Fatalf("headers = %v, want no mutation on error", headers.Entries())

@@ -82,4 +82,43 @@ func TestGoFetchWithTransportPolicySurfacesPolicyErrorsBeforeOutboundFetch(t *te
 			t.Fatalf("request count = %d, want 0 outbound requests when policy preparation fails", got)
 		}
 	})
+
+	t.Run("oauth2 family lookup failures short circuit before outbound fetch", func(t *testing.T) {
+		var requestCount atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer srv.Close()
+
+		parsedURL, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatalf("parse server url: %v", err)
+		}
+
+		policy, err := transport.NewPolicy(testutil.NewTestSecretStore(), []transport.Rule{{
+			Name:      "github_oauth",
+			SecretKey: "github.com/example/github-issues/github_oauth/access_token",
+			Type:      tooldef.CredentialTypeOAuth2,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{parsedURL.Hostname()},
+				Method: "bearer_header",
+			},
+		}}, nil)
+		if err != nil {
+			t.Fatalf("NewPolicy: %v", err)
+		}
+
+		_, err = goFetchWithTransportPolicy(policy)(srv.URL+"/repos/octocat/hello-world", "GET", "[]", "")
+		if err == nil {
+			t.Fatal("expected missing oauth2 access token to fail before outbound fetch")
+		}
+		if !strings.Contains(err.Error(), "github_oauth/access_token") {
+			t.Fatalf("error = %v, want reserved access token key context", err)
+		}
+		if got := requestCount.Load(); got != 0 {
+			t.Fatalf("request count = %d, want 0 outbound requests when oauth2 lookup fails", got)
+		}
+	})
 }

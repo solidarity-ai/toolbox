@@ -335,6 +335,17 @@ func validateCredentialList(field string, module tooldef.ModulePath, credentials
 			return fmt.Errorf("%s.type %q is invalid", prefix, cred.Type)
 		}
 
+		method := strings.TrimSpace(cred.Inject.Method)
+		if method == "" {
+			method = "bearer_header"
+		}
+		if !supportedInjectMethod(method) {
+			return fmt.Errorf("%s.inject.method %q is invalid", prefix, cred.Inject.Method)
+		}
+		if err := validateCredentialInjectConfig(prefix+".inject", method, cred.Inject); err != nil {
+			return err
+		}
+
 		if len(cred.Inject.Hosts) == 0 {
 			return fmt.Errorf("%s.inject.hosts must declare at least one host", prefix)
 		}
@@ -367,6 +378,90 @@ func validateHostList(field string, hosts []string) error {
 		}
 	}
 	return nil
+}
+
+func supportedInjectMethod(method string) bool {
+	switch method {
+	case "bearer_header", "basic_auth", "api_key_header", "api_key_query":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCredentialInjectConfig(field string, method string, inject tooldef.CredentialInject) error {
+	headerName := strings.TrimSpace(inject.HeaderName)
+	queryName := strings.TrimSpace(inject.QueryName)
+
+	switch method {
+	case "bearer_header", "basic_auth":
+		if headerName != "" {
+			return fmt.Errorf("%s.headerName is only allowed for api_key_header", field)
+		}
+		if queryName != "" {
+			return fmt.Errorf("%s.queryName is only allowed for api_key_query", field)
+		}
+	case "api_key_header":
+		if headerName == "" {
+			return fmt.Errorf("%s.headerName must not be empty when method is api_key_header", field)
+		}
+		if !validHTTPHeaderName(headerName) {
+			return fmt.Errorf("%s.headerName %q is invalid", field, inject.HeaderName)
+		}
+		if queryName != "" {
+			return fmt.Errorf("%s.queryName is only allowed for api_key_query", field)
+		}
+	case "api_key_query":
+		if queryName == "" {
+			return fmt.Errorf("%s.queryName must not be empty when method is api_key_query", field)
+		}
+		if !validQueryParamName(queryName) {
+			return fmt.Errorf("%s.queryName %q is invalid", field, inject.QueryName)
+		}
+		if headerName != "" {
+			return fmt.Errorf("%s.headerName is only allowed for api_key_header", field)
+		}
+	}
+
+	return nil
+}
+
+func validHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if c > 127 {
+			return false
+		}
+		switch {
+		case c >= 'A' && c <= 'Z':
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '!' || c == '#' || c == '$' || c == '%' || c == '&' ||
+			c == '\'' || c == '*' || c == '+' || c == '-' || c == '.' ||
+			c == '^' || c == '_' || c == '`' || c == '|' || c == '~':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validQueryParamName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch r {
+		case '&', '=', '#', '?':
+			return false
+		}
+		if r <= 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // InferEffect derives an effect from the tool entry filename verb.

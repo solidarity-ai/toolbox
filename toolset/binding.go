@@ -18,10 +18,13 @@ type BoundTool struct {
 	Bindings map[string]Binding // param name -> binding
 }
 
-// resolveSecretKey preserves the historic simple credential-key shape while
-// delegating normalization and validation to the shared namespace helper.
-func resolveSecretKey(module tooldef.ModulePath, credentialName string) (string, error) {
-	return tooldef.CredentialSecretKey(module, credentialName)
+// resolveSecretKey derives the runtime secret material key for one credential
+// using the shared package namespace helpers.
+func resolveSecretKey(module tooldef.ModulePath, credential tooldef.PackageCredential) (string, error) {
+	if credential.Type == tooldef.CredentialTypeOAuth2 {
+		return tooldef.CredentialFamilySecretKey(module, "", credential.Name, "access_token")
+	}
+	return tooldef.CredentialSecretKey(module, credential.Name)
 }
 
 // Config is the input to Resolve(). It carries bindings, context, and resolved

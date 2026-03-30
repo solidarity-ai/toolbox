@@ -213,7 +213,7 @@ func resolveToolTransportRules(tool tooldef.ResolvedTool) ([]transport.Rule, err
 
 	rules := make([]transport.Rule, 0, len(tool.EffectiveCredentials))
 	for _, declared := range tool.EffectiveCredentials {
-		secretKey, err := resolveSecretKey(tool.Package.Module, declared.Name)
+		secretKey, err := resolveSecretKey(tool.Package.Module, declared)
 		if err != nil {
 			return nil, fmt.Errorf("credential %q: %w", declared.Name, err)
 		}

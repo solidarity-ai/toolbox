@@ -18,13 +18,12 @@ var ErrNoResolver = errors.New("no registry resolver configured")
 
 // ResolvedToolset carries the visible tools and their compiled bindings.
 type ResolvedToolset struct {
-	tools        []tooldef.ResolvedTool
-	bindings     map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
-	hiddenParams map[string]map[string]bool            // tool name -> set of hidden param names
-	auth         map[string]ResolvedAuth               // tool name -> runtime-only auth context
-	allowedHosts map[string][]string                   // tool name -> effective runtime-only host allowlist
-	context      map[string]any
-	celEnv       *cel.Env
+	tools             []tooldef.ResolvedTool
+	bindings          map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
+	hiddenParams      map[string]map[string]bool            // tool name -> set of hidden param names
+	transportPolicies map[string]*transport.Policy          // tool name -> runtime-only transport policy
+	context           map[string]any
+	celEnv            *cel.Env
 }
 
 // Builder incrementally assembles a toolset from source package directories.
@@ -135,8 +134,7 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 
 	allCompiled := make(map[string]map[string]compiledBinding, len(toolBindings))
 	allHidden := make(map[string]map[string]bool)
-	allAuth := make(map[string]ResolvedAuth)
-	allAllowedHosts := make(map[string][]string)
+	allTransportPolicies := make(map[string]*transport.Policy)
 
 	for _, tool := range tools {
 		// Start with explicit per-tool bindings
@@ -178,53 +176,47 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 			}
 		}
 
-		if auth, err := resolveToolAuth(tool, cfg); err != nil {
+		if policy, err := resolveToolTransportPolicy(tool, cfg); err != nil {
 			return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
-		} else if auth.Injector != nil {
-			allAuth[tool.Name] = auth
-		}
-		if allowedHosts := resolveToolAllowedHosts(tool); len(allowedHosts) > 0 {
-			allAllowedHosts[tool.Name] = allowedHosts
+		} else if policy != nil {
+			allTransportPolicies[tool.Name] = policy
 		}
 	}
 
 	out := make([]tooldef.ResolvedTool, len(tools))
 	copy(out, tools)
 	return ResolvedToolset{
-		tools:        out,
-		bindings:     allCompiled,
-		hiddenParams: allHidden,
-		auth:         allAuth,
-		allowedHosts: allAllowedHosts,
-		context:      cfg.Context,
-		celEnv:       env,
+		tools:             out,
+		bindings:          allCompiled,
+		hiddenParams:      allHidden,
+		transportPolicies: allTransportPolicies,
+		context:           cfg.Context,
+		celEnv:            env,
 	}, nil
 }
 
-func resolveToolAuth(tool tooldef.ResolvedTool, cfg Config) (ResolvedAuth, error) {
-	if tool.Package == nil || tool.Package.Module == "" || len(tool.Package.Credentials) == 0 {
-		return ResolvedAuth{}, nil
+func resolveToolTransportPolicy(tool tooldef.ResolvedTool, cfg Config) (*transport.Policy, error) {
+	secretNamespace := ""
+	if tool.Package != nil && tool.Package.Module != "" {
+		secretNamespace = tool.Package.Module.String()
 	}
-	secretNamespace := tool.Package.Module.String()
-	rules := make([]transport.Rule, 0, len(tool.Package.Credentials))
-	for _, declared := range tool.Package.Credentials {
-		rules = append(rules, transport.Rule{
-			Name:      declared.Name,
-			Type:      declared.Type,
-			Provider:  declared.Provider,
-			Scopes:    append([]string(nil), declared.Scopes...),
-			SecretKey: resolveSecretKey(secretNamespace, declared.Name),
-			Inject:    declared.Inject,
-		})
+
+	var rules []transport.Rule
+	if tool.Package != nil && len(tool.Package.Credentials) > 0 {
+		rules = make([]transport.Rule, 0, len(tool.Package.Credentials))
+		for _, declared := range tool.Package.Credentials {
+			rules = append(rules, transport.Rule{
+				Name:      declared.Name,
+				Type:      declared.Type,
+				Provider:  declared.Provider,
+				Scopes:    append([]string(nil), declared.Scopes...),
+				SecretKey: resolveSecretKey(secretNamespace, declared.Name),
+				Inject:    declared.Inject,
+			})
+		}
 	}
-	injector, err := transport.NewInjector(cfg.SecretStore, rules)
-	if err != nil {
-		return ResolvedAuth{}, err
-	}
-	if injector == nil || len(injector.Rules()) == 0 {
-		return ResolvedAuth{}, nil
-	}
-	return ResolvedAuth{Injector: injector}, nil
+
+	return transport.NewPolicy(cfg.SecretStore, rules, tool.AllowedHosts)
 }
 
 func resolveToolAllowedHosts(tool tooldef.ResolvedTool) []string {
@@ -244,13 +236,14 @@ func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, er
 func NewResolvedToolset(tools []tooldef.ResolvedTool) ResolvedToolset {
 	out := make([]tooldef.ResolvedTool, len(tools))
 	copy(out, tools)
-	allowedHosts := make(map[string][]string)
+	transportPolicies := make(map[string]*transport.Policy)
 	for _, tool := range out {
-		if hosts := resolveToolAllowedHosts(tool); len(hosts) > 0 {
-			allowedHosts[tool.Name] = hosts
+		policy, err := transport.NewPolicy(nil, nil, tool.AllowedHosts)
+		if err == nil && policy != nil {
+			transportPolicies[tool.Name] = policy
 		}
 	}
-	return ResolvedToolset{tools: out, allowedHosts: allowedHosts}
+	return ResolvedToolset{tools: out, transportPolicies: transportPolicies}
 }
 
 // Tools returns a shallow copy of the visible tools for this resolved toolset.
@@ -260,17 +253,22 @@ func (r ResolvedToolset) Tools() []tooldef.ResolvedTool {
 	return out
 }
 
-// ToolAuth returns the runtime-only transport auth context for a resolved tool.
-func (r ResolvedToolset) ToolAuth(toolName string) (ResolvedAuth, bool) {
-	auth, ok := r.auth[toolName]
-	return auth, ok
+// ToolTransportPolicy returns the runtime-only shared transport policy for a
+// resolved tool.
+func (r ResolvedToolset) ToolTransportPolicy(toolName string) (*transport.Policy, bool) {
+	policy, ok := r.transportPolicies[toolName]
+	return policy, ok
 }
 
 // ToolAllowedHosts returns the effective runtime-only host allowlist for a resolved tool.
 func (r ResolvedToolset) ToolAllowedHosts(toolName string) ([]string, bool) {
-	allowedHosts, ok := r.allowedHosts[toolName]
-	if !ok {
+	policy, ok := r.transportPolicies[toolName]
+	if !ok || policy == nil {
 		return nil, false
 	}
-	return append([]string(nil), allowedHosts...), true
+	allowedHosts := policy.AllowedHosts()
+	if len(allowedHosts) == 0 {
+		return nil, false
+	}
+	return allowedHosts, true
 }

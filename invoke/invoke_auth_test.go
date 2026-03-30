@@ -28,18 +28,27 @@ func TestGoFetchAuthEmulateRouteReturns401WithoutInjectedAuth(t *testing.T) {
 		"repo":   repo,
 		"number": issueNumber,
 	})
-	if err == nil {
-		t.Fatal("expected auth-gated emulate route to reject unauthenticated fetch")
-	}
-	if !strings.Contains(err.Error(), "GitHub API 401") {
-		t.Fatalf("error = %v, want GitHub API 401", err)
-	}
-	if !strings.Contains(err.Error(), "Authorization: Bearer <redacted>") {
-		t.Fatalf("error = %v, want auth-gate diagnostic", err)
-	}
-	if strings.Contains(err.Error(), wantTitle) {
-		t.Fatalf("error leaked upstream issue payload instead of failing at auth gate: %v", err)
-	}
+	assertUnauthenticatedAuthGateError(t, err, wantTitle)
+}
+
+func TestGoFetchAuthEmulateRouteReturns401WhenHostDoesNotMatchCredentialRule(t *testing.T) {
+	srv := emulatetest.Start(t)
+	owner, repo, issueNumber, wantTitle := seedGithubIssueCanary(t, srv, "go-fetch-host-miss")
+	workDir := tooltest.PrepareGithubIssuesFixture(t, srv.AuthBaseURL())
+	rewriteGithubIssuesCredentialHost(t, workDir, "example.invalid")
+
+	secretStore := testutil.NewTestSecretStore()
+	secretStore.SeedStrings(map[string]string{
+		"github.com/example/github-issues/github_token": srv.Token(),
+	})
+
+	resolved := resolveGithubIssuesToolset(t, workDir, secretStore)
+	_, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
+		"owner":  owner,
+		"repo":   repo,
+		"number": issueNumber,
+	})
+	assertUnauthenticatedAuthGateError(t, err, wantTitle)
 }
 
 func TestGoFetchAuthMissingTransportCredentialReturnsHelpfulError(t *testing.T) {
@@ -178,5 +187,21 @@ func rewriteGithubIssuesCredentialHost(t testing.TB, workDir, host string) {
 	}
 	if err := os.WriteFile(manifestPath, append(updated, '\n'), 0o644); err != nil {
 		t.Fatalf("write manifest for host rewrite: %v", err)
+	}
+}
+
+func assertUnauthenticatedAuthGateError(t testing.TB, err error, wantTitle string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected auth-gated emulate route to reject unauthenticated fetch")
+	}
+	if !strings.Contains(err.Error(), "GitHub API 401") {
+		t.Fatalf("error = %v, want GitHub API 401", err)
+	}
+	if !strings.Contains(err.Error(), "Authorization: Bearer <redacted>") {
+		t.Fatalf("error = %v, want auth-gate diagnostic", err)
+	}
+	if strings.Contains(err.Error(), wantTitle) {
+		t.Fatalf("error leaked upstream issue payload instead of failing at auth gate: %v", err)
 	}
 }

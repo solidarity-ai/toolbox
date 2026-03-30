@@ -18,6 +18,7 @@ import (
 	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/transport"
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
@@ -48,12 +49,12 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
-			auth, _ := resolved.ToolAuth(tool.Name)
+			transportPolicy, _ := resolved.ToolTransportPolicy(tool.Name)
 			if tool.TSWasm != nil {
-				return runTSWasmTool(tool, fullParams, auth)
+				return runTSWasmTool(tool, fullParams, transportPolicy)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, fullParams, auth)
+				return runTSTool(tool, fullParams, transportPolicy)
 			}
 
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
@@ -63,10 +64,10 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func runTSTool(tool tooldef.ResolvedTool, args map[string]any, auth toolset.ResolvedAuth) (string, error) {
+func runTSTool(tool tooldef.ResolvedTool, args map[string]any, transportPolicy *transport.Policy) (string, error) {
 	session := getCheckSession(tool.Package)
 	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{
-		Fetch: goFetchWithAuth(auth),
+		Fetch: goFetchWithTransportPolicy(transportPolicy),
 	}, &session, tool.Sig)
 	setCheckSession(tool.Package, session)
 	return result, err
@@ -83,12 +84,12 @@ func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[stri
 
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
-			auth, _ := resolved.ToolAuth(tool.Name)
+			transportPolicy, _ := resolved.ToolTransportPolicy(tool.Name)
 			if tool.TSWasm != nil {
-				return runTSWasmToolWithVFS(tool, fullParams, memFS, auth)
+				return runTSWasmToolWithVFS(tool, fullParams, memFS, transportPolicy)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, fullParams, auth)
+				return runTSTool(tool, fullParams, transportPolicy)
 			}
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
 		}
@@ -96,11 +97,11 @@ func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[stri
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any, auth toolset.ResolvedAuth) (string, error) {
-	return runTSWasmToolWithVFS(tool, args, vfs.NewMemFS(), auth)
+func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any, transportPolicy *transport.Policy) (string, error) {
+	return runTSWasmToolWithVFS(tool, args, vfs.NewMemFS(), transportPolicy)
 }
 
-func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS *vfs.MemFS, auth toolset.ResolvedAuth) (string, error) {
+func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS *vfs.MemFS, transportPolicy *transport.Policy) (string, error) {
 	sockPath, cleanup, err := startVFSServer(memFS)
 	if err != nil {
 		return "", fmt.Errorf("start vfs server: %w", err)
@@ -119,7 +120,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 		WriteFile: func(path string, data string) error {
 			return memFS.WriteFile(path, []byte(data))
 		},
-		Fetch: goFetchWithAuth(auth),
+		Fetch: goFetchWithTransportPolicy(transportPolicy),
 		Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
 			relativePath, ok := tool.TSWasm.Executables[binary]
 			if !ok {
@@ -189,9 +190,9 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 	}
 }
 
-// goFetchWithAuth performs an HTTP request using the fetch package.
+// goFetchWithTransportPolicy performs an HTTP request using the fetch package.
 // It's the Go-side implementation behind the JS fetch() global.
-func goFetchWithAuth(auth toolset.ResolvedAuth) func(url, method, headersJSON, body string) (quickts.FetchResult, error) {
+func goFetchWithTransportPolicy(policy *transport.Policy) func(url, method, headersJSON, body string) (quickts.FetchResult, error) {
 	return func(url, method, headersJSON, body string) (quickts.FetchResult, error) {
 		reqHeaders := fetch.NewHeaders()
 		var pairs [][2]string
@@ -202,8 +203,8 @@ func goFetchWithAuth(auth toolset.ResolvedAuth) func(url, method, headersJSON, b
 		}
 
 		var err error
-		if auth.Injector != nil {
-			url, err = auth.Injector.InjectRequest(context.Background(), url, reqHeaders)
+		if policy != nil {
+			url, err = policy.PrepareRequest(context.Background(), url, reqHeaders)
 			if err != nil {
 				return quickts.FetchResult{}, err
 			}

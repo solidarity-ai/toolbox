@@ -12,11 +12,11 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 	t.Parallel()
 
 	resolved := authResolvedToolset(t)
-	auth, ok := resolved.ToolAuth("github.issues.get")
+	policy, ok := resolved.ToolTransportPolicy("github.issues.get")
 	if !ok {
-		t.Fatal("expected runtime auth for tool")
+		t.Fatal("expected runtime transport policy for tool")
 	}
-	rules := auth.Rules()
+	rules := policy.Rules()
 	if len(rules) != 1 {
 		t.Fatalf("expected 1 runtime rule, got %d", len(rules))
 	}
@@ -24,8 +24,12 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 	if rule.SecretKey != "github.com/example/github-issues/github_token" {
 		t.Fatalf("secret key = %q, want package-scoped credential key", rule.SecretKey)
 	}
-	if got := auth.SecretKeys(); len(got) != 1 || got[0] != rule.SecretKey {
-		t.Fatalf("SecretKeys() = %v, want [%q]", got, rule.SecretKey)
+	secretKeys := make([]string, 0, len(rules))
+	for _, resolvedRule := range rules {
+		secretKeys = append(secretKeys, resolvedRule.SecretKey)
+	}
+	if len(secretKeys) != 1 || secretKeys[0] != rule.SecretKey {
+		t.Fatalf("transport policy secret keys = %v, want [%q]", secretKeys, rule.SecretKey)
 	}
 }
 

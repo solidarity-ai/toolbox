@@ -44,6 +44,18 @@ func TestResolveToolAllowedHosts(t *testing.T) {
 	}
 
 	t.Run("inherits normalized package policy", func(t *testing.T) {
+		policy, ok := resolved.ToolTransportPolicy("users.list")
+		if !ok {
+			t.Fatal("expected transport policy for users.list")
+		}
+		got := policy.AllowedHosts()
+		want := []string{"*.googleapis.com", "oauth2.googleapis.com"}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("ToolTransportPolicy(users.list).AllowedHosts() mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("tool allowlist accessor stays compatible", func(t *testing.T) {
 		got, ok := resolved.ToolAllowedHosts("users.list")
 		if !ok {
 			t.Fatal("expected allowed hosts for users.list")
@@ -91,8 +103,10 @@ func TestAllowlistRuntimeStateStaysOutOfAgentView(t *testing.T) {
 	if len(view.Tools) != 1 {
 		t.Fatalf("AgentView tool count = %d, want 1", len(view.Tools))
 	}
-	if _, ok := resolved.ToolAllowedHosts("hooks.send"); !ok {
-		t.Fatal("expected runtime allowlist for hooks.send")
+	if policy, ok := resolved.ToolTransportPolicy("hooks.send"); !ok {
+		t.Fatal("expected runtime transport policy for hooks.send")
+	} else if diff := cmp.Diff([]string{"hooks.slack.com"}, policy.AllowedHosts()); diff != "" {
+		t.Fatalf("transport policy allowlist mismatch (-want +got):\n%s", diff)
 	}
 	if view.Tools[0].ParamsSchema != nil {
 		if _, ok := view.Tools[0].ParamsSchema["allowed_hosts"]; ok {

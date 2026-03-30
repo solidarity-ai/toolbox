@@ -144,16 +144,17 @@ func (t *PackageTool) UnmarshalJSON(data []byte) error {
 // outside-in seams. It combines static package identity with the concrete
 // executable artifact for one visible tool.
 type ResolvedTool struct {
-	Name           string
-	Description    string
-	Sig            *toolbox.FuncSignature
-	Effect         Effect
-	Idempotent     *bool
-	ResourceParams []ResourceParam
-	AllowedHosts   []string
-	Package        *Package
-	TS             *TSToolDef
-	TSWasm         *TSWasmToolDef
+	Name                 string
+	Description          string
+	Sig                  *toolbox.FuncSignature
+	Effect               Effect
+	Idempotent           *bool
+	ResourceParams       []ResourceParam
+	AllowedHosts         []string
+	EffectiveCredentials []PackageCredential
+	Package              *Package
+	TS                   *TSToolDef
+	TSWasm               *TSWasmToolDef
 
 	// paramsSchema is the fallback JSON Schema for when Sig is nil (e.g. dist packages).
 	// Use ParamsSchema() to access — it derives from Sig when available.

@@ -427,6 +427,81 @@ func TestResolvedToolsAllowedHosts(t *testing.T) {
 	}
 }
 
+func TestResolvedToolsEffectiveCredentials(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	manifestJSON := `{
+  "module": "github.com/example/github-tools",
+  "name": "github-tools",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/issues.list.ts", "effect": "readOnly" },
+    { "entry_ts": "tools/status.get.ts", "effect": "readOnly", "credentials": [] },
+    {
+      "entry_ts": "tools/calendar.list.ts",
+      "effect": "readOnly",
+      "credentials": [
+        {
+          "name": "calendar_token",
+          "type": "bearer",
+          "inject": {
+            "hosts": ["api.example.com"],
+            "method": "bearer_header"
+          }
+        }
+      ]
+    }
+  ]
+}`
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), manifestJSON)
+	mustWriteFile(t, filepath.Join(dir, "tools", "issues.list.ts"), "export default function() {}")
+	mustWriteFile(t, filepath.Join(dir, "tools", "status.get.ts"), "export default function() {}")
+	mustWriteFile(t, filepath.Join(dir, "tools", "calendar.list.ts"), "export default function() {}")
+
+	loaded, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir() error: %v", err)
+	}
+
+	resolved := loaded.ResolvedTools()
+	got := make(map[string][]string, len(resolved))
+	for _, tool := range resolved {
+		if len(tool.EffectiveCredentials) == 0 {
+			got[tool.Name] = nil
+			continue
+		}
+		names := make([]string, 0, len(tool.EffectiveCredentials))
+		for _, cred := range tool.EffectiveCredentials {
+			names = append(names, cred.Name)
+		}
+		got[tool.Name] = names
+	}
+
+	want := map[string][]string{
+		"issues.list":   {"github_token"},
+		"status.get":    nil,
+		"calendar.list": {"calendar_token"},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("ResolvedTools() effective credentials mismatch (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([]string{"github_token"}, []string{loaded.Package.Credentials[0].Name}); diff != "" {
+		t.Fatalf("package credentials changed unexpectedly (-want +got):\n%s", diff)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

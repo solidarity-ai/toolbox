@@ -77,14 +77,15 @@ func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
 			description = manifest.InferToolName(pkgTool.EntryTS)
 		}
 		resolved := tooldef.ResolvedTool{
-			Name:           manifest.InferToolName(pkgTool.EntryTS),
-			Description:    description,
-			Sig:            pkgTool.Sig,
-			Effect:         pkgTool.Effect,
-			Idempotent:     pkgTool.Idempotent,
-			ResourceParams: pkgTool.ResourceParams,
-			AllowedHosts:   resolveAllowedHosts(p.Package.AllowedHosts, pkgTool.AllowedHosts, pkgTool.AllowedHostsExtend),
-			Package:        &p.Package,
+			Name:                 manifest.InferToolName(pkgTool.EntryTS),
+			Description:          description,
+			Sig:                  pkgTool.Sig,
+			Effect:               pkgTool.Effect,
+			Idempotent:           pkgTool.Idempotent,
+			ResourceParams:       pkgTool.ResourceParams,
+			AllowedHosts:         resolveAllowedHosts(p.Package.AllowedHosts, pkgTool.AllowedHosts, pkgTool.AllowedHostsExtend),
+			EffectiveCredentials: resolveEffectiveCredentials(p.Package.Credentials, pkgTool),
+			Package:              &p.Package,
 		}
 		resolved.SetParamsSchema(pkgTool.ParamsSchema)
 
@@ -203,4 +204,17 @@ func resolveAllowedHosts(packageAllowedHosts []string, toolAllowedHosts []string
 		return nil
 	}
 	return append([]string(nil), combined...)
+}
+
+func resolveEffectiveCredentials(packageCredentials []tooldef.PackageCredential, pkgTool tooldef.PackageTool) []tooldef.PackageCredential {
+	if pkgTool.CredentialsPresent {
+		if len(pkgTool.Credentials) == 0 {
+			return nil
+		}
+		return append([]tooldef.PackageCredential(nil), pkgTool.Credentials...)
+	}
+	if len(packageCredentials) == 0 {
+		return nil
+	}
+	return append([]tooldef.PackageCredential(nil), packageCredentials...)
 }

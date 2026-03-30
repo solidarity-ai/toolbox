@@ -36,42 +36,224 @@ func TestResolveToolAuthDerivesPackageScopedCredentialNamespace(t *testing.T) {
 func TestResolveToolAuthRejectsAmbiguousCanonicalRules(t *testing.T) {
 	t.Parallel()
 
-	pkg := tooldef.Package{
-		Module:  "github.com/example/github-issues",
-		Name:    "github-issues",
-		Runtime: tooldef.RuntimeTypeScriptSandbox,
-		Credentials: []tooldef.PackageCredential{
-			{
-				Name: "primary_token",
-				Type: tooldef.CredentialTypeBearer,
-				Inject: tooldef.CredentialInject{
-					Hosts:      []string{" API.GitHub.com "},
-					PathPrefix: "/repos/",
-					Method:     "bearer_header",
-				},
+	credentials := []tooldef.PackageCredential{
+		{
+			Name: "primary_token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:      []string{" API.GitHub.com "},
+				PathPrefix: "/repos/",
+				Method:     "bearer_header",
 			},
-			{
-				Name: "fallback_token",
-				Type: tooldef.CredentialTypeBearer,
-				Inject: tooldef.CredentialInject{
-					Hosts:      []string{"api.github.com"},
-					PathPrefix: "/repos",
-					Method:     "bearer_header",
-				},
+		},
+		{
+			Name: "fallback_token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:      []string{"api.github.com"},
+				PathPrefix: "/repos",
+				Method:     "bearer_header",
 			},
 		},
 	}
 
 	_, err := toolset.ResolveTools([]tooldef.ResolvedTool{{
-		Name:        "github.issues.get",
-		Description: "Get a GitHub issue",
-		Package:     &pkg,
+		Name:                 "github.issues.get",
+		Description:          "Get a GitHub issue",
+		Package:              &tooldef.Package{Module: "github.com/example/github-issues", Name: "github-issues", Runtime: tooldef.RuntimeTypeScriptSandbox},
+		EffectiveCredentials: credentials,
 	}}, toolset.Config{})
 	if err == nil {
 		t.Fatal("expected ambiguous credential rules to fail resolution")
 	}
 	if !strings.Contains(err.Error(), "ambiguous transport credential rules") {
 		t.Fatalf("ResolveTools error = %v, want ambiguity context", err)
+	}
+}
+
+func TestResolveToolAuthUsesEffectiveCredentialOverrideAndExplicitNoCredentials(t *testing.T) {
+	t.Parallel()
+
+	basePkg := tooldef.Package{
+		Module:  "github.com/example/multi-auth",
+		Name:    "multi-auth",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Credentials: []tooldef.PackageCredential{{
+			Name: "package_token",
+			Type: tooldef.CredentialTypeBearer,
+			Inject: tooldef.CredentialInject{
+				Hosts:  []string{"api.github.com"},
+				Method: "bearer_header",
+			},
+		}},
+	}
+
+	tools := []tooldef.ResolvedTool{
+		{
+			Name:                 "package.default",
+			Description:          "Uses inherited credential",
+			Package:              &basePkg,
+			EffectiveCredentials: basePkg.Credentials,
+		},
+		{
+			Name:        "package.none",
+			Description: "Explicit no-auth tool",
+			Package:     &basePkg,
+		},
+		{
+			Name:        "package.override",
+			Description: "Uses replacement credential",
+			Package:     &basePkg,
+			EffectiveCredentials: []tooldef.PackageCredential{{
+				Name: "override_token",
+				Type: tooldef.CredentialTypeBearer,
+				Inject: tooldef.CredentialInject{
+					Hosts:  []string{"api.github.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	resolved, err := toolset.ResolveTools(tools, toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+
+	defaultPolicy, ok := resolved.ToolTransportPolicy("package.default")
+	if !ok {
+		t.Fatal("expected policy for inherited credential tool")
+	}
+	defaultRules := defaultPolicy.Rules()
+	if len(defaultRules) != 1 || defaultRules[0].SecretKey != "github.com/example/multi-auth/package_token" {
+		t.Fatalf("default rules = %+v, want inherited package_token rule", defaultRules)
+	}
+
+	nonePolicy, ok := resolved.ToolTransportPolicy("package.none")
+	if ok && len(nonePolicy.Rules()) > 0 {
+		t.Fatalf("explicit no-auth tool unexpectedly received rules: %+v", nonePolicy.Rules())
+	}
+
+	overridePolicy, ok := resolved.ToolTransportPolicy("package.override")
+	if !ok {
+		t.Fatal("expected policy for override tool")
+	}
+	overrideRules := overridePolicy.Rules()
+	if len(overrideRules) != 1 || overrideRules[0].SecretKey != "github.com/example/multi-auth/override_token" {
+		t.Fatalf("override rules = %+v, want replacement override_token rule", overrideRules)
+	}
+}
+
+func TestResolveToolAuthKeepsPackageScopedKeysDistinctAcrossPackages(t *testing.T) {
+	t.Parallel()
+
+	sharedCredential := tooldef.PackageCredential{
+		Name: "shared_token",
+		Type: tooldef.CredentialTypeBearer,
+		Inject: tooldef.CredentialInject{
+			Hosts:  []string{"api.example.com"},
+			Method: "bearer_header",
+		},
+	}
+
+	tools := []tooldef.ResolvedTool{
+		{
+			Name:                 "pkg.one.tool",
+			Description:          "Package one",
+			Package:              &tooldef.Package{Module: "github.com/example/pkg-one", Name: "pkg-one", Runtime: tooldef.RuntimeTypeScriptSandbox},
+			EffectiveCredentials: []tooldef.PackageCredential{sharedCredential},
+		},
+		{
+			Name:                 "pkg.two.tool",
+			Description:          "Package two",
+			Package:              &tooldef.Package{Module: "github.com/example/pkg-two", Name: "pkg-two", Runtime: tooldef.RuntimeTypeScriptSandbox},
+			EffectiveCredentials: []tooldef.PackageCredential{sharedCredential},
+		},
+	}
+
+	resolved, err := toolset.ResolveTools(tools, toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+
+	firstPolicy, ok := resolved.ToolTransportPolicy("pkg.one.tool")
+	if !ok {
+		t.Fatal("expected policy for pkg.one.tool")
+	}
+	secondPolicy, ok := resolved.ToolTransportPolicy("pkg.two.tool")
+	if !ok {
+		t.Fatal("expected policy for pkg.two.tool")
+	}
+	firstKey := firstPolicy.Rules()[0].SecretKey
+	secondKey := secondPolicy.Rules()[0].SecretKey
+	if firstKey == secondKey {
+		t.Fatalf("package-scoped keys collided: %q", firstKey)
+	}
+	if firstKey != "github.com/example/pkg-one/shared_token" {
+		t.Fatalf("first key = %q, want package-one scoped key", firstKey)
+	}
+	if secondKey != "github.com/example/pkg-two/shared_token" {
+		t.Fatalf("second key = %q, want package-two scoped key", secondKey)
+	}
+}
+
+func TestResolveToolAuthNamespaceHelpersReserveTenantAndCredentialFamilies(t *testing.T) {
+	t.Parallel()
+
+	module := tooldef.ModulePath("github.com/example/github-issues")
+
+	packageNamespace, err := tooldef.PackageSecretNamespace(module)
+	if err != nil {
+		t.Fatalf("PackageSecretNamespace: %v", err)
+	}
+	if packageNamespace != "github.com/example/github-issues" {
+		t.Fatalf("package namespace = %q", packageNamespace)
+	}
+
+	tenantNamespace, err := tooldef.TenantSecretNamespace(module, "acme")
+	if err != nil {
+		t.Fatalf("TenantSecretNamespace: %v", err)
+	}
+	if tenantNamespace != "github.com/example/github-issues/tenant/acme" {
+		t.Fatalf("tenant namespace = %q", tenantNamespace)
+	}
+	if !strings.HasPrefix(tenantNamespace, packageNamespace+"/") {
+		t.Fatalf("tenant namespace = %q, want nested beneath package root %q", tenantNamespace, packageNamespace)
+	}
+
+	familyKey, err := tooldef.CredentialFamilySecretKey(module, "acme", "github_oauth", "access_token")
+	if err != nil {
+		t.Fatalf("CredentialFamilySecretKey: %v", err)
+	}
+	if familyKey != "github.com/example/github-issues/tenant/acme/github_oauth/access_token" {
+		t.Fatalf("family key = %q", familyKey)
+	}
+
+	otherFamilyKey, err := tooldef.CredentialFamilySecretKey(module, "acme", "calendar_oauth", "access_token")
+	if err != nil {
+		t.Fatalf("CredentialFamilySecretKey second credential: %v", err)
+	}
+	if familyKey == otherFamilyKey {
+		t.Fatalf("credential family keys collided: %q", familyKey)
+	}
+}
+
+func TestResolveToolAuthNamespaceHelpersRejectMalformedParts(t *testing.T) {
+	t.Parallel()
+
+	module := tooldef.ModulePath("github.com/example/github-issues")
+
+	if _, err := tooldef.PackageSecretNamespace(""); err == nil {
+		t.Fatal("expected empty module to fail package namespace resolution")
+	}
+	if _, err := tooldef.TenantSecretNamespace(module, "tenant/one"); err == nil {
+		t.Fatal("expected malformed tenant to fail")
+	}
+	if _, err := tooldef.CredentialSecretKey(module, " "); err == nil {
+		t.Fatal("expected empty credential name to fail")
+	}
+	if _, err := tooldef.CredentialFamilySecretKey(module, "", "github_oauth", "refresh/token"); err == nil {
+		t.Fatal("expected malformed family segment to fail")
 	}
 }
 
@@ -141,9 +323,10 @@ func authResolvedToolset(t testing.TB) toolset.ResolvedToolset {
 	}
 
 	rt := tooldef.ResolvedTool{
-		Name:        "github.issues.get",
-		Description: "Get a GitHub issue",
-		Package:     &pkg,
+		Name:                 "github.issues.get",
+		Description:          "Get a GitHub issue",
+		Package:              &pkg,
+		EffectiveCredentials: pkg.Credentials,
 	}
 	rt.SetParamsSchema(map[string]any{
 		"type": "object",

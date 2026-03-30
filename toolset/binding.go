@@ -1,9 +1,8 @@
 package toolset
 
 import (
-	"fmt"
-
 	"github.com/solidarity-ai/toolbox/secrets"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // Binding describes how a parameter is resolved at call time.
@@ -19,14 +18,10 @@ type BoundTool struct {
 	Bindings map[string]Binding // param name -> binding
 }
 
-func resolveSecretKey(namespace, credentialName string) string {
-	if namespace == "" {
-		return credentialName
-	}
-	if credentialName == "" {
-		return namespace
-	}
-	return fmt.Sprintf("%s/%s", namespace, credentialName)
+// resolveSecretKey preserves the historic simple credential-key shape while
+// delegating normalization and validation to the shared namespace helper.
+func resolveSecretKey(module tooldef.ModulePath, credentialName string) (string, error) {
+	return tooldef.CredentialSecretKey(module, credentialName)
 }
 
 // Config is the input to Resolve(). It carries bindings, context, and resolved

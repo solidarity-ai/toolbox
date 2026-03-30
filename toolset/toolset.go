@@ -196,21 +196,23 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 }
 
 func resolveToolTransportPolicy(tool tooldef.ResolvedTool, cfg Config) (*transport.Policy, error) {
-	secretNamespace := ""
-	if tool.Package != nil && tool.Package.Module != "" {
-		secretNamespace = tool.Package.Module.String()
-	}
-
 	var rules []transport.Rule
-	if tool.Package != nil && len(tool.Package.Credentials) > 0 {
-		rules = make([]transport.Rule, 0, len(tool.Package.Credentials))
-		for _, declared := range tool.Package.Credentials {
+	if len(tool.EffectiveCredentials) > 0 {
+		if tool.Package == nil {
+			return nil, fmt.Errorf("resolved credentials require package metadata")
+		}
+		rules = make([]transport.Rule, 0, len(tool.EffectiveCredentials))
+		for _, declared := range tool.EffectiveCredentials {
+			secretKey, err := resolveSecretKey(tool.Package.Module, declared.Name)
+			if err != nil {
+				return nil, err
+			}
 			rules = append(rules, transport.Rule{
 				Name:      declared.Name,
 				Type:      declared.Type,
 				Provider:  declared.Provider,
 				Scopes:    append([]string(nil), declared.Scopes...),
-				SecretKey: resolveSecretKey(secretNamespace, declared.Name),
+				SecretKey: secretKey,
 				Inject:    declared.Inject,
 			})
 		}

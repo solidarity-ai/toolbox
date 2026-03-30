@@ -1,9 +1,22 @@
 {
+  "module": "github.com/example/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
-  "sha256": "e677577d710ae2a833f11a67d263c25bd45037f4c5a1f4b0edf7f0a27fb91295",
+  "sha256": "d87ab5c6136ea3a9c588c1257aecb14f57317b923b40b492c5b27d075bbac2b5",
   "additionalTypeScriptGlobs": [
     "tools/shims.ts"
+  ],
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": [
+          "api.github.com"
+        ],
+        "method": "bearer_header"
+      }
+    }
   ],
   "tools": [
     {

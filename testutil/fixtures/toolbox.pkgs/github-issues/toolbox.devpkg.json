@@ -1,7 +1,18 @@
 {
+  "module": "github.com/example/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["tools/shims.ts"],
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
   "tools": [
     {
       "entry_ts": "tools/github-issues.get.ts"

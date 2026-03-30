@@ -11,7 +11,9 @@ import (
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
+	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -26,8 +28,13 @@ func TestNpmDepsDevMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDev: %v", err)
 	}
+	assertGithubIssuesAuthContract(t, loaded.Package)
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	resolved, err := toolset.ResolveTools(loaded.ResolvedTools(), toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+	assertToolAuthHiddenFromAgentView(t, resolved)
 
 	// Verify esbuild can bundle the tool with npm deps.
 	// We don't run the tool (it would hang on a real fetch to api.github.com)
@@ -61,8 +68,13 @@ func TestNpmDepsDistMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadArchive: %v", err)
 	}
+	assertGithubIssuesAuthContract(t, loaded.Package)
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	resolved, err := toolset.ResolveTools(loaded.ResolvedTools(), toolset.Config{})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+	assertToolAuthHiddenFromAgentView(t, resolved)
 
 	_, err = invoke.Run(resolved, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
@@ -93,6 +105,7 @@ func TestNpmDepsBundleSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDev: %v", err)
 	}
+	assertGithubIssuesAuthContract(t, loaded.Package)
 
 	tools := loaded.ResolvedTools()
 	if len(tools) == 0 {
@@ -177,7 +190,8 @@ func npmInstall(t *testing.T, dir string) {
 }
 
 // TestNpmDepsE2E runs the github-issues tool against the real GitHub API.
-// Uses GITHUB_TOKEN env var, or falls back to `gh auth token`.
+// Uses GITHUB_TOKEN env var, or falls back to `gh auth token`, but injects it
+// through the package-declared transport credential instead of a tool param.
 func TestNpmDepsE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
@@ -192,15 +206,24 @@ func TestNpmDepsE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDev: %v", err)
 	}
+	assertGithubIssuesAuthContract(t, loaded.Package)
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	secretStore := testutil.NewTestSecretStore()
+	secretStore.Seed(map[string][]byte{
+		"github.com/example/github-issues/github_token": []byte(token),
+	})
+
+	resolved, err := toolset.ResolveTools(loaded.ResolvedTools(), toolset.Config{SecretStore: secretStore})
+	if err != nil {
+		t.Fatalf("ResolveTools: %v", err)
+	}
+	assertToolAuthHiddenFromAgentView(t, resolved)
 
 	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
 	result, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "Hello-World",
 		"number": 1,
-		"token":  token,
 	})
 	if err != nil {
 		t.Fatalf("invoke.Run: %v", err)
@@ -235,6 +258,56 @@ func githubToken(t *testing.T) string {
 		t.Skip("GITHUB_TOKEN not set and `gh auth token` failed — set GITHUB_TOKEN to enable this test")
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func assertGithubIssuesAuthContract(t *testing.T, pkg tooldef.Package) {
+	t.Helper()
+	if got := pkg.Module.String(); got != "github.com/example/github-issues" {
+		t.Fatalf("package module = %q, want github.com/example/github-issues", got)
+	}
+	if len(pkg.Credentials) != 1 {
+		t.Fatalf("package credentials = %d, want 1", len(pkg.Credentials))
+	}
+	cred := pkg.Credentials[0]
+	if cred.Name != "github_token" {
+		t.Fatalf("credential name = %q, want github_token", cred.Name)
+	}
+	if cred.Type != tooldef.CredentialTypeBearer {
+		t.Fatalf("credential type = %q, want bearer", cred.Type)
+	}
+	if len(cred.Inject.Hosts) != 1 || cred.Inject.Hosts[0] != "api.github.com" {
+		t.Fatalf("credential hosts = %v, want [api.github.com]", cred.Inject.Hosts)
+	}
+	if cred.Inject.Method != "bearer_header" {
+		t.Fatalf("credential inject method = %q, want bearer_header", cred.Inject.Method)
+	}
+}
+
+func assertToolAuthHiddenFromAgentView(t *testing.T, resolved toolset.ResolvedToolset) {
+	t.Helper()
+	view := resolved.AgentView()
+	if len(view.Tools) != 1 {
+		t.Fatalf("agent view tool count = %d, want 1", len(view.Tools))
+	}
+	props, ok := view.Tools[0].ParamsSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("params schema properties missing: %#v", view.Tools[0].ParamsSchema)
+	}
+	if _, ok := props["owner"]; !ok {
+		t.Fatal("expected owner param to remain visible")
+	}
+	if _, ok := props["repo"]; !ok {
+		t.Fatal("expected repo param to remain visible")
+	}
+	if _, ok := props["number"]; !ok {
+		t.Fatal("expected number param to remain visible")
+	}
+	if _, ok := props["token"]; ok {
+		t.Fatal("token param should not appear in AgentView schema")
+	}
+	if _, ok := props["github_token"]; ok {
+		t.Fatal("transport credential should not appear in AgentView schema")
+	}
 }
 
 // Ensure quickts is used (imported for EmitBundle).

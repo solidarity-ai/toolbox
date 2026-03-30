@@ -31,20 +31,16 @@ export default async function tool(
   owner: string,
   repo: string,
   number: number,
-  token?: string,
 ): Promise<Issue> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "toolbox",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  if (token) {
-    headers["Authorization"] = `token ${token}`;
-  }
-
   const resp = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
-    { headers },
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "toolbox",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
   );
 
   if (resp.status !== 200) {

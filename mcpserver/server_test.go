@@ -3,7 +3,6 @@ package mcpserver_test
 import (
 	"crypto/tls"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/transport/mitmproxy"
 )
@@ -166,223 +166,161 @@ func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {
 	}
 }
 
-func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
-	requireTSWasmerArtifacts(t)
-
-	builder := toolset.New()
-	if err := builder.AddFromDir(gwsFixtureDir()); err != nil {
-		t.Fatalf("add external package dir: %v", err)
-	}
-
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
-	result := h.CallTool("users.list", map[string]any{})
-	if result.IsError {
-		t.Fatalf("expected non-error result")
-	}
-	if len(result.Content) == 0 {
-		t.Fatalf("expected text content")
-	}
-	text, ok := mcp.AsTextContent(result.Content[0])
-	if !ok {
-		t.Fatalf("expected text content, got %#v", result.Content[0])
-	}
-	if text.Text != "wasm-ada@example.com" {
-		t.Fatalf("expected parsed tool result, got %#v", text.Text)
-	}
-}
-
-// TODO: Move these copied-package Wasmer integration checks out of the default
-// MCP test file once we have a better home for them, either in toolpkg-gws
-// itself or in dedicated WASIX/Wasm runtime integration tests.
-func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testing.T) {
-	requireTSWasmerArtifacts(t)
-
-	srcDir := gwsFixtureDir()
-	dstDir := filepath.Join(t.TempDir(), "toolpkg-gws")
-	if err := copyPackageDir(srcDir, dstDir); err != nil {
-		t.Fatalf("copy package dir: %v", err)
-	}
-
-	if err := os.WriteFile(
-		filepath.Join(dstDir, "tools", "users.list.ts"),
-		[]byte(strings.ReplaceAll(readFile(t, filepath.Join(srcDir, "tools", "users.list.ts")), `"gwc"`, `"gwc2"`)),
-		0o644,
-	); err != nil {
-		t.Fatalf("rewrite tool source: %v", err)
-	}
-
-	if err := os.WriteFile(
-		filepath.Join(dstDir, "toolbox.devpkg.json"),
-		[]byte(strings.ReplaceAll(
-			readFile(t, filepath.Join(srcDir, "toolbox.devpkg.json")),
-			`"gwc": "dist/gwc.wasm"`,
-			`"gwc2": "dist/gwc2.wasm"`,
-		)),
-		0o644,
-	); err != nil {
-		t.Fatalf("rewrite package manifest: %v", err)
-	}
-
-	srcWasm := filepath.Join(srcDir, "dist", "gwc.wasm")
-	dstWasm := filepath.Join(dstDir, "dist", "gwc2.wasm")
-	if err := copyFile(srcWasm, dstWasm); err != nil {
-		t.Fatalf("copy renamed wasm: %v", err)
-	}
-
-	builder := toolset.New()
-	if err := builder.AddFromDir(dstDir); err != nil {
-		t.Fatalf("add copied package dir: %v", err)
-	}
-
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
-	result := h.CallTool("users.list", map[string]any{})
-	if result.IsError {
-		t.Fatalf("expected non-error result")
-	}
-	if len(result.Content) == 0 {
-		t.Fatalf("expected text content")
-	}
-	text, ok := mcp.AsTextContent(result.Content[0])
-	if !ok {
-		t.Fatalf("expected text content, got %#v", result.Content[0])
-	}
-	if text.Text != "wasm-ada@example.com" {
-		t.Fatalf("expected parsed tool result, got %#v", text.Text)
-	}
-}
-
-func requireTSWasmerArtifacts(t *testing.T) {
-	t.Helper()
-	tooltest.EnsureSandboxBinary(t)
-
-	paths := []string{
-		filepath.Join(gwsFixtureDir(), "toolbox.devpkg.json"),
-		filepath.Join(gwsFixtureDir(), "dist", "gwc.wasm"),
-	}
-	for _, p := range paths {
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("fixture artifact missing: %s", p)
+func TestMCPServerRunsGoogleWorkspaceFixtureFromDir(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/admin/directory/v1/users" {
+			t.Fatalf("request path = %q, want /admin/directory/v1/users", r.URL.Path)
 		}
+		if got := r.URL.Query().Get("customer"); got != "my_customer" {
+			t.Fatalf("customer query = %q, want my_customer", got)
+		}
+		if got := r.URL.Query().Get("maxResults"); got != "1" {
+			t.Fatalf("maxResults query = %q, want 1", got)
+		}
+		if got := r.URL.Query().Get("orderBy"); got != "email" {
+			t.Fatalf("orderBy query = %q, want email", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"users":[{"primaryEmail":"fetch-ada@example.com"}]}`))
+	}))
+	defer server.Close()
+
+	dir := rewriteGoogleWorkspaceSourceFixtureForTest(t, server.URL)
+	h := googleWorkspaceHarness(t, dir)
+	assertGoogleWorkspaceSchemaHasNoCredentialInputs(t, h.ListTools())
+	assertGoogleWorkspaceFixtureResult(t, h.CallTool("users.list", map[string]any{}), "fetch-ada@example.com")
+}
+
+func TestMCPServerRunsGoogleWorkspaceFixtureFromCopiedDir(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"users":[{"primaryEmail":"copy-ada@example.com"}]}`))
+	}))
+	defer server.Close()
+
+	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	h := googleWorkspaceHarness(t, dir)
+	assertGoogleWorkspaceSchemaHasNoCredentialInputs(t, h.ListTools())
+	assertGoogleWorkspaceFixtureResult(t, h.CallTool("users.list", map[string]any{}), "copy-ada@example.com")
+}
+
+func TestMCPServerRunsGoogleWorkspaceFixtureRejectsMalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"users":`))
+	}))
+	defer server.Close()
+
+	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	h := googleWorkspaceHarness(t, dir)
+	assertGoogleWorkspaceFixtureError(t, h.CallTool("users.list", map[string]any{}), "google workspace response was not valid JSON")
+}
+
+func TestMCPServerRunsGoogleWorkspaceFixtureRejectsMissingPrimaryEmail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"users":[{"name":"Ada"}]}`))
+	}))
+	defer server.Close()
+
+	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	h := googleWorkspaceHarness(t, dir)
+	assertGoogleWorkspaceFixtureError(t, h.CallTool("users.list", map[string]any{}), "google workspace response missing users[0].primaryEmail")
+}
+
+func TestMCPServerRunsGoogleWorkspaceFixtureRejectsUpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`Authorization: Bearer should-not-leak`))
+	}))
+	defer server.Close()
+
+	dir := tooltest.PrepareGoogleWorkspaceFixture(t, server.URL, tooldef.OAuth2ProviderRef{})
+	h := googleWorkspaceHarness(t, dir)
+	result := h.CallTool("users.list", map[string]any{})
+	assertGoogleWorkspaceFixtureError(t, result, "Google Workspace API 502")
+	text := requireSingleTextContent(t, result)
+	if strings.Contains(text, "should-not-leak") || strings.Contains(text, "Authorization:") {
+		t.Fatalf("tool error leaked upstream auth material: %s", text)
 	}
 }
 
-func gwsFixtureDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		panic("mcpserver_test: runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
-}
-
-func readFile(t *testing.T, path string) string {
+func rewriteGoogleWorkspaceSourceFixtureForTest(t *testing.T, baseURL string) string {
 	t.Helper()
 
-	data, err := os.ReadFile(path)
+	dir := tooltest.GoogleWorkspaceFixtureDir(t)
+	toolPath := filepath.Join(dir, "tools", "users.list.ts")
+	manifestPath := filepath.Join(dir, "toolbox.devpkg.json")
+	toolRaw, err := os.ReadFile(toolPath)
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("read source google-workspace tool: %v", err)
 	}
-	return string(data)
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read source google-workspace manifest: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.WriteFile(toolPath, toolRaw, 0o644); err != nil {
+			t.Fatalf("restore source google-workspace tool: %v", err)
+		}
+		if err := os.WriteFile(manifestPath, manifestRaw, 0o644); err != nil {
+			t.Fatalf("restore source google-workspace manifest: %v", err)
+		}
+	})
+
+	tooltest.RewriteGoogleWorkspaceFixtureBaseURL(t, dir, baseURL, tooldef.OAuth2ProviderRef{})
+	return dir
 }
 
-type sourcePackageManifest struct {
-	AdditionalTypeScriptGlobs []string          `json:"additionalTypeScriptGlobs"`
-	Executables               map[string]string `json:"executables"`
-	Tools                     []struct {
-		EntryTS string `json:"entry_ts"`
-	} `json:"tools"`
+func googleWorkspaceHarness(t testing.TB, dir string) *mcptest.Harness {
+	t.Helper()
+	builder := tooltest.GoogleWorkspaceBuilderFromDir(t, dir)
+	return mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
 }
 
-func copyPackageDir(src string, dst string) error {
-	manifestPath := filepath.Join(src, "toolbox.devpkg.json")
-	manifestData, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return err
-	}
+func assertGoogleWorkspaceSchemaHasNoCredentialInputs(t testing.TB, tools *mcp.ListToolsResult) {
+	t.Helper()
 
-	var manifest sourcePackageManifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	if err := copyFile(manifestPath, filepath.Join(dst, "toolbox.devpkg.json")); err != nil {
-		return err
-	}
-
-	seen := map[string]struct{}{}
-	copyRel := func(rel string) error {
-		if _, ok := seen[rel]; ok {
-			return nil
-		}
-		seen[rel] = struct{}{}
-		return copyFile(filepath.Join(src, rel), filepath.Join(dst, rel))
-	}
-
-	for _, tool := range manifest.Tools {
-		if err := copyRel(tool.EntryTS); err != nil {
-			return err
+	var usersList *mcp.Tool
+	for i := range tools.Tools {
+		if tools.Tools[i].Name == "users.list" {
+			usersList = &tools.Tools[i]
+			break
 		}
 	}
-	for _, path := range manifest.Executables {
-		if err := copyRel(path); err != nil {
-			return err
-		}
+	if usersList == nil {
+		t.Fatal("expected users.list in MCP tool list")
 	}
-	for _, pattern := range manifest.AdditionalTypeScriptGlobs {
-		matches, err := filepath.Glob(filepath.Join(src, pattern))
-		if err != nil {
-			return err
-		}
-		for _, match := range matches {
-			info, err := os.Lstat(match)
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			rel, err := filepath.Rel(src, match)
-			if err != nil {
-				return err
-			}
-			if err := copyRel(rel); err != nil {
-				return err
-			}
-		}
+	if usersList.InputSchema.Type != "object" {
+		t.Fatalf("users.list input schema type = %q, want object", usersList.InputSchema.Type)
 	}
-
-	return nil
+	if len(usersList.InputSchema.Properties) != 0 {
+		t.Fatalf("users.list input schema properties = %#v, want no tool-visible inputs", usersList.InputSchema.Properties)
+	}
 }
 
-func copyFile(src string, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
+func assertGoogleWorkspaceFixtureResult(t testing.TB, result *mcp.CallToolResult, want string) {
+	t.Helper()
+	if result.IsError {
+		text := requireSingleTextContent(t, result)
+		t.Fatalf("expected non-error result, got: %s", text)
 	}
-	defer in.Close()
-
-	info, err := in.Stat()
-	if err != nil {
-		return err
+	text := requireSingleTextContent(t, result)
+	if text != want {
+		t.Fatalf("tool result = %q, want %q", text, want)
 	}
+}
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
+func assertGoogleWorkspaceFixtureError(t testing.TB, result *mcp.CallToolResult, wantSubstring string) {
+	t.Helper()
+	if !result.IsError {
+		text := requireSingleTextContent(t, result)
+		t.Fatalf("expected error result, got: %s", text)
 	}
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
-	if err != nil {
-		return err
+	text := requireSingleTextContent(t, result)
+	if !strings.Contains(text, wantSubstring) {
+		t.Fatalf("tool error = %q, want substring %q", text, wantSubstring)
 	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-
-	return out.Close()
 }
 
 func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {

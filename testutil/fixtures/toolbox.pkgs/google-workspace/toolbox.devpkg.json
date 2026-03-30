@@ -1,9 +1,7 @@
 {
   "name": "google-workspace",
-  "runtime": "typescript+wasix-sandbox",
-  "executables": {
-    "gwc": "dist/gwc.wasm"
-  },
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": ["admin.googleapis.com"],
   "tools": [
     {
       "entry_ts": "tools/users.list.ts",

@@ -20,6 +20,7 @@ type ResolvedToolset struct {
 	tools        []tooldef.ResolvedTool
 	bindings     map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
 	hiddenParams map[string]map[string]bool            // tool name -> set of hidden param names
+	auth         map[string]ResolvedAuth               // tool name -> runtime-only auth context
 	context      map[string]any
 	celEnv       *cel.Env
 }
@@ -132,6 +133,7 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 
 	allCompiled := make(map[string]map[string]compiledBinding, len(toolBindings))
 	allHidden := make(map[string]map[string]bool)
+	allAuth := make(map[string]ResolvedAuth)
 
 	for _, tool := range tools {
 		// Start with explicit per-tool bindings
@@ -155,24 +157,26 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 			}
 		}
 
-		if len(bindings) == 0 {
-			continue
-		}
+		if len(bindings) > 0 {
+			compiled, err := compileBindings(env, bindings)
+			if err != nil {
+				return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
+			}
+			allCompiled[tool.Name] = compiled
 
-		compiled, err := compileBindings(env, bindings)
-		if err != nil {
-			return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
-		}
-		allCompiled[tool.Name] = compiled
-
-		hidden := make(map[string]bool)
-		for paramName, binding := range bindings {
-			if binding.Hidden {
-				hidden[paramName] = true
+			hidden := make(map[string]bool)
+			for paramName, binding := range bindings {
+				if binding.Hidden {
+					hidden[paramName] = true
+				}
+			}
+			if len(hidden) > 0 {
+				allHidden[tool.Name] = hidden
 			}
 		}
-		if len(hidden) > 0 {
-			allHidden[tool.Name] = hidden
+
+		if auth := resolveToolAuth(tool, cfg); len(auth.Credentials) > 0 {
+			allAuth[tool.Name] = auth
 		}
 	}
 
@@ -182,9 +186,28 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 		tools:        out,
 		bindings:     allCompiled,
 		hiddenParams: allHidden,
+		auth:         allAuth,
 		context:      cfg.Context,
 		celEnv:       env,
 	}, nil
+}
+
+func resolveToolAuth(tool tooldef.ResolvedTool, cfg Config) ResolvedAuth {
+	if tool.Package == nil || tool.Package.Module == "" || len(tool.Package.Credentials) == 0 {
+		return ResolvedAuth{}
+	}
+	credentials := make([]ResolvedCredential, 0, len(tool.Package.Credentials))
+	for _, declared := range tool.Package.Credentials {
+		credentials = append(credentials, ResolvedCredential{
+			Name:            declared.Name,
+			Type:            declared.Type,
+			Provider:        declared.Provider,
+			Scopes:          append([]string(nil), declared.Scopes...),
+			SecretNamespace: tool.Package.Module.String(),
+			Inject:          declared.Inject,
+		})
+	}
+	return ResolvedAuth{Store: cfg.SecretStore, Credentials: credentials}
 }
 
 // ResolveTools resolves a pre-built list of tools with the given config.
@@ -208,4 +231,10 @@ func (r ResolvedToolset) Tools() []tooldef.ResolvedTool {
 	out := make([]tooldef.ResolvedTool, len(r.tools))
 	copy(out, r.tools)
 	return out
+}
+
+// ToolAuth returns the runtime-only transport auth context for a resolved tool.
+func (r ResolvedToolset) ToolAuth(toolName string) (ResolvedAuth, bool) {
+	auth, ok := r.auth[toolName]
+	return auth, ok
 }

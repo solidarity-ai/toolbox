@@ -48,11 +48,12 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
+			auth, _ := resolved.ToolAuth(tool.Name)
 			if tool.TSWasm != nil {
-				return runTSWasmTool(tool, fullParams)
+				return runTSWasmTool(tool, fullParams, auth)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, fullParams)
+				return runTSTool(tool, fullParams, auth)
 			}
 
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
@@ -62,10 +63,10 @@ func Run(resolved toolset.ResolvedToolset, toolName string, args map[string]any)
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func runTSTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
+func runTSTool(tool tooldef.ResolvedTool, args map[string]any, auth toolset.ResolvedAuth) (string, error) {
 	session := getCheckSession(tool.Package)
 	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{
-		Fetch: goFetch,
+		Fetch: goFetchWithAuth(auth),
 	}, &session, tool.Sig)
 	setCheckSession(tool.Package, session)
 	return result, err
@@ -82,11 +83,12 @@ func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[stri
 
 	for _, tool := range resolved.Tools() {
 		if tool.Name == toolName {
+			auth, _ := resolved.ToolAuth(tool.Name)
 			if tool.TSWasm != nil {
-				return runTSWasmToolWithVFS(tool, fullParams, memFS)
+				return runTSWasmToolWithVFS(tool, fullParams, memFS, auth)
 			}
 			if tool.TS != nil {
-				return runTSTool(tool, fullParams)
+				return runTSTool(tool, fullParams, auth)
 			}
 			return "", fmt.Errorf("tool %s has no executable", tool.Name)
 		}
@@ -94,11 +96,11 @@ func RunWithVFS(resolved toolset.ResolvedToolset, toolName string, args map[stri
 	return "", fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any) (string, error) {
-	return runTSWasmToolWithVFS(tool, args, vfs.NewMemFS())
+func runTSWasmTool(tool tooldef.ResolvedTool, args map[string]any, auth toolset.ResolvedAuth) (string, error) {
+	return runTSWasmToolWithVFS(tool, args, vfs.NewMemFS(), auth)
 }
 
-func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS *vfs.MemFS) (string, error) {
+func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS *vfs.MemFS, auth toolset.ResolvedAuth) (string, error) {
 	sockPath, cleanup, err := startVFSServer(memFS)
 	if err != nil {
 		return "", fmt.Errorf("start vfs server: %w", err)
@@ -117,7 +119,7 @@ func runTSWasmToolWithVFS(tool tooldef.ResolvedTool, args map[string]any, memFS 
 		WriteFile: func(path string, data string) error {
 			return memFS.WriteFile(path, []byte(data))
 		},
-		Fetch: goFetch,
+		Fetch: goFetchWithAuth(auth),
 		Exec: func(binary string, execArgs []string) (quickts.ExecResult, error) {
 			relativePath, ok := tool.TSWasm.Executables[binary]
 			if !ok {
@@ -187,42 +189,50 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 	}
 }
 
-// goFetch performs an HTTP request using the fetch package.
+// goFetchWithAuth performs an HTTP request using the fetch package.
 // It's the Go-side implementation behind the JS fetch() global.
-func goFetch(url, method, headersJSON, body string) (quickts.FetchResult, error) {
-	reqHeaders := fetch.NewHeaders()
-	var pairs [][2]string
-	if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
-		for _, p := range pairs {
-			reqHeaders.Append(p[0], p[1])
+func goFetchWithAuth(auth toolset.ResolvedAuth) func(url, method, headersJSON, body string) (quickts.FetchResult, error) {
+	return func(url, method, headersJSON, body string) (quickts.FetchResult, error) {
+		reqHeaders := fetch.NewHeaders()
+		var pairs [][2]string
+		if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
+			for _, p := range pairs {
+				reqHeaders.Append(p[0], p[1])
+			}
 		}
-	}
 
-	var bodyReader io.Reader
-	if body != "" {
-		bodyReader = strings.NewReader(body)
-	}
+		var err error
+		url, err = auth.InjectRequest(context.Background(), url, reqHeaders)
+		if err != nil {
+			return quickts.FetchResult{}, err
+		}
 
-	resp, err := fetch.Fetch(context.Background(), url, &fetch.RequestInit{
-		Method:  method,
-		Headers: reqHeaders,
-		Body:    bodyReader,
-	})
-	if err != nil {
-		return quickts.FetchResult{}, err
-	}
-	defer resp.Body().Close()
+		var bodyReader io.Reader
+		if body != "" {
+			bodyReader = strings.NewReader(body)
+		}
 
-	respBody, err := io.ReadAll(resp.Body())
-	if err != nil {
-		return quickts.FetchResult{}, fmt.Errorf("read response body: %w", err)
-	}
+		resp, err := fetch.Fetch(context.Background(), url, &fetch.RequestInit{
+			Method:  method,
+			Headers: reqHeaders,
+			Body:    bodyReader,
+		})
+		if err != nil {
+			return quickts.FetchResult{}, err
+		}
+		defer resp.Body().Close()
 
-	return quickts.FetchResult{
-		Status:     resp.Status(),
-		StatusText: resp.StatusText(),
-		Headers:    resp.Headers().Entries(),
-		Body:       string(respBody),
-		URL:        resp.URL(),
-	}, nil
+		respBody, err := io.ReadAll(resp.Body())
+		if err != nil {
+			return quickts.FetchResult{}, fmt.Errorf("read response body: %w", err)
+		}
+
+		return quickts.FetchResult{
+			Status:     resp.Status(),
+			StatusText: resp.StatusText(),
+			Headers:    resp.Headers().Entries(),
+			Body:       string(respBody),
+			URL:        resp.URL(),
+		}, nil
+	}
 }

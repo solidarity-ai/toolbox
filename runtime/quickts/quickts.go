@@ -161,6 +161,56 @@ func installHost(rt *qjs.Runtime, host Host) error {
 		return err
 	}
 
+	if err := installBrowserCompat(rt); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func installBrowserCompat(rt *qjs.Runtime) error {
+	const browserCompatJS = `
+(function() {
+  if (typeof globalThis.btoa === 'undefined') {
+    globalThis.btoa = function btoa(input) {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const text = String(input);
+      let result = "";
+      for (let i = 0; i < text.length; i += 3) {
+        const a = text.charCodeAt(i);
+        const b = i + 1 < text.length ? text.charCodeAt(i + 1) : 0;
+        const c = i + 2 < text.length ? text.charCodeAt(i + 2) : 0;
+        result += chars[a >> 2];
+        result += chars[((a & 3) << 4) | (b >> 4)];
+        result += i + 1 < text.length ? chars[((b & 15) << 2) | (c >> 6)] : "=";
+        result += i + 2 < text.length ? chars[c & 63] : "=";
+      }
+      return result;
+    };
+  }
+
+  if (typeof globalThis.atob === 'undefined') {
+    globalThis.atob = function atob(input) {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const text = String(input).replace(/=+$/, "");
+      let result = "";
+      for (let i = 0; i < text.length; i += 4) {
+        const a = chars.indexOf(text[i]);
+        const b = chars.indexOf(text[i + 1]);
+        const c = chars.indexOf(text[i + 2]);
+        const d = chars.indexOf(text[i + 3]);
+        result += String.fromCharCode((a << 2) | (b >> 4));
+        if (c !== -1) result += String.fromCharCode(((b & 15) << 4) | (c >> 2));
+        if (d !== -1) result += String.fromCharCode(((c & 3) << 6) | d);
+      }
+      return result;
+    };
+  }
+})();
+`
+	if _, err := rt.Eval("__toolbox_browser_compat.js", qjs.Code(browserCompatJS)); err != nil {
+		return fmt.Errorf("install browser compat: %w", err)
+	}
 	return nil
 }
 

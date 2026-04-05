@@ -22,7 +22,9 @@ type PreparedToolset struct {
 	byName map[string]int
 }
 
-func prepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config) (PreparedToolset, error) {
+// PrepareTools prepares a pre-built list of loaded tools with the given config.
+// This is useful for testing with synthetic tool definitions.
+func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config) (PreparedToolset, error) {
 	// Build binding lookup: tool ref -> param name -> Binding
 	toolBindings := make(map[string]map[string]Binding, len(cfg.Tools))
 	for _, bt := range cfg.Tools {
@@ -102,12 +104,6 @@ func prepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		tools:  out,
 		byName: byName,
 	}, nil
-}
-
-// PrepareTools prepares a pre-built list of loaded tools with the given config.
-// This is useful for testing with synthetic tool definitions.
-func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config) (PreparedToolset, error) {
-	return prepareTools(ctx, tools, cfg)
 }
 
 // NewPreparedToolset creates a prepared toolset from a visible tool list

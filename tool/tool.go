@@ -34,6 +34,14 @@ type OAuth2ProviderConfig struct {
 	AuthURL    string            `json:"auth_url,omitempty"`
 	TokenURL   string            `json:"token_url,omitempty"`
 	AuthParams map[string]string `json:"auth_params,omitempty"`
+	PKCE       *bool             `json:"pkce,omitempty"`
+}
+
+func (c *OAuth2ProviderConfig) PKCEEnabled() bool {
+	if c == nil || c.PKCE == nil {
+		return true
+	}
+	return *c.PKCE
 }
 
 // PackageInject describes how and where to inject a credential.

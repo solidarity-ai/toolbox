@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -204,6 +205,7 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	if account == "" {
 		account = "default"
 	}
+	pkceEnabled := cred.Provider.PKCEEnabled()
 	clientIDKey := credentialrepo.OAuth2ClientIDRef(pkg, cred.Name)
 	clientSecretKey := credentialrepo.OAuth2ClientSecretRef(pkg, cred.Name)
 	refreshTokenKey := credentialrepo.OAuth2RefreshTokenRef(pkg, cred.Name, account)
@@ -239,19 +241,28 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	}
 
 	// Check secret store, then prompt for client_secret (shared across accounts).
-	clientSecret, err := getRequiredSecret(ctx, repo, clientSecretKey)
+	clientSecret, err := getOptionalSecret(ctx, repo, clientSecretKey)
 	if err != nil {
-		fmt.Fprintf(stdout, "Enter client_secret for %s: ", cred.Name)
+		return err
+	}
+	if len(clientSecret) == 0 {
+		prompt := fmt.Sprintf("Enter client_secret for %s: ", cred.Name)
+		if pkceEnabled {
+			prompt = fmt.Sprintf("Enter client_secret for %s (press Enter to skip for PKCE public clients): ", cred.Name)
+		}
+		fmt.Fprint(stdout, prompt)
 		line, err := input.ReadLine(ctx)
 		if err != nil {
 			return fmt.Errorf("reading client_secret: %w", err)
 		}
 		clientSecret = []byte(line)
-		if len(clientSecret) == 0 {
+		if len(clientSecret) == 0 && !pkceEnabled {
 			return fmt.Errorf("client_secret cannot be empty")
 		}
-		if err := repo.Set(ctx, clientSecretKey, clientSecret); err != nil {
-			return fmt.Errorf("storing client_secret: %w", err)
+		if len(clientSecret) > 0 {
+			if err := repo.Set(ctx, clientSecretKey, clientSecret); err != nil {
+				return fmt.Errorf("storing client_secret: %w", err)
+			}
 		}
 	}
 
@@ -264,7 +275,7 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	cfg := &oauth2.Config{
 		ClientID:     string(clientID),
 		ClientSecret: string(clientSecret),
-		Endpoint:     oauth2.Endpoint{AuthURL: authEndpoint, TokenURL: tokenEndpoint},
+		Endpoint:     oauth2Endpoint(authEndpoint, tokenEndpoint, len(clientSecret) == 0),
 		Scopes:       cred.Scopes,
 	}
 
@@ -280,7 +291,10 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	defer receiver.Close()
 
 	// Build auth options from manifest.
-	verifier := oauth2.GenerateVerifier()
+	verifier := ""
+	if pkceEnabled {
+		verifier = oauth2.GenerateVerifier()
+	}
 	var opts []oauth2.AuthCodeOption
 	if cred.Provider != nil {
 		for k, v := range cred.Provider.AuthParams {
@@ -314,7 +328,11 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 
 	input.IgnoreOnce(code)
 
-	tok, err := cfg.Exchange(flowCtx, code, oauth2.VerifierOption(verifier))
+	var exchangeOpts []oauth2.AuthCodeOption
+	if verifier != "" {
+		exchangeOpts = append(exchangeOpts, oauth2.VerifierOption(verifier))
+	}
+	tok, err := cfg.Exchange(flowCtx, code, exchangeOpts...)
 	if err != nil {
 		return fmt.Errorf("oauth2 authorization: exchange token: %w", err)
 	}
@@ -329,7 +347,11 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 
 	fmt.Fprintf(stdout, "Authorized %s (oauth2)\n", cred.Name)
 	fmt.Fprintf(stdout, "  client_id:     secret store (%s)\n", clientIDKey.String())
-	fmt.Fprintf(stdout, "  client_secret: secret store (%s)\n", clientSecretKey.String())
+	if len(clientSecret) > 0 {
+		fmt.Fprintf(stdout, "  client_secret: secret store (%s)\n", clientSecretKey.String())
+	} else {
+		fmt.Fprintf(stdout, "  client_secret: not used (PKCE public client)\n")
+	}
 	fmt.Fprintf(stdout, "  refresh_token: secret store (%s)\n", refreshTokenKey.String())
 	fmt.Fprintf(stdout, "\nCredentials stored. Tools in this package can now make authenticated requests.\n")
 
@@ -460,7 +482,7 @@ func authBearer(ctx context.Context, repo *credentialrepo.Repository, input *aut
 }
 
 func getRequiredSecret(ctx context.Context, repo *credentialrepo.Repository, ref credentialrepo.Ref) ([]byte, error) {
-	value, err := repo.Get(ctx, ref)
+	value, err := getOptionalSecret(ctx, repo, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -468,6 +490,28 @@ func getRequiredSecret(ctx context.Context, repo *credentialrepo.Repository, ref
 		return nil, secrets.ErrNotFound
 	}
 	return value, nil
+}
+
+func getOptionalSecret(ctx context.Context, repo *credentialrepo.Repository, ref credentialrepo.Ref) ([]byte, error) {
+	value, err := repo.Get(ctx, ref)
+	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(value) == 0 {
+		return nil, nil
+	}
+	return value, nil
+}
+
+func oauth2Endpoint(authURL, tokenURL string, publicClient bool) oauth2.Endpoint {
+	endpoint := oauth2.Endpoint{AuthURL: authURL, TokenURL: tokenURL}
+	if publicClient {
+		endpoint.AuthStyle = oauth2.AuthStyleInParams
+	}
+	return endpoint
 }
 
 type authInput struct {
@@ -666,6 +710,8 @@ func checkAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Repo
 		for _, shared := range check.Shared {
 			if shared.Present {
 				fmt.Fprintf(stdout, "  %-14s \u2713 secret store\n", shared.Label+":")
+			} else if !shared.Required {
+				fmt.Fprintf(stdout, "  %-14s optional (PKCE public client)\n", shared.Label+":")
 			} else {
 				fmt.Fprintf(stdout, "  %-14s \u2717 missing \u2014 run 'toolbox auth %s'\n", shared.Label+":", loaded.Package.Name)
 			}

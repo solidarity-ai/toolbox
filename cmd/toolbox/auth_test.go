@@ -443,6 +443,52 @@ func TestRunAuthCheckTreatsEmptyStoredSecretAsMissing(t *testing.T) {
 	}
 }
 
+func TestRunAuthCheckFlag_OAuth2PublicClientDoesNotRequireClientSecret(t *testing.T) {
+	repo, store := newTestCredentialRepo(t)
+
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("oauth-public-check"),
+			Name:    "oauth-public-check",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "test_oauth",
+				Type: "oauth2",
+				Provider: &tooldef.OAuth2ProviderConfig{
+					AuthURL:  "https://example.com/auth",
+					TokenURL: "https://example.com/token",
+				},
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString("oauth-public-check"), "test_oauth"), []byte("cid")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, credpath.OAuth2RefreshToken(testModuleString("oauth-public-check"), "test_oauth", "default"), []byte("rt")); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := checkAuthWithRepo(loaded, repo, &stdout)
+	if err != nil {
+		t.Fatalf("checkAuthWithRepo() error: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "test_oauth (oauth2): ✓ configured") {
+		t.Fatalf("expected oauth2 credential configured, got: %s", out)
+	}
+	if !strings.Contains(out, "client_secret: optional (PKCE public client)") {
+		t.Fatalf("expected optional client_secret line, got: %s", out)
+	}
+}
+
 func TestRunAuthAPIKeyKeepExisting(t *testing.T) {
 	repo, store := newTestCredentialRepo(t)
 
@@ -703,6 +749,297 @@ func TestRunAuthOAuth2EndToEnd(t *testing.T) {
 			t.Errorf("PKCE verification failed: challenge = %q, expected %q (from verifier %q)",
 				codeChallenge, expectedChallenge, receivedCodeVerifier)
 		}
+	}
+}
+
+func TestRunAuthOAuth2PublicClientAllowsBlankSecret(t *testing.T) {
+	var (
+		mu                   sync.Mutex
+		receivedGrantType    string
+		receivedCode         string
+		receivedClientID     string
+		receivedClientSecret string
+		receivedCodeVerifier string
+	)
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		receivedGrantType = r.FormValue("grant_type")
+		receivedCode = r.FormValue("code")
+		receivedClientID = r.FormValue("client_id")
+		receivedClientSecret = r.FormValue("client_secret")
+		if receivedClientID == "" {
+			receivedClientID, receivedClientSecret, _ = r.BasicAuth()
+		}
+		receivedCodeVerifier = r.FormValue("code_verifier")
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-at",
+			"refresh_token": "test-rt",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString("oauth-public"), "test_oauth"), []byte("test-client-id")); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("oauth-public"),
+			Name:    "oauth-public",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "test_oauth",
+				Type: "oauth2",
+				Provider: &tooldef.OAuth2ProviderConfig{
+					AuthURL:  authServer.URL + "/authorize",
+					TokenURL: tokenServer.URL + "/token",
+				},
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	originalOpenBrowser := openBrowser
+	defer func() { openBrowser = originalOpenBrowser }()
+
+	callbackDone := make(chan struct{})
+	openBrowser = func(authURL string) {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+
+		go func() {
+			defer close(callbackDone)
+			callbackURL := fmt.Sprintf("%s?code=test-auth-code&state=%s", redirectURI, state)
+			resp, err := http.Get(callbackURL)
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepo(loaded, repo, strings.NewReader("\n"), &stdout, &stderr, "", "")
+	if err != nil {
+		t.Fatalf("runAuthWithRepo() error: %v", err)
+	}
+	<-callbackDone
+
+	if _, err := store.Get(ctx, credpath.OAuth2ClientSecret(testModuleString("oauth-public"), "test_oauth")); !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatalf("Get(client_secret) error = %v, want ErrNotFound", err)
+	}
+	refreshToken, err := store.Get(ctx, credpath.OAuth2RefreshToken(testModuleString("oauth-public"), "test_oauth", "default"))
+	if err != nil {
+		t.Fatalf("Get(refresh_token) error: %v", err)
+	}
+	if string(refreshToken) != "test-rt" {
+		t.Fatalf("stored refresh_token = %q, want %q", string(refreshToken), "test-rt")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "press Enter to skip for PKCE public clients") {
+		t.Fatalf("stdout missing public-client prompt, got: %s", out)
+	}
+	if !strings.Contains(out, "client_secret: not used (PKCE public client)") {
+		t.Fatalf("stdout missing public-client provenance, got: %s", out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if receivedGrantType != "authorization_code" {
+		t.Fatalf("grant_type = %q, want %q", receivedGrantType, "authorization_code")
+	}
+	if receivedCode != "test-auth-code" {
+		t.Fatalf("code = %q, want %q", receivedCode, "test-auth-code")
+	}
+	if receivedClientID != "test-client-id" {
+		t.Fatalf("client_id = %q, want %q", receivedClientID, "test-client-id")
+	}
+	if receivedClientSecret != "" {
+		t.Fatalf("client_secret = %q, want empty", receivedClientSecret)
+	}
+	if receivedCodeVerifier == "" {
+		t.Fatal("code_verifier was empty")
+	}
+}
+
+func TestRunAuthOAuth2WithoutPKCERequiresClientSecret(t *testing.T) {
+	repo, store := newTestCredentialRepo(t)
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString("oauth-no-pkce"), "test_oauth"), []byte("test-client-id")); err != nil {
+		t.Fatal(err)
+	}
+
+	pkce := false
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("oauth-no-pkce"),
+			Name:    "oauth-no-pkce",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "test_oauth",
+				Type: "oauth2",
+				Provider: &tooldef.OAuth2ProviderConfig{
+					AuthURL:  "https://example.com/auth",
+					TokenURL: "https://example.com/token",
+					PKCE:     &pkce,
+				},
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepo(loaded, repo, strings.NewReader("\n"), &stdout, &stderr, "", "")
+	if err == nil {
+		t.Fatal("expected error for missing client_secret when PKCE is disabled")
+	}
+	if !strings.Contains(err.Error(), "client_secret cannot be empty") {
+		t.Fatalf("error = %v, want 'client_secret cannot be empty'", err)
+	}
+}
+
+func TestRunAuthOAuth2WithoutPKCEDisablesChallengeAndVerifier(t *testing.T) {
+	var (
+		mu                   sync.Mutex
+		receivedCodeVerifier string
+		capturedAuthURL      string
+	)
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		receivedCodeVerifier = r.FormValue("code_verifier")
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-at",
+			"refresh_token": "test-rt",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString("oauth-no-pkce"), "test_oauth"), []byte("test-client-id")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, credpath.OAuth2ClientSecret(testModuleString("oauth-no-pkce"), "test_oauth"), []byte("test-client-secret")); err != nil {
+		t.Fatal(err)
+	}
+
+	pkce := false
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("oauth-no-pkce"),
+			Name:    "oauth-no-pkce",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "test_oauth",
+				Type: "oauth2",
+				Provider: &tooldef.OAuth2ProviderConfig{
+					AuthURL:  authServer.URL + "/authorize",
+					TokenURL: tokenServer.URL + "/token",
+					PKCE:     &pkce,
+				},
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	originalOpenBrowser := openBrowser
+	defer func() { openBrowser = originalOpenBrowser }()
+
+	callbackDone := make(chan struct{})
+	openBrowser = func(authURL string) {
+		capturedAuthURL = authURL
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+
+		go func() {
+			defer close(callbackDone)
+			callbackURL := fmt.Sprintf("%s?code=test-auth-code&state=%s", redirectURI, state)
+			resp, err := http.Get(callbackURL)
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepo(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "")
+	if err != nil {
+		t.Fatalf("runAuthWithRepo() error: %v", err)
+	}
+	<-callbackDone
+
+	mu.Lock()
+	gotVerifier := receivedCodeVerifier
+	mu.Unlock()
+	if gotVerifier != "" {
+		t.Fatalf("code_verifier = %q, want empty", gotVerifier)
+	}
+	if capturedAuthURL == "" {
+		t.Fatal("capturedAuthURL was empty")
+	}
+	parsed, err := url.Parse(capturedAuthURL)
+	if err != nil {
+		t.Fatalf("failed to parse captured auth URL: %v", err)
+	}
+	if parsed.Query().Get("code_challenge") != "" {
+		t.Fatalf("code_challenge = %q, want empty", parsed.Query().Get("code_challenge"))
+	}
+	if parsed.Query().Get("code_challenge_method") != "" {
+		t.Fatalf("code_challenge_method = %q, want empty", parsed.Query().Get("code_challenge_method"))
 	}
 }
 

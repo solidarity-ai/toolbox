@@ -44,6 +44,14 @@ func seedOAuth2Secrets(t *testing.T, store *testutil.TestSecretStore, moduleName
 	})
 }
 
+func seedOAuth2PublicClientSecrets(t *testing.T, store *testutil.TestSecretStore, moduleName, credName string) {
+	t.Helper()
+	store.Seed(map[string][]byte{
+		credpath.OAuth2ClientID(moduleName, credName):          []byte("test-client-id"),
+		credpath.Shared(moduleName, credName, "refresh_token"): []byte("test-refresh-token"),
+	})
+}
+
 func TestCredentialInjector_BearerInjection(t *testing.T) {
 	t.Parallel()
 
@@ -93,6 +101,88 @@ func TestCredentialInjector_BearerInjection(t *testing.T) {
 		t.Fatalf("returned URL %q leaks the token", url)
 	}
 
+	if c := calls.Load(); c != 1 {
+		t.Fatalf("token endpoint called %d times, want 1", c)
+	}
+}
+
+func TestCredentialInjector_BearerInjection_PublicClientWithoutSecret(t *testing.T) {
+	t.Parallel()
+
+	var (
+		calls                atomic.Int64
+		mu                   sync.Mutex
+		receivedClientID     string
+		receivedClientSecret string
+	)
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		receivedClientID = r.FormValue("client_id")
+		receivedClientSecret = r.FormValue("client_secret")
+		if receivedClientID == "" {
+			receivedClientID, receivedClientSecret, _ = r.BasicAuth()
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "public-client-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	}))
+	t.Cleanup(tokenSrv.Close)
+
+	store := testutil.NewTestSecretStore()
+	seedOAuth2PublicClientSecrets(t, store, "google", "default")
+
+	rules := []transport.InjectionRule{
+		{
+			Hosts:          []string{"*.googleapis.com"},
+			PathPrefix:     "/admin/directory/v1/",
+			ModuleName:     "google",
+			CredentialName: "default",
+			SecretPrefix:   credpath.SharedPrefix("google", "default"),
+			Type:           transport.CredentialTypeOAuth2,
+			Method:         transport.InjectionMethodBearerHeader,
+			Provider: &transport.OAuth2Provider{
+				TokenURL: tokenSrv.URL + "/token",
+			},
+		},
+	}
+
+	ci := transport.NewCredentialInjector(rules, store)
+	_, headers, injected, err := ci.InjectRequest("GET", "https://admin.googleapis.com/admin/directory/v1/users", nil)
+	if err != nil {
+		t.Fatalf("InjectRequest: %v", err)
+	}
+	if !injected {
+		t.Fatal("expected injected=true")
+	}
+
+	var authHeader string
+	for _, h := range headers {
+		if strings.EqualFold(h[0], "Authorization") {
+			authHeader = h[1]
+		}
+	}
+	if authHeader != "Bearer public-client-token" {
+		t.Fatalf("Authorization header = %q, want %q", authHeader, "Bearer public-client-token")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if receivedClientID != "test-client-id" {
+		t.Fatalf("client_id = %q, want %q", receivedClientID, "test-client-id")
+	}
+	if receivedClientSecret != "" {
+		t.Fatalf("client_secret = %q, want empty", receivedClientSecret)
+	}
 	if c := calls.Load(); c != 1 {
 		t.Fatalf("token endpoint called %d times, want 1", c)
 	}

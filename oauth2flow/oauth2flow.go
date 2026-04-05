@@ -32,7 +32,11 @@ func Run(ctx context.Context, cfg *oauth2.Config, receiver CodeReceiver, verifie
 		return nil, err
 	}
 
-	return cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	var exchangeOpts []oauth2.AuthCodeOption
+	if verifier != "" {
+		exchangeOpts = append(exchangeOpts, oauth2.VerifierOption(verifier))
+	}
+	return cfg.Exchange(ctx, code, exchangeOpts...)
 }
 
 // AuthorizeCode runs the authorization URL + receiver portion of the flow and
@@ -48,7 +52,9 @@ func AuthorizeCode(ctx context.Context, cfg *oauth2.Config, receiver CodeReceive
 	state := base64.RawURLEncoding.EncodeToString(stateBytes[:])
 
 	authOpts := make([]oauth2.AuthCodeOption, 0, len(opts)+1)
-	authOpts = append(authOpts, oauth2.S256ChallengeOption(verifier))
+	if verifier != "" {
+		authOpts = append(authOpts, oauth2.S256ChallengeOption(verifier))
+	}
 	authOpts = append(authOpts, opts...)
 
 	authURL := cfg.AuthCodeURL(state, authOpts...)

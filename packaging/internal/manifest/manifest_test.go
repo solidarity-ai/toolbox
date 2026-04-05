@@ -220,6 +220,43 @@ func TestParseDev(t *testing.T) {
 			},
 		},
 		{
+			name: "oauth2 provider object with pkce flag",
+			json: `{
+  "module": "example.com/custom-oauth",
+  "name": "custom-oauth",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/custom.list.ts" }],
+  "credentials": [{
+    "name": "default",
+    "type": "oauth2",
+    "provider": {"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false},
+    "inject": {
+      "hosts": ["api.example.com"],
+      "method": "bearer_header"
+    }
+  }]
+}`,
+			want: DevManifest{
+				Module:  testModule("custom-oauth"),
+				Name:    "custom-oauth",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{EntryTS: "tools/custom.list.ts"},
+				},
+				Credentials: []DevManifestCredential{
+					{
+						Name:     "default",
+						Type:     "oauth2",
+						Provider: json.RawMessage(`{"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false}`),
+						Inject: DevManifestInject{
+							Hosts:  []string{"api.example.com"},
+							Method: "bearer_header",
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "invalid credential type rejected",
 			json: `{
   "module": "example.com/bad",
@@ -981,7 +1018,7 @@ func TestCompileWithCustomProviderObject(t *testing.T) {
 			{
 				Name:     "default",
 				Type:     "oauth2",
-				Provider: json.RawMessage(`{"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token"}`),
+				Provider: json.RawMessage(`{"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false}`),
 				Inject: DevManifestInject{
 					Hosts:  []string{"api.example.com"},
 					Method: "bearer_header",
@@ -1004,6 +1041,9 @@ func TestCompileWithCustomProviderObject(t *testing.T) {
 	}
 	if cred.Provider.TokenURL != "https://auth.example.com/token" {
 		t.Fatalf("provider token_url = %q, want https://auth.example.com/token", cred.Provider.TokenURL)
+	}
+	if cred.Provider.PKCE == nil || *cred.Provider.PKCE {
+		t.Fatalf("provider pkce = %+v, want false", cred.Provider.PKCE)
 	}
 }
 

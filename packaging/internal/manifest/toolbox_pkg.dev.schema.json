@@ -51,8 +51,8 @@
           "provider": {
             "oneOf": [
               { "type": "string" },
-              { "type": "object", "properties": { "name": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}} }, "required": ["name"] },
-              { "type": "object", "properties": { "auth_url": {"type": "string"}, "token_url": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}} }, "required": ["auth_url", "token_url"] }
+              { "type": "object", "properties": { "name": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}}, "pkce": {"type": "boolean"} }, "required": ["name"] },
+              { "type": "object", "properties": { "auth_url": {"type": "string"}, "token_url": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}}, "pkce": {"type": "boolean"} }, "required": ["auth_url", "token_url"] }
             ]
           },
           "scopes": { "type": "array", "items": { "type": "string" } },

@@ -12,9 +12,10 @@ import (
 
 // SecretCheck describes whether a specific secret ref is present.
 type SecretCheck struct {
-	Label   string
-	Ref     Ref
-	Present bool
+	Label    string
+	Ref      Ref
+	Present  bool
+	Required bool
 }
 
 // AccountCheck describes the account-scoped secret checks for one account.
@@ -34,7 +35,7 @@ type CredentialCheck struct {
 // Configured reports whether all required shared and account secrets are present.
 func (c CredentialCheck) Configured() bool {
 	for _, check := range c.Shared {
-		if !check.Present {
+		if check.Required && !check.Present {
 			return false
 		}
 	}
@@ -92,7 +93,7 @@ func (r *Repository) CheckPackage(ctx context.Context, pkg tooldef.Package) (Pac
 		case "oauth2":
 			check.Shared = r.checkRefs(ctx, []labeledRef{
 				{label: "client_id", ref: OAuth2ClientIDRef(pkg, cred.Name)},
-				{label: "client_secret", ref: OAuth2ClientSecretRef(pkg, cred.Name)},
+				{label: "client_secret", ref: OAuth2ClientSecretRef(pkg, cred.Name), optional: cred.Provider.PKCEEnabled()},
 			})
 			check.Accounts = r.accountChecks(ctx, pkg, cred.Name, credAccounts[cred.Name], func(acct string) []labeledRef {
 				return []labeledRef{
@@ -232,8 +233,9 @@ func (r *Repository) DeleteCredential(ctx context.Context, pkg tooldef.Package, 
 }
 
 type labeledRef struct {
-	label string
-	ref   Ref
+	label    string
+	ref      Ref
+	optional bool
 }
 
 func (r *Repository) checkRefs(ctx context.Context, refs []labeledRef) []SecretCheck {
@@ -241,9 +243,10 @@ func (r *Repository) checkRefs(ctx context.Context, refs []labeledRef) []SecretC
 	for _, ref := range refs {
 		value, err := r.Get(ctx, ref.ref)
 		checks = append(checks, SecretCheck{
-			Label:   ref.label,
-			Ref:     ref.ref,
-			Present: err == nil && len(value) > 0,
+			Label:    ref.label,
+			Ref:      ref.ref,
+			Present:  err == nil && len(value) > 0,
+			Required: !ref.optional,
 		})
 	}
 	return checks

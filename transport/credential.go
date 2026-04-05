@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -416,8 +417,11 @@ func (ci *CredentialInjector) refreshOAuth2(rule *InjectionRule, cacheKey string
 	}
 	clientSecretKey := credpath.OAuth2ClientSecret(rule.ModuleName, rule.CredentialName)
 	clientSecret, err := ci.secrets.Get(ctx, clientSecretKey)
-	if err != nil {
-		return "", fmt.Errorf("secret %s not found — run 'toolbox auth' for package %q to set up credentials: %w", clientSecretKey, rule.ModuleName, err)
+	if err != nil && !errors.Is(err, secrets.ErrNotFound) {
+		return "", fmt.Errorf("reading secret %s for package %q: %w", clientSecretKey, rule.ModuleName, err)
+	}
+	if errors.Is(err, secrets.ErrNotFound) || len(clientSecret) == 0 {
+		clientSecret = nil
 	}
 	// Refresh token is per-account (SecretPrefix is already scoped to the account).
 	refreshTokenKey := rule.SecretPrefix + "refresh_token"
@@ -426,10 +430,14 @@ func (ci *CredentialInjector) refreshOAuth2(rule *InjectionRule, cacheKey string
 		return "", fmt.Errorf("secret %s not found — run 'toolbox auth' for package %q to set up credentials: %w", refreshTokenKey, rule.ModuleName, err)
 	}
 
+	endpoint := oauth2.Endpoint{TokenURL: rule.Provider.TokenURL}
+	if len(clientSecret) == 0 {
+		endpoint.AuthStyle = oauth2.AuthStyleInParams
+	}
 	cfg := &oauth2.Config{
 		ClientID:     string(clientID),
 		ClientSecret: string(clientSecret),
-		Endpoint:     oauth2.Endpoint{TokenURL: rule.Provider.TokenURL},
+		Endpoint:     endpoint,
 	}
 
 	tok, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: string(refreshToken)}).Token()

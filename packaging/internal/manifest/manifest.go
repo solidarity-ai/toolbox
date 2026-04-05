@@ -215,12 +215,14 @@ func compileProvider(raw json.RawMessage) *tooldef.OAuth2ProviderConfig {
 		AuthURL    string            `json:"auth_url"`
 		TokenURL   string            `json:"token_url"`
 		AuthParams map[string]string `json:"auth_params"`
+		PKCE       *bool             `json:"pkce"`
 	}
 	if err := json.Unmarshal(raw, &obj); err == nil {
 		if obj.Name != "" {
 			return &tooldef.OAuth2ProviderConfig{
 				Name:       obj.Name,
 				AuthParams: obj.AuthParams,
+				PKCE:       obj.PKCE,
 			}
 		}
 		if obj.AuthURL != "" || obj.TokenURL != "" {
@@ -228,6 +230,7 @@ func compileProvider(raw json.RawMessage) *tooldef.OAuth2ProviderConfig {
 				AuthURL:    obj.AuthURL,
 				TokenURL:   obj.TokenURL,
 				AuthParams: obj.AuthParams,
+				PKCE:       obj.PKCE,
 			}
 		}
 	}

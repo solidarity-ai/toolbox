@@ -45,11 +45,32 @@ type LoadResult struct {
 
 // DevManifest is the source authoring format read from toolbox.devpkg.json.
 type DevManifest struct {
-	Name                      string              `json:"name"`
-	Runtime                   tooldef.ToolRuntime `json:"runtime"`
-	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs"`
-	Executables               map[string]string   `json:"executables"`
-	Tools                     []DevManifestTool   `json:"tools"`
+	Module                    tooldef.ModulePath      `json:"module"`
+	Name                      string                  `json:"name"`
+	Runtime                   tooldef.ToolRuntime     `json:"runtime"`
+	AdditionalTypeScriptGlobs []string                `json:"additionalTypeScriptGlobs"`
+	Executables               map[string]string       `json:"executables"`
+	Tools                     []DevManifestTool       `json:"tools"`
+	Credentials               []DevManifestCredential `json:"credentials,omitempty"`
+	AllowedHosts              []string                `json:"allowed_hosts,omitempty"`
+}
+
+// DevManifestCredential declares a credential requirement in the dev manifest.
+type DevManifestCredential struct {
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Provider json.RawMessage   `json:"provider,omitempty"`
+	Scopes   []string          `json:"scopes,omitempty"`
+	Inject   DevManifestInject `json:"inject"`
+}
+
+// DevManifestInject describes injection targets in the dev manifest.
+type DevManifestInject struct {
+	Hosts                    []string `json:"hosts"`
+	Method                   string   `json:"method"`
+	HeaderName               string   `json:"header_name,omitempty"`
+	PathPrefix               string   `json:"path_prefix,omitempty"`
+	AllowUnsafeHTTPInjection bool     `json:"allow_unsafe_http_injection,omitempty"`
 }
 
 // DevManifestToolResource groups resource-related overrides for a tool.
@@ -61,7 +82,7 @@ type DevManifestToolResource struct {
 type DevManifestTool struct {
 	EntryTS    string                   `json:"entry_ts"`
 	Idempotent *bool                    `json:"idempotent"`
-	Effect     *tooldef.Effect           `json:"effect"`
+	Effect     *tooldef.Effect          `json:"effect"`
 	Resource   *DevManifestToolResource `json:"resource,omitempty"`
 }
 
@@ -91,6 +112,9 @@ func ParseDev(data []byte) (DevManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
 	}
+	if err := validateModulePath(manifest.Module); err != nil {
+		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
+	}
 	for _, tool := range manifest.Tools {
 		if err := validateEntryName(tool.EntryTS); err != nil {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
@@ -105,6 +129,9 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
+	if err := validateModulePath(pkg.Module); err != nil {
+		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
 	return pkg, nil
 }
 
@@ -112,11 +139,16 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 // applying inference rules for missing fields.
 func Compile(dev DevManifest) tooldef.Package {
 	pkg := tooldef.Package{
+		Module:                    dev.Module,
 		Name:                      dev.Name,
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
 		Executables:               dev.Executables,
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
+		AllowedHosts:              append([]string(nil), dev.AllowedHosts...),
+	}
+	if len(pkg.AllowedHosts) == 0 {
+		pkg.AllowedHosts = nil
 	}
 	for i, tool := range dev.Tools {
 		effect := InferEffect(tool.EntryTS)
@@ -145,13 +177,72 @@ func Compile(dev DevManifest) tooldef.Package {
 			ResourceParams: resourceParams,
 		}
 	}
+	for _, cred := range dev.Credentials {
+		pc := tooldef.PackageCredential{
+			Name:   cred.Name,
+			Type:   cred.Type,
+			Scopes: cred.Scopes,
+			Inject: tooldef.PackageInject{
+				Hosts:                    cred.Inject.Hosts,
+				Method:                   cred.Inject.Method,
+				HeaderName:               cred.Inject.HeaderName,
+				PathPrefix:               cred.Inject.PathPrefix,
+				AllowUnsafeHTTPInjection: cred.Inject.AllowUnsafeHTTPInjection,
+			},
+		}
+		pc.Provider = compileProvider(cred.Provider)
+		pkg.Credentials = append(pkg.Credentials, pc)
+	}
 	return pkg
+}
+
+// compileProvider resolves the provider field from a dev manifest credential.
+// It may be a string (known provider name) or an object with auth_url/token_url.
+func compileProvider(raw json.RawMessage) *tooldef.OAuth2ProviderConfig {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	// Try string first (known provider name).
+	var name string
+	if err := json.Unmarshal(raw, &name); err == nil {
+		return &tooldef.OAuth2ProviderConfig{Name: name}
+	}
+
+	// Try object form (named provider with optional auth_params, or custom URLs).
+	var obj struct {
+		Name       string            `json:"name"`
+		AuthURL    string            `json:"auth_url"`
+		TokenURL   string            `json:"token_url"`
+		AuthParams map[string]string `json:"auth_params"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		if obj.Name != "" {
+			return &tooldef.OAuth2ProviderConfig{
+				Name:       obj.Name,
+				AuthParams: obj.AuthParams,
+			}
+		}
+		if obj.AuthURL != "" || obj.TokenURL != "" {
+			return &tooldef.OAuth2ProviderConfig{
+				AuthURL:    obj.AuthURL,
+				TokenURL:   obj.TokenURL,
+				AuthParams: obj.AuthParams,
+			}
+		}
+	}
+
+	return nil
 }
 
 // ValidateCompiled validates a compiled package against both the dev (lenient)
 // and dist (strict) schemas. In dev mode, dist violations are returned as
 // warnings. In dist mode, they are errors.
 func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, error) {
+	if err := validateModulePath(pkg.Module); err != nil {
+		return nil, fmt.Errorf("validate compiled package: %w", err)
+	}
+
 	raw, err := json.Marshal(pkg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal compiled package: %w", err)
@@ -173,6 +264,13 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 		warnings = append(warnings, Warning{Message: fmt.Sprintf("distribution validation: %v", err)})
 	}
 	return warnings, nil
+}
+
+func validateModulePath(module tooldef.ModulePath) error {
+	if _, err := tooldef.ParseModulePath(module.String()); err != nil {
+		return fmt.Errorf("invalid module %q: %w", module, err)
+	}
+	return nil
 }
 
 // InferEffect derives an effect from the tool entry filename verb.

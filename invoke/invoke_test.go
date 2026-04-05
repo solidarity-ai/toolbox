@@ -4,15 +4,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestRunUnknownToolErrors(t *testing.T) {
-	resolved := toolset.NewResolvedToolset(nil)
+	prepared := toolset.NewPreparedToolset(nil)
 
-	_, err := invoke.Run(resolved, "does.not.exist", nil)
+	_, err := invoke.Run(prepared, "does.not.exist", nil)
 	if err == nil {
 		t.Fatal("expected unknown tool error")
 	}
@@ -26,15 +27,15 @@ func TestRunVisibleToolWithoutExecutableErrors(t *testing.T) {
 		Name:    "broken",
 		Runtime: tooldef.RuntimeTypeScriptSandbox,
 	}
-	resolved := toolset.NewResolvedToolset([]tooldef.ResolvedTool{
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{
 		{
 			Name:        "broken.noop",
 			Description: "Broken tool",
-			Package:     &pkg,
+			PackageMeta:     &pkg,
 		},
 	})
 
-	_, err := invoke.Run(resolved, "broken.noop", nil)
+	_, err := invoke.Run(prepared, "broken.noop", nil)
 	if err == nil {
 		t.Fatal("expected missing executable error")
 	}

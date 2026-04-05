@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/solidarity-ai/toolbox/packaging/internal/manifest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
@@ -24,6 +25,7 @@ func TestLoadDir(t *testing.T) {
 		{
 			name: "valid dev package",
 			manifest: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -31,6 +33,7 @@ func TestLoadDir(t *testing.T) {
   ]
 }`,
 			wantPackage: tooldef.Package{
+				Module:  tooldef.ModulePath("example.com/calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -41,6 +44,7 @@ func TestLoadDir(t *testing.T) {
 		{
 			name: "wasix runtime with executables",
 			manifest: `{
+  "module": "example.com/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
@@ -49,6 +53,7 @@ func TestLoadDir(t *testing.T) {
   ]
 }`,
 			wantPackage: tooldef.Package{
+				Module:      tooldef.ModulePath("example.com/google-workspace"),
 				Name:        "google-workspace",
 				Runtime:     tooldef.RuntimeTypeScriptWasixSandbox,
 				Executables: map[string]string{"gwc": "dist/gwc.wasm"},
@@ -56,6 +61,17 @@ func TestLoadDir(t *testing.T) {
 					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
+		},
+		{
+			name: "missing module",
+			manifest: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`,
+			wantErr: `"module"`,
 		},
 		{
 			name:    "missing manifest file",
@@ -71,6 +87,8 @@ func TestLoadDir(t *testing.T) {
 			dir := t.TempDir()
 			if tt.manifest != "" {
 				mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), tt.manifest)
+				mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function tool() { return \"ok\"; }\n")
+				mustWriteFile(t, filepath.Join(dir, "tools", "users.list.ts"), "export default function tool() { return \"ok\"; }\n")
 			}
 
 			loaded, err := LoadDir(dir)
@@ -87,7 +105,7 @@ func TestLoadDir(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadDir() error: %v", err)
 			}
-			if diff := cmp.Diff(tt.wantPackage, loaded.Package); diff != "" {
+			if diff := cmp.Diff(tt.wantPackage, loaded.Package, cmpopts.IgnoreFields(tooldef.PackageTool{}, "Sig")); diff != "" {
 				t.Fatalf("LoadDir() package mismatch (-want +got):\n%s", diff)
 			}
 			if loaded.Dir != dir {
@@ -107,12 +125,14 @@ func TestLoadDirWithMode(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "effect": "readOnly" }
   ]
 }`)
+		mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function tool() { return \"ok\"; }\n")
 		result, err := LoadDirWithMode(dir, manifest.ValidationModeDev)
 		if err != nil {
 			t.Fatalf("LoadDirWithMode() error: %v", err)
@@ -126,12 +146,14 @@ func TestLoadDirWithMode(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "effect": "reversible" }
   ]
 }`)
+		mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function tool() { return \"ok\"; }\n")
 		_, err := LoadDirWithMode(dir, manifest.ValidationModeDist)
 		if err != nil {
 			t.Fatalf("expected no error for missing idempotent, got: %v", err)
@@ -144,6 +166,7 @@ func TestLoadDirExecutables(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
@@ -151,6 +174,7 @@ func TestLoadDirExecutables(t *testing.T) {
     { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "users.list.ts"), "export default function tool() { return \"ok\"; }\n")
 
 	loaded, err := LoadDir(dir)
 	if err != nil {
@@ -161,6 +185,30 @@ func TestLoadDirExecutables(t *testing.T) {
 	}
 	if got := loaded.Package.Executables["gwc"]; got != "dist/gwc.wasm" {
 		t.Fatalf("expected executable gwc=dist/gwc.wasm, got %q", got)
+	}
+}
+
+func TestLoadDirErrorsWhenToolHasNoDefaultExportFunction(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`)
+	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export const tool = () => \"ok\";\n")
+
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Fatal("LoadDir() error = nil, want metadata extraction error")
+	}
+	if !strings.Contains(err.Error(), `tools/calc.add.ts`) {
+		t.Fatalf("error = %q, want entry path", err)
+	}
+	if !strings.Contains(err.Error(), "no default export function found") {
+		t.Fatalf("error = %q, want default export function error", err)
 	}
 }
 
@@ -175,6 +223,7 @@ func TestSourceFSFiltersTypeScript(t *testing.T) {
 		{
 			name: "tool entries only",
 			manifest: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -186,6 +235,7 @@ func TestSourceFSFiltersTypeScript(t *testing.T) {
 		{
 			name: "additional typescript globs include helper",
 			manifest: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["lib/**/*.ts"],
@@ -230,76 +280,6 @@ func TestSourceFSFiltersTypeScript(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestResolvedTools(t *testing.T) {
-	t.Parallel()
-
-	t.Run("typescript sandbox tools", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
-  "name": "calc",
-  "runtime": "typescript-sandbox",
-  "tools": [
-    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" },
-    { "entry_ts": "tools/calc.sub.ts", "idempotent": true, "effect": "readOnly" }
-  ]
-}`)
-		mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function() {}")
-		mustWriteFile(t, filepath.Join(dir, "tools", "calc.sub.ts"), "export default function() {}")
-
-		loaded, err := LoadDir(dir)
-		if err != nil {
-			t.Fatalf("LoadDir() error: %v", err)
-		}
-
-		resolved := loaded.ResolvedTools()
-		if len(resolved) != 2 {
-			t.Fatalf("expected 2 resolved tools, got %d", len(resolved))
-		}
-
-		if resolved[0].Name != "calc.add" {
-			t.Fatalf("expected first tool name calc.add, got %q", resolved[0].Name)
-		}
-		if resolved[0].TS == nil {
-			t.Fatalf("expected TS definition for calc.add")
-		}
-		if resolved[0].TSWasm != nil {
-			t.Fatalf("expected no TSWasm for typescript-sandbox tool")
-		}
-	})
-
-	t.Run("wasix sandbox tools", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
-  "name": "google-workspace",
-  "runtime": "typescript+wasix-sandbox",
-  "executables": { "gwc": "dist/gwc.wasm" },
-  "tools": [
-    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
-  ]
-}`)
-		mustWriteFile(t, filepath.Join(dir, "tools", "users.list.ts"), "export default function() {}")
-
-		loaded, err := LoadDir(dir)
-		if err != nil {
-			t.Fatalf("LoadDir() error: %v", err)
-		}
-
-		resolved := loaded.ResolvedTools()
-		if len(resolved) != 1 {
-			t.Fatalf("expected 1 resolved tool, got %d", len(resolved))
-		}
-
-		if resolved[0].TSWasm == nil {
-			t.Fatalf("expected TSWasm definition for wasix tool")
-		}
-		if resolved[0].TSWasm.Executables["gwc"] != "dist/gwc.wasm" {
-			t.Fatalf("expected executable gwc=dist/gwc.wasm, got %q", resolved[0].TSWasm.Executables["gwc"])
-		}
-	})
 }
 
 func boolPtr(v bool) *bool {

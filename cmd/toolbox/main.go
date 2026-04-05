@@ -11,9 +11,12 @@ import (
 	"strings"
 
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -43,6 +46,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runVersions(args[1:], stdout)
 	case "mcp":
 		return runMCP(args[1:], stdin, stdout, stderr)
+	case "auth":
+		return runAuth(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -110,11 +115,11 @@ func runResolve(args []string, stdout io.Writer) error {
 		}
 	}
 
-	resolved, err := ts.Resolve(ctx, resolver)
+	prepared, err := ts.Prepare(ctx, resolver)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "resolved %d tools\n", len(resolved.Tools()))
+	fmt.Fprintf(stdout, "resolved %d tools\n", len(prepared.Tools()))
 	if ts.LockFilename() != "" {
 		fmt.Fprintf(stdout, "lockfile: %s\n", ts.LockFilename())
 	}
@@ -193,12 +198,21 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	resolved, err := ts.Resolve(context.Background(), resolver)
+
+	ctx := context.Background()
+
+	store := secrets.NewLocalSecretStore("", "")
+
+	cfg := toolset.Config{
+		CredentialPolicySource: credentialrepo.New(store),
+	}
+
+	prepared, err := ts.Prepare(ctx, resolver, cfg)
 	if err != nil {
 		return err
 	}
 
-	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(resolved))
+	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(prepared))
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
@@ -245,4 +259,5 @@ func printUsage(f io.Writer) {
 	fmt.Fprintln(f, "  toolbox resolve [--file FILE] [--upgrade MODULE]")
 	fmt.Fprintln(f, "  toolbox versions [--file FILE] <module>")
 	fmt.Fprintln(f, "  toolbox mcp serve [--file FILE]")
+	fmt.Fprintln(f, "  toolbox auth [--check|--delete-account NAME|--delete-credential --credential NAME] <package-dir>")
 }

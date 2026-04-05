@@ -13,7 +13,8 @@ import (
 type inferEffectTestCase struct {
 	name         string
 	manifest     string
-	wantEffect     tooldef.Effect
+	entryTS      string
+	wantEffect   tooldef.Effect
 	wantWarnings int
 }
 
@@ -29,6 +30,12 @@ func TestLoadDevWithModeInfersEffectInDev(t *testing.T) {
 			manifestPath := filepath.Join(dir, packaging.DevManifestFilename)
 			if err := os.WriteFile(manifestPath, []byte(tt.manifest), 0o644); err != nil {
 				t.Fatalf("write manifest: %v", err)
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, tt.entryTS)), 0o755); err != nil {
+				t.Fatalf("mkdir tool dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, tt.entryTS), []byte(`export default function tool() { return "ok"; }`), 0o644); err != nil {
+				t.Fatalf("write tool source: %v", err)
 			}
 
 			result, err := packaging.LoadDevWithMode(dir, packaging.ValidationModeDev)
@@ -87,15 +94,17 @@ func devEffectInferenceCases() []inferEffectTestCase {
 func inferredEffectCase(verb string, mode tooldef.Effect) inferEffectTestCase {
 	entryTS := fmt.Sprintf("tools/users.%s.ts", verb)
 	return inferEffectTestCase{
-		name: fmt.Sprintf("dev infers %s for %s", mode, verb),
+		name:    fmt.Sprintf("dev infers %s for %s", mode, verb),
+		entryTS: entryTS,
 		manifest: fmt.Sprintf(`{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": %q, "idempotent": true }
   ]
 }`, entryTS),
-		wantEffect:     mode,
+		wantEffect:   mode,
 		wantWarnings: 0,
 	}
 }

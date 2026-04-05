@@ -1,11 +1,10 @@
 package invoke_test
 
 import (
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/invoke"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -13,7 +12,7 @@ func TestRunWithHiddenParamBinding(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"fixed_a": 10,
 		},
 		Tools: []toolset.BoundTool{
@@ -26,17 +25,10 @@ func TestRunWithHiddenParamBinding(t *testing.T) {
 		},
 	}
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(calcDir()); err != nil {
-		t.Fatalf("add calc dir: %v", err)
-	}
-	resolved, err := builder.Resolve(cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// Agent only provides b=5; a=10 is injected from context
-	result, err := invoke.Run(resolved, "calc.add", map[string]any{"b": 5})
+	result, err := invoke.Run(prepared, "calc.add", map[string]any{"b": 5})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -50,7 +42,7 @@ func TestRunWithHiddenParamBindingOverridesAgentValue(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"fixed_a": 10,
 		},
 		Tools: []toolset.BoundTool{
@@ -63,17 +55,10 @@ func TestRunWithHiddenParamBindingOverridesAgentValue(t *testing.T) {
 		},
 	}
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(calcDir()); err != nil {
-		t.Fatalf("add calc dir: %v", err)
-	}
-	resolved, err := builder.Resolve(cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// Agent tries to pass a=999 for a hidden param — binding should override it
-	result, err := invoke.Run(resolved, "calc.add", map[string]any{"a": 999, "b": 5})
+	result, err := invoke.Run(prepared, "calc.add", map[string]any{"a": 999, "b": 5})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -88,7 +73,7 @@ func TestRunWithCheckExpressionBlocksCall(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"max_value": 10,
 		},
 		Tools: []toolset.BoundTool{
@@ -101,26 +86,11 @@ func TestRunWithCheckExpressionBlocksCall(t *testing.T) {
 		},
 	}
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(calcDir()); err != nil {
-		t.Fatalf("add calc dir: %v", err)
-	}
-	resolved, err := builder.Resolve(cfg)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// a=50 exceeds max_value=10, should be blocked
-	_, err = invoke.Run(resolved, "calc.add", map[string]any{"a": 50, "b": 5})
+	_, err := invoke.Run(prepared, "calc.add", map[string]any{"a": 50, "b": 5})
 	if err == nil {
 		t.Fatal("expected check failure error")
 	}
-}
-
-func calcDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		panic("runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "calc")
 }

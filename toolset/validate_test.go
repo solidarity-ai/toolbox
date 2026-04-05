@@ -11,7 +11,7 @@ func TestValidateCallInjectsHiddenParam(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"fixed_a": 42,
 		},
 		Tools: []toolset.BoundTool{
@@ -24,9 +24,9 @@ func TestValidateCallInjectsHiddenParam(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
+	prepared := calcToolset(t, cfg)
 
-	fullParams, err := resolved.ValidateCall("calc.add", map[string]any{"b": 3})
+	fullParams, err := prepared.ValidateCall("calc.add", map[string]any{"b": 3})
 	if err != nil {
 		t.Fatalf("validate call: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestValidateCallValueBindingOverridesAgentParam(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"forced_a": 99,
 		},
 		Tools: []toolset.BoundTool{
@@ -56,9 +56,9 @@ func TestValidateCallValueBindingOverridesAgentParam(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
+	prepared := calcToolset(t, cfg)
 
-	fullParams, err := resolved.ValidateCall("calc.add", map[string]any{"a": 1, "b": 2})
+	fullParams, err := prepared.ValidateCall("calc.add", map[string]any{"a": 1, "b": 2})
 	if err != nil {
 		t.Fatalf("validate call: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestValidateCallCheckPassesAllowsExecution(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"max_value": 100,
 		},
 		Tools: []toolset.BoundTool{
@@ -86,9 +86,9 @@ func TestValidateCallCheckPassesAllowsExecution(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
+	prepared := calcToolset(t, cfg)
 
-	fullParams, err := resolved.ValidateCall("calc.add", map[string]any{"a": 50, "b": 2})
+	fullParams, err := prepared.ValidateCall("calc.add", map[string]any{"a": 50, "b": 2})
 	if err != nil {
 		t.Fatalf("validate call: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestValidateCallCheckFailsReturnsError(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"max_value": 10,
 		},
 		Tools: []toolset.BoundTool{
@@ -115,9 +115,9 @@ func TestValidateCallCheckFailsReturnsError(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
+	prepared := calcToolset(t, cfg)
 
-	_, err := resolved.ValidateCall("calc.add", map[string]any{"a": 50, "b": 2})
+	_, err := prepared.ValidateCall("calc.add", map[string]any{"a": 50, "b": 2})
 	if err == nil {
 		t.Fatal("expected check failure error")
 	}
@@ -129,9 +129,9 @@ func TestValidateCallCheckFailsReturnsError(t *testing.T) {
 func TestValidateCallNoBindingsPassthrough(t *testing.T) {
 	t.Parallel()
 
-	resolved := calcToolset(t, toolset.Config{})
+	prepared := calcToolset(t, toolset.Config{})
 
-	fullParams, err := resolved.ValidateCall("calc.add", map[string]any{"a": 1, "b": 2})
+	fullParams, err := prepared.ValidateCall("calc.add", map[string]any{"a": 1, "b": 2})
 	if err != nil {
 		t.Fatalf("validate call: %v", err)
 	}
@@ -144,9 +144,9 @@ func TestValidateCallNoBindingsPassthrough(t *testing.T) {
 func TestValidateCallUnknownToolErrors(t *testing.T) {
 	t.Parallel()
 
-	resolved := calcToolset(t, toolset.Config{})
+	prepared := calcToolset(t, toolset.Config{})
 
-	_, err := resolved.ValidateCall("nonexistent.tool", map[string]any{})
+	_, err := prepared.ValidateCall("nonexistent.tool", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for unknown tool")
 	}
@@ -166,9 +166,9 @@ func TestValidateCallLiteralBinding(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
+	prepared := calcToolset(t, cfg)
 
-	fullParams, err := resolved.ValidateCall("calc.add", map[string]any{"b": 3})
+	fullParams, err := prepared.ValidateCall("calc.add", map[string]any{"b": 3})
 	if err != nil {
 		t.Fatalf("validate call: %v", err)
 	}

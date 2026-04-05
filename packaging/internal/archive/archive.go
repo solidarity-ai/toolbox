@@ -154,7 +154,9 @@ func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error)
 		return source.LoadedPackage{}, fmt.Errorf("validate archive manifest for distribution: %w", err)
 	}
 
-	source.EnrichToolMetadata(archiveFS, &externalPkg)
+	if err := source.EnrichToolMetadata(archiveFS, &externalPkg); err != nil {
+		return source.LoadedPackage{}, err
+	}
 
 	return source.LoadedPackage{
 		Package: externalPkg,

@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/shared-types",
   "name": "shared-types",
   "runtime": "typescript-sandbox",
-  "sha256": "385d539c2a9181a0ef632ffadebe20373265e454838c4e80afd91eeeed082fed",
+  "sha256": "a1dad5313c1670ce4a4726ab84bb36a4dcd0120014a74be9391dcccdc209fa51",
   "tools": [
     {
       "entry_ts": "tools/tickets.get.ts",

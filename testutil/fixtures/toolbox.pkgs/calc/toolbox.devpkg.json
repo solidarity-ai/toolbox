@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [

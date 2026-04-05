@@ -49,14 +49,14 @@ func groupToolsByNamespace(tools []toolset.AgentTool) (map[string][]toolset.Agen
 // Run is the smallest useful codemode seam for outside-in tests.
 //
 // It intentionally stays narrow:
-// - one resolved toolset
+// - one prepared toolset
 // - one TS code snippet
 // - a stubbed SDK injected as global `tools`
 // - tool calls delegated to invoke
-func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
-	view := resolved.AgentView()
+func Run(prepared toolset.PreparedToolset, code string) (string, error) {
+	view := prepared.AgentView()
 
-	files, err := typecheckFiles(resolved, code)
+	files, err := typecheckFiles(prepared, code)
 	if err != nil {
 		return "", err
 	}
@@ -81,7 +81,7 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 
 	ctx := rt.Context()
 	jsInvoke, err := qjs.FuncToJS(ctx, func(toolName string, args map[string]any) (string, error) {
-		return invoke.Run(resolved, toolName, args)
+		return invoke.Run(prepared, toolName, args)
 	})
 	if err != nil {
 		return "", fmt.Errorf("bind invoke: %w", err)
@@ -113,9 +113,9 @@ func Run(resolved toolset.ResolvedToolset, code string) (string, error) {
 	return val.String(), nil
 }
 
-func typecheckFiles(resolved toolset.ResolvedToolset, code string) (fs.FS, error) {
+func typecheckFiles(prepared toolset.PreparedToolset, code string) (fs.FS, error) {
 	return fstest.MapFS{
-		"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(resolved))},
+		"__codemode_sdk.ts": &fstest.MapFile{Data: []byte(typecheckSDKSource(prepared))},
 		"__codemode_run.ts": &fstest.MapFile{Data: []byte("import { tools } from \"./__codemode_sdk.ts\";\n" + code)},
 	}, nil
 }
@@ -154,11 +154,11 @@ func preludeForTools(view toolset.AgentView) string {
 	return b.String()
 }
 
-func typecheckSDKSource(resolved toolset.ResolvedToolset) string {
+func typecheckSDKSource(prepared toolset.PreparedToolset) string {
 	var b strings.Builder
 	b.WriteString("declare function __invokeTool<T>(toolName: string, args: unknown): T;\n")
 
-	view := resolved.AgentView()
+	view := prepared.AgentView()
 	tools := sortedTools(view)
 
 	// Collect unique type declarations from all tools' param types.

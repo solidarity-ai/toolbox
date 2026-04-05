@@ -127,6 +127,13 @@ func (s *LocalSecretStore) ensureUnlocked() error {
 
 func (s *LocalSecretStore) unlock() error {
 	identityFile, err := os.Open(s.identityPath)
+	if os.IsNotExist(err) {
+		// Auto-generate a new age identity on first use.
+		if err := s.generateIdentity(); err != nil {
+			return fmt.Errorf("generating identity: %w", err)
+		}
+		identityFile, err = os.Open(s.identityPath)
+	}
 	if err != nil {
 		return fmt.Errorf("opening identity file: %w", err)
 	}
@@ -239,6 +246,25 @@ func recipientFromIdentity(id age.Identity) (age.Recipient, error) {
 		return rp.Recipient(), nil
 	}
 	return nil, fmt.Errorf("identity type %T does not expose a recipient", id)
+}
+
+// generateIdentity creates a new age identity file at s.identityPath.
+func (s *LocalSecretStore) generateIdentity() error {
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		return fmt.Errorf("generating age key: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(s.identityPath), 0700); err != nil {
+		return fmt.Errorf("creating identity directory: %w", err)
+	}
+
+	content := fmt.Sprintf("# created by toolbox\n# public key: %s\n%s\n", identity.Recipient(), identity)
+	if err := os.WriteFile(s.identityPath, []byte(content), 0600); err != nil {
+		return fmt.Errorf("writing identity file: %w", err)
+	}
+
+	return nil
 }
 
 func defaultStorePath() string {

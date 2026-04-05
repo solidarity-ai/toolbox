@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["tools/shims.ts"],

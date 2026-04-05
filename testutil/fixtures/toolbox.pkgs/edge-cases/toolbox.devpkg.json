@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/edge-cases",
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
   "tools": [

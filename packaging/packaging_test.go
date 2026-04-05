@@ -17,6 +17,7 @@ func TestLoadDev(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -28,6 +29,9 @@ func TestLoadDev(t *testing.T) {
 	loaded, err := packaging.LoadDev(dir)
 	if err != nil {
 		t.Fatalf("LoadDev() error: %v", err)
+	}
+	if loaded.Package.Module != tooldef.ModulePath("example.com/calc") {
+		t.Fatalf("expected module=example.com/calc, got %q", loaded.Package.Module)
 	}
 	if loaded.Package.Name != "calc" {
 		t.Fatalf("expected name=calc, got %q", loaded.Package.Name)
@@ -42,6 +46,7 @@ func TestPackAndLoadArchive(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -60,6 +65,9 @@ func TestPackAndLoadArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadArchive() error: %v", err)
 	}
+	if loaded.Package.Module != tooldef.ModulePath("example.com/calc") {
+		t.Fatalf("expected module=example.com/calc, got %q", loaded.Package.Module)
+	}
 	if loaded.Package.Name != "calc" {
 		t.Fatalf("expected name=calc, got %q", loaded.Package.Name)
 	}
@@ -70,6 +78,7 @@ func TestPackAcceptsMissingIdempotent(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -135,6 +144,7 @@ func TestLoadDevWasip2Runtime(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
+  "module": "example.com/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
   "executables": { "http-client": "dist/http-client.wasm" },

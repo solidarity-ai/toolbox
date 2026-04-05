@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
@@ -27,12 +28,12 @@ func TestNpmDepsDevMode(t *testing.T) {
 		t.Fatalf("LoadDev: %v", err)
 	}
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
 	// Verify esbuild can bundle the tool with npm deps.
 	// We don't run the tool (it would hang on a real fetch to api.github.com)
 	// but we prove the bundle is self-contained with zod + octokit inlined.
-	bundled, err := quickts.EmitBundle(*resolved.Tools()[0].TS)
+	bundled, err := quickts.EmitBundle(*prepared.Tools()[0].TS)
 	if err != nil {
 		t.Fatalf("esbuild bundling failed: %v", err)
 	}
@@ -62,9 +63,9 @@ func TestNpmDepsDistMode(t *testing.T) {
 		t.Fatalf("LoadArchive: %v", err)
 	}
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
-	_, err = invoke.Run(resolved, "githubIssues.get", map[string]any{
+	_, err = invoke.Run(prepared, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "hello-world",
 		"number": 1,
@@ -94,9 +95,9 @@ func TestNpmDepsBundleSize(t *testing.T) {
 		t.Fatalf("LoadDev: %v", err)
 	}
 
-	tools := loaded.ResolvedTools()
+	tools := assembler.LoadedTools(loaded)
 	if len(tools) == 0 {
-		t.Fatal("no tools resolved")
+		t.Fatal("no tools loaded")
 	}
 
 	// Verify node_modules and shims exist in the work dir
@@ -193,10 +194,10 @@ func TestNpmDepsE2E(t *testing.T) {
 		t.Fatalf("LoadDev: %v", err)
 	}
 
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
 	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
-	result, err := invoke.Run(resolved, "githubIssues.get", map[string]any{
+	result, err := invoke.Run(prepared, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "Hello-World",
 		"number": 1,

@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/vfs-test",
   "name": "vfs-test",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "014a6e1e43659246abdb49c1ced675e9c2243e539edad34ab815de2e7494b10b",
+  "sha256": "fb7664966a27b551b76a6a96292b77ad94a9ef25c55c8120b18beeea4d8ea568",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

@@ -14,14 +14,21 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
 	clienttransport "github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/credpath"
+	"github.com/solidarity-ai/toolbox/invoke"
+	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -108,7 +115,7 @@ func TestRunVersionsRejectsInvalidModuleArgument(t *testing.T) {
 }
 
 func TestRunResolveWritesLockfile(t *testing.T) {
-	archiveBytes, manifestBytes := loadDistFixtureBytes(t, "calc-dist")
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -166,7 +173,7 @@ func TestRunResolveWritesLockfile(t *testing.T) {
 }
 
 func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
-	archiveBytes, manifestBytes := loadDistFixtureBytes(t, "calc-dist")
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "cccccccccccccccccccccccccccccccccccccccc"
 
 	var mu sync.Mutex
@@ -259,8 +266,13 @@ func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
 }
 
 func TestRunResolveSiblingLocalOverlayPreservesLockfile(t *testing.T) {
-	archiveBytes, manifestBytes := loadDistFixtureBytes(t, "calc-dist")
-	githubIssuesDir := loadSourceFixtureDir(t, "github-issues")
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "example.com/acme/calc")
+	githubIssuesDir := filepath.Join(t.TempDir(), "github-issues")
+	if err := os.MkdirAll(githubIssuesDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", githubIssuesDir, err)
+	}
+	copyFixtureDir(t, loadSourceFixtureDir(t, "github-issues"), githubIssuesDir)
+	rewriteSourceFixtureModule(t, githubIssuesDir, "example.com/zeta/github-issues")
 
 	workspace := filepath.Join(t.TempDir(), "nested", "support-agent")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -359,6 +371,7 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	}
 
 	copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), packageDir)
+	rewriteSourceFixtureModule(t, packageDir, "example.com/acme/calc")
 
 	toolsetPath := filepath.Join(consumerDir, "toolbox.toolset.json")
 	writeJSONFile(t, toolsetPath, map[string]any{
@@ -451,6 +464,121 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	}
 }
 
+func TestBuildPackageCredentialPolicies_IsolatesLoadedPackages_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	pkgADir := filepath.Join(workspace, "pkg-a")
+	pkgBDir := filepath.Join(workspace, "pkg-b")
+	if err := os.MkdirAll(filepath.Join(pkgADir, "tools"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", pkgADir, err)
+	}
+	if err := os.MkdirAll(filepath.Join(pkgBDir, "tools"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", pkgBDir, err)
+	}
+
+	writeJSONFile(t, filepath.Join(pkgADir, "toolbox.devpkg.json"), map[string]any{
+		"module":        "example.com/acme/pkg-a",
+		"name":          "pkg-a",
+		"runtime":       "typescript-sandbox",
+		"allowed_hosts": []string{"127.0.0.1"},
+		"tools": []map[string]any{{
+			"entry_ts":   "tools/pkg-a.get.ts",
+			"idempotent": true,
+			"effect":     "readOnly",
+		}},
+	})
+	if err := os.WriteFile(filepath.Join(pkgADir, "tools", "pkg-a.get.ts"), []byte(`export default async function tool(url: string): Promise<string> {
+  const response = await fetch(url);
+  return await response.text();
+}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(pkg-a tool): %v", err)
+	}
+
+	writeJSONFile(t, filepath.Join(pkgBDir, "toolbox.devpkg.json"), map[string]any{
+		"module":  "example.com/acme/pkg-b",
+		"name":    "pkg-b",
+		"runtime": "typescript-sandbox",
+		"credentials": []map[string]any{{
+			"name": "default",
+			"type": "api_key",
+			"inject": map[string]any{
+				"hosts":       []string{"localhost"},
+				"method":      "api_key_header",
+				"header_name": "X-Pkg-B-Key",
+				"path_prefix": "/api/",
+			},
+		}},
+		"allowed_hosts": []string{"localhost"},
+		"tools": []map[string]any{{
+			"entry_ts":   "tools/pkg-b.get.ts",
+			"idempotent": true,
+			"effect":     "readOnly",
+		}},
+	})
+	if err := os.WriteFile(filepath.Join(pkgBDir, "tools", "pkg-b.get.ts"), []byte(`export default async function tool(url: string): Promise<string> {
+  const response = await fetch(url);
+  return await response.text();
+}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(pkg-b tool): %v", err)
+	}
+
+	loaded, err := assembler.Load(context.Background(), nil, assembler.Declaration{
+		Packages: []assembler.PackageDeclaration{
+			{
+				Module:     "example.com/acme/pkg-a",
+				Version:    "v1.0.0",
+				ReplaceDir: pkgADir,
+			},
+			{
+				Module:     "example.com/acme/pkg-b",
+				Version:    "v1.0.0",
+				ReplaceDir: pkgBDir,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("assembler.Load: %v", err)
+	}
+
+	repo := testutil.NewTestCredentialRepo()
+	repo.Seed(map[string][]byte{
+		credpath.Shared("example.com/acme/pkg-b", "default", "api_key"): []byte("LEAKED-IF-MERGED"),
+	})
+
+	prepared, err := toolset.PrepareTools(context.Background(), loaded.Tools(), toolset.Config{
+		CredentialPolicySource: repo,
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools(final): %v", err)
+	}
+
+	var requestCount atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("unexpected upstream hit"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	blockedURL := strings.Replace(upstream.URL, "127.0.0.1", "localhost", 1) + "/api/blocked"
+
+	_, err = invoke.Run(prepared, "pkgA.get", map[string]any{
+		"url": blockedURL,
+	})
+	if err == nil {
+		t.Fatal("expected allowlist error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not in allowlist") {
+		t.Fatalf("error = %v, want allowlist failure", err)
+	}
+	if got := requestCount.Load(); got != 0 {
+		t.Fatalf("upstream request count = %d, want 0", got)
+	}
+}
+
 func TestRunResolveRejectsInvalidUpgradeModuleArgument(t *testing.T) {
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
@@ -488,13 +616,13 @@ func TestRunResolveMalformedLocalOverlayKeepsValidationContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("run() error = nil, want malformed local overlay error")
 	}
-	assertErrorContains(t, err, "resolve toolset file")
+	assertErrorContains(t, err, "prepare toolset file")
 	assertErrorContains(t, err, "schema-validate toolset local file")
 	assertErrorContains(t, err, file.LocalFilename())
 }
 
 func TestRunResolveUpgradeRewritesToolsetAndLockfile(t *testing.T) {
-	archiveBytes, manifestBytes := loadDistFixtureBytes(t, "calc-dist")
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -643,6 +771,33 @@ func loadDistFixtureBytes(t *testing.T, fixtureName string) ([]byte, []byte) {
 	return archiveBytes, manifestBytes
 }
 
+func packSourceFixtureBytesWithModule(t *testing.T, fixtureName, module string) ([]byte, []byte) {
+	t.Helper()
+
+	workDir := filepath.Join(t.TempDir(), fixtureName)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", workDir, err)
+	}
+	copyFixtureDir(t, loadSourceFixtureDir(t, fixtureName), workDir)
+	rewriteSourceFixtureModule(t, workDir, module)
+
+	outDir := t.TempDir()
+	result, err := packaging.Pack(workDir, outDir)
+	if err != nil {
+		t.Fatalf("Pack(%q): %v", workDir, err)
+	}
+
+	archiveBytes, err := os.ReadFile(result.ArchivePath)
+	if err != nil {
+		t.Fatalf("read archive %s: %v", result.ArchivePath, err)
+	}
+	manifestBytes, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatalf("read manifest %s: %v", result.ManifestPath, err)
+	}
+	return archiveBytes, manifestBytes
+}
+
 func loadSourceFixtureDir(t *testing.T, fixtureName string) string {
 	t.Helper()
 	for _, dir := range fixtures.SourceDirs() {
@@ -652,6 +807,23 @@ func loadSourceFixtureDir(t *testing.T, fixtureName string) string {
 	}
 	t.Fatalf("source fixture %q not found", fixtureName)
 	return ""
+}
+
+func rewriteSourceFixtureModule(t *testing.T, dir, module string) {
+	t.Helper()
+
+	manifestPath := filepath.Join(dir, packaging.DevManifestFilename)
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", manifestPath, err)
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", manifestPath, err)
+	}
+	manifest["module"] = module
+	writeJSONFile(t, manifestPath, manifest)
 }
 
 func sha256HexForTest(data []byte) string {

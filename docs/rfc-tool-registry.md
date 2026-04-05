@@ -8,7 +8,7 @@
 
 ## Problem
 
-Today, toolsets are assembled manually. `Builder.AddFromDir()` loads a package from a local directory. `Builder.AddFromArchive()` loads from a pre-built `.toolbox.pkg` file. Both require the caller to already have the package on disk and to wire everything together imperatively.
+Today, toolsets are assembled from declarations. Local packages are loaded from source directories, dist packages are loaded from `.toolbox.pkg` archives plus manifests, and registry packages are resolved by module path + version. Callers still need the package-loading and tool-resolution steps wired together explicitly.
 
 This is fine for local development and controlled deployments, but it doesn't work for the world we're building toward:
 
@@ -19,7 +19,7 @@ This is fine for local development and controlled deployments, but it doesn't wo
 We need:
 1. A way to uniquely identify any tool across the ecosystem (FQN)
 2. A way to discover and fetch packages without pre-staging them (registry + auto-download)
-3. A declarative toolset format that lists package refs and bindings, replacing imperative builder calls
+3. A declarative toolset format that lists package refs and bindings, replacing imperative assembly code
 4. A version resolution and integrity model that makes this reproducible and safe
 
 ---
@@ -321,14 +321,20 @@ Auto-download is a layer above `packaging.LoadArchive`, not a replacement. The f
 resolve(module_path, version)
   → locate or download archive + manifest to cache
   → packaging.LoadArchive(cachePath, manifestPath)
-  → returns LoadedPackage (same type the Builder already consumes)
+  → returns LoadedPackage (same type the assembler consumes)
 ```
 
-The `Builder` gains a new method alongside the existing two:
+The package assembly layer gains a registry-backed path alongside the local
+directory and explicit archive paths:
 
 ```go
-// AddFromRegistry resolves and downloads a package by module path and version.
-func (b *Builder) AddFromRegistry(modulePath, version string) error
+decl := assembler.Declaration{
+  Packages: []assembler.PackageDeclaration{{
+    Module:  "github.com/acme-corp/zendesk-tools",
+    Version: "v2.0.1",
+  }},
+}
+loaded, err := assembler.Load(ctx, resolver, decl)
 ```
 
 Internally, this calls the resolver, which calls `LoadArchive` on the cached result.
@@ -337,7 +343,7 @@ Internally, this calls the resolver, which calls `LoadArchive` on the cached res
 
 ### 4. Toolset Composition — Declarative Format
 
-> **Note:** The declarative toolset file format described here is provisional. It covers the file-based model needed for initial implementation. When the toolbox server is complete, toolset composition may move entirely to the server side, and static `.toolset.json` files may no longer be needed. The programmatic Builder API (described below) is the stable interface — the file format is one way to drive it.
+> **Note:** The declarative toolset file format described here is provisional. It covers the file-based model needed for initial implementation. When the toolbox server is complete, toolset composition may move entirely to the server side, and static `.toolset.json` files may no longer be needed. The assembly seam described below is the stable interface — the file format is one way to drive it.
 
 #### Toolset file: `toolbox.toolset.json`
 
@@ -493,7 +499,7 @@ The lockfile is committed to version control. It guarantees:
 
 Running `toolbox resolve` reads the toolset file, resolves all packages, and writes/updates the lockfile. Running `toolbox resolve --upgrade github.com/acme-corp/zendesk-tools` bumps one package to its latest version and updates the lockfile.
 
-#### Two interfaces: declarative file and programmatic Builder
+#### Two interfaces: declarative file and programmatic assembly
 
 Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.json` is not required.
 
@@ -501,21 +507,24 @@ Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.js
 
 ```go
 ts, err := toolsetfile.Load("toolbox.toolset.json")  // reads toolset + lockfile (any filename works)
-resolved, err := ts.Resolve(ctx, resolver)            // auto-downloads, caches, resolves through toolset.Builder
+resolved, err := ts.Resolve(ctx, resolver)            // auto-downloads, caches, assembles packages, resolves tools
 ```
 
-**Programmatic Builder** — for toolsets assembled in code (harnesses, tests, dynamic composition):
+**Programmatic assembly** — for toolsets assembled in code (harnesses, tests, dynamic composition):
 
 ```go
-b := toolset.New()
-b.AddFromRegistry("github.com/acme-corp/zendesk-tools", "v2.0.1")
-b.AddFromRegistry("github.com/solidarity-ai/slack-tools", "v1.2.0")
-b.AddFromDir("../local-tools")  // local dev package
-// bindings, context, credentials configured programmatically
-resolved := b.Resolve()
+decl := assembler.Declaration{
+  Packages: []assembler.PackageDeclaration{
+    {Module: "github.com/acme-corp/zendesk-tools", Version: "v2.0.1"},
+    {Module: "github.com/solidarity-ai/slack-tools", Version: "v1.2.0"},
+    {Module: "local/dev-tools", Version: "v0.0.0", ReplaceDir: "../local-tools"},
+  },
+}
+loaded, err := assembler.Load(ctx, resolver, decl)
+resolved, err := toolset.ResolveTools(loaded.Tools(), toolset.Config{})
 ```
 
-The declarative file is a convenience that calls the same Builder APIs underneath. Harness authors who build toolsets programmatically get the same auto-download, caching, and integrity verification — the file format is just one way to drive it.
+The declarative file is a convenience that drives the same assembly seam underneath. Harness authors who build toolsets programmatically get the same auto-download, caching, and integrity verification — the file format is just one way to drive it.
 
 ---
 
@@ -873,7 +882,7 @@ This RFC covers a large surface area. The recommended build order:
 
 4. **Git-source fallback resolver** — Given a module path + version, clone/fetch the git repo at the tag, run `Pack` to produce an archive, store in the cache. Used when release artifacts aren't available.
 
-5. **`Builder.AddFromRegistry`** — New method that calls the resolver (release then git-source), then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
+5. **Registry-backed assembly** — Add the assembly path that calls the resolver (release then git-source), then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
 
 6. **GitHub Action for packing** — `solidarity-ai/toolbox-pack-action` that runs `toolbox pack` and attaches artifacts to a GitHub Release on tag push.
 

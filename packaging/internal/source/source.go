@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -49,7 +50,9 @@ func LoadDirWithMode(dir string, mode manifest.ValidationMode) (LoadDirResult, e
 	pkg := manifest.Compile(dev)
 
 	files := NewSourceFS(os.DirFS(dir), dir, pkg)
-	EnrichToolMetadata(files, &pkg)
+	if err := EnrichToolMetadata(files, &pkg); err != nil {
+		return LoadDirResult{}, err
+	}
 
 	warnings, err := manifest.ValidateCompiled(pkg, mode)
 	if err != nil {
@@ -66,46 +69,6 @@ func LoadDirWithMode(dir string, mode manifest.ValidationMode) (LoadDirResult, e
 		Loaded:   loaded,
 		Warnings: warnings,
 	}, nil
-}
-
-// ResolvedTools produces resolved tool definitions from the loaded package.
-func (p LoadedPackage) ResolvedTools() []tooldef.ResolvedTool {
-	tools := make([]tooldef.ResolvedTool, 0, len(p.Package.Tools))
-	for _, pkgTool := range p.Package.Tools {
-		description := pkgTool.Description
-		if description == "" {
-			description = manifest.InferToolName(pkgTool.EntryTS)
-		}
-		resolved := tooldef.ResolvedTool{
-			Name:           manifest.InferToolName(pkgTool.EntryTS),
-			Description:    description,
-			Sig:            pkgTool.Sig,
-			Effect:         pkgTool.Effect,
-			Idempotent:     pkgTool.Idempotent,
-			ResourceParams: pkgTool.ResourceParams,
-			Package:        &p.Package,
-		}
-		resolved.SetParamsSchema(pkgTool.ParamsSchema)
-
-		baseDef := tooldef.TSToolDef{
-			Entry:       pkgTool.EntryTS,
-			Files:       p.Files,
-			PackageRoot: p.Dir,
-		}
-
-		if p.Package.Runtime == tooldef.RuntimeTypeScriptWasixSandbox ||
-			p.Package.Runtime == tooldef.RuntimeTypeScriptWasip2Sandbox {
-			resolved.TSWasm = &tooldef.TSWasmToolDef{
-				TSToolDef:   baseDef,
-				Executables: p.Package.Executables,
-			}
-		} else {
-			resolved.TS = &baseDef
-		}
-
-		tools = append(tools, resolved)
-	}
-	return tools
 }
 
 // LoadBuiltDir loads a compiled package from dir by reading toolbox.pkg.json.
@@ -133,7 +96,9 @@ func LoadBuiltDirWithMode(dir string, mode manifest.ValidationMode) (LoadedPacka
 	_ = warnings
 
 	files := NewSourceFS(os.DirFS(dir), dir, pkg)
-	EnrichToolMetadata(files, &pkg)
+	if err := EnrichToolMetadata(files, &pkg); err != nil {
+		return LoadedPackage{}, err
+	}
 
 	return LoadedPackage{
 		Package: pkg,
@@ -156,7 +121,7 @@ func NewSourceFS(base fs.FS, dir string, pkg tooldef.Package) fs.FS {
 
 // EnrichToolMetadata extracts type signatures and JSDoc metadata from the
 // tool source files and populates the package's tool definitions.
-func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
+func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) error {
 	for i := range pkg.Tools {
 		tool := &pkg.Tools[i]
 		meta, err := toolbox.ExtractToolMetadata(context.Background(), toolbox.ExtractInput{
@@ -164,15 +129,15 @@ func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 			Entry: tool.EntryTS,
 		})
 		if err != nil {
-			continue
+			return fmt.Errorf("extract tool metadata for %q: %w", tool.EntryTS, err)
+		}
+		if meta == nil || meta.Sig == nil {
+			return fmt.Errorf("extract tool metadata for %q: missing function signature", tool.EntryTS)
 		}
 		if meta.Description != "" {
 			tool.Description = meta.Description
 		}
 		tool.Sig = meta.Sig
-		if meta.Sig == nil && meta.ParamsSchema != nil {
-			tool.ParamsSchema = meta.ParamsSchema
-		}
 		// Extract tool metadata from JSDoc tags (overrides manifest values).
 		if meta.Sig != nil {
 			for _, tag := range meta.Sig.Tags() {
@@ -188,4 +153,5 @@ func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) {
 			}
 		}
 	}
+	return nil
 }

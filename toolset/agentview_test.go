@@ -1,10 +1,11 @@
 package toolset_test
 
 import (
-	"path/filepath"
-	"runtime"
+	"context"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -12,8 +13,8 @@ import (
 func TestAgentViewNoBindingsShowsAllParams(t *testing.T) {
 	t.Parallel()
 
-	resolved := calcToolset(t, toolset.Config{})
-	view := resolved.AgentView()
+	prepared := calcToolset(t, toolset.Config{})
+	view := prepared.AgentView()
 
 	if len(view.Tools) == 0 {
 		t.Fatal("expected at least one tool in AgentView")
@@ -41,7 +42,7 @@ func TestAgentViewHiddenParamRemovedFromSchema(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"fixed_a": 42,
 		},
 		Tools: []toolset.BoundTool{
@@ -54,8 +55,8 @@ func TestAgentViewHiddenParamRemovedFromSchema(t *testing.T) {
 		},
 	}
 
-	resolved := calcToolset(t, cfg)
-	view := resolved.AgentView()
+	prepared := calcToolset(t, cfg)
+	view := prepared.AgentView()
 
 	addTool := findAgentTool(t, view, "calc.add")
 	props, ok := addTool.ParamsSchema["properties"].(map[string]any)
@@ -84,7 +85,7 @@ func TestAgentViewCheckExpressionStored(t *testing.T) {
 	t.Parallel()
 
 	cfg := toolset.Config{
-		Context: map[string]any{
+		EnvContext: map[string]any{
 			"allowed_max": 100,
 		},
 		Tools: []toolset.BoundTool{
@@ -97,9 +98,9 @@ func TestAgentViewCheckExpressionStored(t *testing.T) {
 		},
 	}
 
-	// Should resolve without error — check expressions compile at resolve time
-	resolved := calcToolset(t, cfg)
-	view := resolved.AgentView()
+	// Should prepare without error — check expressions compile at prepare time
+	prepared := calcToolset(t, cfg)
+	view := prepared.AgentView()
 
 	addTool := findAgentTool(t, view, "calc.add")
 	// Both params should still be visible (check doesn't hide)
@@ -126,8 +127,7 @@ func TestResolveInvalidCELExpressionErrors(t *testing.T) {
 		},
 	}
 
-	builder := calcBuilder(t)
-	_, err := builder.Resolve(cfg)
+	_, err := calcPrepare(t, cfg)
 	if err == nil {
 		t.Fatal("expected error for invalid CEL expression")
 	}
@@ -136,8 +136,8 @@ func TestResolveInvalidCELExpressionErrors(t *testing.T) {
 func TestAgentViewEffectAndIdempotent(t *testing.T) {
 	t.Parallel()
 
-	resolved := calcToolset(t, toolset.Config{})
-	view := resolved.AgentView()
+	prepared := calcToolset(t, toolset.Config{})
+	view := prepared.AgentView()
 
 	addTool := findAgentTool(t, view, "calc.add")
 	if addTool.Effect != tooldef.EffectReadOnly {
@@ -148,25 +148,41 @@ func TestAgentViewEffectAndIdempotent(t *testing.T) {
 	}
 }
 
-// helpers
-
-func calcBuilder(t testing.TB) *toolset.Builder {
+func calcToolset(t testing.TB, cfg toolset.Config) toolset.PreparedToolset {
 	t.Helper()
-	builder := toolset.New()
-	if err := builder.AddFromDir(calcFixtureDir()); err != nil {
-		t.Fatalf("add calc dir: %v", err)
+	prepared, err := calcPrepare(t, cfg)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
-	return builder
+	return prepared
 }
 
-func calcToolset(t testing.TB, cfg toolset.Config) toolset.ResolvedToolset {
+func calcPrepare(t testing.TB, cfg toolset.Config) (toolset.PreparedToolset, error) {
 	t.Helper()
-	builder := calcBuilder(t)
-	resolved, err := builder.Resolve(cfg)
+
+	loaded, err := assembler.Load(context.Background(), nil, tooltest.DistPackageDecl("calc"))
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("load calc fixture: %v", err)
 	}
-	return resolved
+	return toolset.PrepareTools(context.Background(), loaded.Tools(), cfg)
+}
+
+func calcLoadedTool(t testing.TB, name string) assembler.LoadedTool {
+	t.Helper()
+
+	loaded, err := assembler.Load(context.Background(), nil, tooltest.DistPackageDecl("calc"))
+	if err != nil {
+		t.Fatalf("load calc fixture: %v", err)
+	}
+	pkg, ok := loaded.Package("calc")
+	if !ok {
+		t.Fatal("calc package not found")
+	}
+	tool, ok := pkg.Tool(name)
+	if !ok {
+		t.Fatalf("tool %q not found", name)
+	}
+	return tool
 }
 
 func findAgentTool(t testing.TB, view toolset.AgentView, name string) toolset.AgentTool {
@@ -183,154 +199,92 @@ func findAgentTool(t testing.TB, view toolset.AgentView, name string) toolset.Ag
 func TestAgentViewResourceBindingHidesParam(t *testing.T) {
 	t.Parallel()
 
-	// Simulate a package with resource params using NewResolvedToolset
-	// and manual toolset construction — real resource binding goes through
-	// Builder.Resolve which reads PackageTool.ResourceParams
-	pkg := tooldef.Package{
-		Name:    "zendesk",
-		Runtime: tooldef.RuntimeTypeScriptSandbox,
-		Tools: []tooldef.PackageTool{
-			{
-				EntryTS:    "tools/account.tickets.list.ts",
-				Effect: tooldef.EffectReadOnly,
-				Idempotent: boolPtr(true),
-				ParamsSchema: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"account_id": map[string]any{"type": "string"},
-						"status":     map[string]any{"type": "string"},
-					},
-					"required": []any{"account_id"},
-				},
-				ResourceParams: []tooldef.ResourceParam{
-					{Name: "account_id", BindingName: "zendesk_account"},
-				},
-			},
-		},
+	// Use the real calc.add fixture (has params a, b with a Sig).
+	// Add a ResourceParam so we can verify that without bindings all params
+	// remain visible.
+	rt := calcLoadedTool(t, "calc.add")
+	rt.ResourceParams = []tooldef.ResourceParam{
+		{Name: "a", BindingName: "shared_a"},
 	}
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{rt})
 
-	builder := toolset.New()
-	// We need to use the packaging layer to load, but for a unit test
-	// we'll test the binding propagation by verifying the Resolve flow
-	// with a manually constructed resolved toolset.
-	rt := tooldef.ResolvedTool{
-		Name:        "account.tickets.list",
-		Description: "List tickets",
-		Package:     &pkg,
-		TS: &tooldef.TSToolDef{
-			Entry: "tools/account.tickets.list.ts",
-		},
-	}
-	rt.SetParamsSchema(pkg.Tools[0].ParamsSchema)
-	resolved := toolset.NewResolvedToolset([]tooldef.ResolvedTool{rt})
-	_ = builder // not used in this test path
-
-	view := resolved.AgentView()
-	tool := findAgentTool(t, view, "account.tickets.list")
+	view := prepared.AgentView()
+	tool := findAgentTool(t, view, "calc.add")
 
 	// Without bindings, both params should be visible
 	props := tool.ParamsSchema["properties"].(map[string]any)
-	if _, ok := props["account_id"]; !ok {
-		t.Fatal("expected account_id in unbound view")
+	if _, ok := props["a"]; !ok {
+		t.Fatal("expected param 'a' in unbound view")
 	}
-	if _, ok := props["status"]; !ok {
-		t.Fatal("expected status in unbound view")
+	if _, ok := props["b"]; !ok {
+		t.Fatal("expected param 'b' in unbound view")
 	}
 }
 
 // TestResourceBindingTwoTierFlow tests the full two-tier binding model:
 // 1. Package declares resource params with canonical binding names
 // 2. Toolset-level Config.ResourceBindings maps canonical names to CEL bindings
-// 3. Resolve propagates resource bindings to matching tools
+// 3. Prepare propagates resource bindings to matching tools
 // 4. AgentView hides resource params, ValidateCall injects them
 func TestResourceBindingTwoTierFlow(t *testing.T) {
 	t.Parallel()
 
-	listTool := tooldef.ResolvedTool{
-		Name:        "account.tickets.list",
-		Description: "List tickets",
-		ResourceParams: []tooldef.ResourceParam{
-			{Name: "account_id", BindingName: "zendesk_account"},
-		},
+	// Use real calc fixtures (calc.add and calc.sub both have params a, b).
+	// Treat param "a" as a shared resource param on both tools.
+	addTool := calcLoadedTool(t, "calc.add")
+	addTool.ResourceParams = []tooldef.ResourceParam{
+		{Name: "a", BindingName: "shared_a"},
 	}
-	listTool.SetParamsSchema(map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"account_id": map[string]any{"type": "string"},
-			"status":     map[string]any{"type": "string"},
-		},
-		"required": []any{"account_id"},
-	})
 
-	getToolDef := tooldef.ResolvedTool{
-		Name:        "account.tickets.get",
-		Description: "Get a ticket",
-		ResourceParams: []tooldef.ResourceParam{
-			{Name: "account_id", BindingName: "zendesk_account"},
-			{Name: "ticket_id", BindingName: "ticket_id"},
-		},
+	subTool := calcLoadedTool(t, "calc.sub")
+	subTool.ResourceParams = []tooldef.ResourceParam{
+		{Name: "a", BindingName: "shared_a"},
+		{Name: "b", BindingName: "shared_b"},
 	}
-	getToolDef.SetParamsSchema(map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"account_id": map[string]any{"type": "string"},
-			"ticket_id":  map[string]any{"type": "string"},
-		},
-		"required": []any{"account_id", "ticket_id"},
-	})
 
-	tools := []tooldef.ResolvedTool{listTool, getToolDef}
+	tools := []assembler.LoadedTool{addTool, subTool}
 
-	resolved, err := toolset.ResolveTools(tools, toolset.Config{
+	prepared, err := toolset.PrepareTools(context.Background(), tools, toolset.Config{
 		ResourceBindings: map[string]toolset.Binding{
-			"zendesk_account": {Value: "context.customer_id", Hidden: true},
+			"shared_a": {Value: "context.fixed_a", Hidden: true},
 		},
-		Context: map[string]any{"customer_id": "cust_123"},
+		EnvContext: map[string]any{"fixed_a": 42},
 	})
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("prepare: %v", err)
 	}
 
-	// AgentView should hide account_id on both tools.
-	view := resolved.AgentView()
+	// AgentView should hide param "a" on both tools (bound via shared_a).
+	view := prepared.AgentView()
 
-	listAgent := findAgentTool(t, view, "account.tickets.list")
-	listProps := listAgent.ParamsSchema["properties"].(map[string]any)
-	if _, ok := listProps["account_id"]; ok {
-		t.Error("account_id should be hidden from list tool AgentView")
+	addAgent := findAgentTool(t, view, "calc.add")
+	addProps := addAgent.ParamsSchema["properties"].(map[string]any)
+	if _, ok := addProps["a"]; ok {
+		t.Error("param 'a' should be hidden from calc.add AgentView")
 	}
-	if _, ok := listProps["status"]; !ok {
-		t.Error("status should be visible in list tool AgentView")
-	}
-
-	getAgent := findAgentTool(t, view, "account.tickets.get")
-	getProps := getAgent.ParamsSchema["properties"].(map[string]any)
-	if _, ok := getProps["account_id"]; ok {
-		t.Error("account_id should be hidden from get tool AgentView")
-	}
-	if _, ok := getProps["ticket_id"]; !ok {
-		t.Error("ticket_id should be visible (no resource binding for ticket_id)")
+	if _, ok := addProps["b"]; !ok {
+		t.Error("param 'b' should be visible in calc.add AgentView")
 	}
 
-	// ValidateCall should inject account_id from context.
-	params, err := resolved.ValidateCall("account.tickets.list", map[string]any{"status": "open"})
+	subAgent := findAgentTool(t, view, "calc.sub")
+	subProps := subAgent.ParamsSchema["properties"].(map[string]any)
+	if _, ok := subProps["a"]; ok {
+		t.Error("param 'a' should be hidden from calc.sub AgentView")
+	}
+	if _, ok := subProps["b"]; !ok {
+		t.Error("param 'b' should be visible (no resource binding for shared_b)")
+	}
+
+	// ValidateCall should inject param "a" from context.
+	params, err := prepared.ValidateCall("calc.add", map[string]any{"b": 10})
 	if err != nil {
 		t.Fatalf("ValidateCall: %v", err)
 	}
-	if params["account_id"] != "cust_123" {
-		t.Errorf("expected account_id=cust_123, got %v", params["account_id"])
+	// CEL evaluates integer context values as int64.
+	if params["a"] != int64(42) {
+		t.Errorf("expected a=42, got %v (type %T)", params["a"], params["a"])
 	}
-	if params["status"] != "open" {
-		t.Errorf("expected status=open, got %v", params["status"])
+	if params["b"] != 10 {
+		t.Errorf("expected b=10, got %v", params["b"])
 	}
-}
-
-func boolPtr(v bool) *bool { return &v }
-
-func calcFixtureDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		panic("runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "calc")
 }

@@ -14,10 +14,10 @@ import (
 
 // DeclarationSource generates a .d.ts file with JSDoc comments for the
 // agent-visible tools. This is the type declaration the agent imports.
-func DeclarationSource(resolved toolset.ResolvedToolset) string {
+func DeclarationSource(prepared toolset.PreparedToolset) string {
 	var b strings.Builder
 
-	view := resolved.AgentView()
+	view := prepared.AgentView()
 	tools := sortedTools(view)
 
 	// Collect $ref type declarations (used for both params and returns).

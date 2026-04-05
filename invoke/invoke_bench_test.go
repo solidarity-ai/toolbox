@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/tswasmcli"
@@ -253,7 +254,7 @@ func benchFullRoundTrip(b *testing.B, fixtureDir string) {
 	if err != nil {
 		b.Fatalf("load vfs-test package: %v", err)
 	}
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
 	b.ResetTimer()
 	for range b.N {
@@ -262,7 +263,7 @@ func benchFullRoundTrip(b *testing.B, fixtureDir string) {
 			b.Fatalf("pre-populate: %v", err)
 		}
 
-		result, err := invoke.RunWithVFS(resolved, "vfsTest.run", map[string]any{}, memFS)
+		result, err := invoke.RunWithVFS(prepared, "vfsTest.run", map[string]any{}, memFS)
 		if err != nil {
 			b.Fatalf("RunWithVFS: %v", err)
 		}
@@ -282,7 +283,7 @@ func BenchmarkWasip2CLIVFSRoundTrip(b *testing.B) {
 	if err != nil {
 		b.Fatalf("load vfs-wasip2 package: %v", err)
 	}
-	resolved := toolset.NewResolvedToolset(loaded.ResolvedTools())
+	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
 	b.ResetTimer()
 	for range b.N {
@@ -290,7 +291,7 @@ func BenchmarkWasip2CLIVFSRoundTrip(b *testing.B) {
 		if err := memFS.WriteFile("/input.txt", []byte("hello from bench")); err != nil {
 			b.Fatalf("pre-populate: %v", err)
 		}
-		result, err := invoke.RunWithVFS(resolved, "vfsWasip2.run", map[string]any{}, memFS)
+		result, err := invoke.RunWithVFS(prepared, "vfsWasip2.run", map[string]any{}, memFS)
 		if err != nil {
 			b.Fatalf("invoke.RunWithVFS: %v", err)
 		}

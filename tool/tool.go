@@ -8,12 +8,41 @@ import (
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
-	Name                      string            `json:"name"`
-	Runtime                   ToolRuntime       `json:"runtime"`
-	SHA256                    string            `json:"sha256,omitempty"`
-	AdditionalTypeScriptGlobs []string          `json:"additionalTypeScriptGlobs,omitempty"`
-	Executables               map[string]string `json:"executables,omitempty"`
-	Tools                     []PackageTool     `json:"tools"`
+	Module                    ModulePath          `json:"module"`
+	Name                      string              `json:"name"`
+	Runtime                   ToolRuntime         `json:"runtime"`
+	SHA256                    string              `json:"sha256,omitempty"`
+	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs,omitempty"`
+	Executables               map[string]string   `json:"executables,omitempty"`
+	Tools                     []PackageTool       `json:"tools"`
+	Credentials               []PackageCredential `json:"credentials,omitempty"`
+	AllowedHosts              []string            `json:"allowed_hosts,omitempty"`
+}
+
+// PackageCredential declares a credential a package needs and how to inject it.
+type PackageCredential struct {
+	Name     string                `json:"name"`
+	Type     string                `json:"type"`
+	Provider *OAuth2ProviderConfig `json:"provider,omitempty"`
+	Scopes   []string              `json:"scopes,omitempty"`
+	Inject   PackageInject         `json:"inject"`
+}
+
+// OAuth2ProviderConfig holds OAuth2 provider endpoint configuration.
+type OAuth2ProviderConfig struct {
+	Name       string            `json:"name,omitempty"`
+	AuthURL    string            `json:"auth_url,omitempty"`
+	TokenURL   string            `json:"token_url,omitempty"`
+	AuthParams map[string]string `json:"auth_params,omitempty"`
+}
+
+// PackageInject describes how and where to inject a credential.
+type PackageInject struct {
+	Hosts                    []string `json:"hosts"`
+	Method                   string   `json:"method"`
+	HeaderName               string   `json:"header_name,omitempty"`
+	PathPrefix               string   `json:"path_prefix,omitempty"`
+	AllowUnsafeHTTPInjection bool     `json:"allow_unsafe_http_injection,omitempty"`
 }
 
 type ToolRuntime string
@@ -46,44 +75,6 @@ type PackageTool struct {
 	ParamsSchema   map[string]any         `json:"paramsSchema,omitempty"`
 	Sig            *toolbox.FuncSignature `json:"-"`
 	ResourceParams []ResourceParam        `json:"resourceParams,omitempty"`
-}
-
-// ResolvedTool is the smallest useful selected tool shape for the current
-// outside-in seams. It combines static package identity with the concrete
-// executable artifact for one visible tool.
-type ResolvedTool struct {
-	Name           string
-	Description    string
-	Sig            *toolbox.FuncSignature
-	Effect         Effect
-	Idempotent     *bool
-	ResourceParams []ResourceParam
-	Package        *Package
-	TS             *TSToolDef
-	TSWasm         *TSWasmToolDef
-
-	// paramsSchema is the fallback JSON Schema for when Sig is nil (e.g. dist packages).
-	// Use ParamsSchema() to access — it derives from Sig when available.
-	paramsSchema map[string]any
-}
-
-// SetParamsSchema sets the fallback JSON Schema (used when Sig is nil).
-func (rt *ResolvedTool) SetParamsSchema(schema map[string]any) {
-	rt.paramsSchema = schema
-}
-
-// ParamsSchema returns the JSON Schema for this tool's parameters.
-// When Sig is available, it derives the schema from the type signature
-// using ParamsAsObject (which handles both single-param-object and
-// multi-param functions); otherwise it falls back to the stored schema
-// (e.g. from dist manifests).
-func (rt ResolvedTool) ParamsSchema() map[string]any {
-	if rt.Sig != nil {
-		if pt := rt.Sig.ParamsAsObject(); pt != nil {
-			return pt.ToJSONSchema()
-		}
-	}
-	return rt.paramsSchema
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

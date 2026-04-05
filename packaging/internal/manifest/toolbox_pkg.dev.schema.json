@@ -2,8 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "runtime", "tools"],
+  "required": ["module", "name", "runtime", "tools"],
   "properties": {
+    "module": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical module path for this package."
+    },
     "name": {
       "type": "string",
       "minLength": 1,
@@ -32,6 +37,44 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "credentials": {
+      "type": "array",
+      "description": "Credential declarations for OAuth2, API key, or bearer token injection.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "inject"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "type": { "type": "string", "enum": ["oauth2", "api_key", "bearer"] },
+          "provider": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object", "properties": { "name": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}} }, "required": ["name"] },
+              { "type": "object", "properties": { "auth_url": {"type": "string"}, "token_url": {"type": "string"}, "auth_params": {"type": "object", "additionalProperties": {"type": "string"}} }, "required": ["auth_url", "token_url"] }
+            ]
+          },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "inject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["hosts", "method"],
+            "properties": {
+              "hosts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "method": { "type": "string", "enum": ["bearer_header", "basic_auth", "api_key_header", "api_key_query"] },
+              "header_name": { "type": "string", "minLength": 1, "description": "Custom header name for api_key_header method. Defaults to X-API-Key." },
+              "path_prefix": { "type": "string" },
+              "allow_unsafe_http_injection": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "allowed_hosts": {
+      "type": "array",
+      "description": "Hosts that tools in this package are allowed to contact.",
+      "items": { "type": "string", "minLength": 1 }
     },
     "tools": {
       "type": "array",

@@ -41,10 +41,23 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 		httpReq.Header.Set("Accept-Language", "*")
 	}
 
+	// Capture the optional caller-supplied redirect check (e.g. allowlist enforcement).
+	var extraRedirectCheck func(*http.Request, []*http.Request) error
+	if init != nil && init.CheckRedirect != nil {
+		extraRedirectCheck = init.CheckRedirect
+	}
+
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 20 {
 				return fmt.Errorf("fetch: too many redirects")
+			}
+			if shouldStripSensitiveHeadersOnRedirect(req, via) {
+				req.Header.Del("Authorization")
+				req.Header.Del("X-API-Key")
+			}
+			if extraRedirectCheck != nil {
+				return extraRedirectCheck(req, via)
 			}
 			return nil
 		},
@@ -68,4 +81,15 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 	}
 
 	return resp, nil
+}
+
+func shouldStripSensitiveHeadersOnRedirect(req *http.Request, via []*http.Request) bool {
+	if len(via) == 0 {
+		return false
+	}
+	if req.URL.Host != via[0].URL.Host {
+		return true
+	}
+	prev := via[len(via)-1]
+	return strings.EqualFold(prev.URL.Scheme, "https") && strings.EqualFold(req.URL.Scheme, "http")
 }

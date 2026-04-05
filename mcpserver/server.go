@@ -7,48 +7,50 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/invoke"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 // New creates an MCP server that exposes one MCP tool per visible invoke tool.
-func New(resolved toolset.ResolvedToolset) *server.MCPServer {
+func New(prepared toolset.PreparedToolset) *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		"toolbox-mcp-server",
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
 
-	for _, tool := range resolved.Tools() {
-		mcpTool := newMCPTool(tool)
-		mcpServer.AddTool(mcpTool, handleToolCall(resolved, tool.Name))
+	view := prepared.AgentView()
+	for _, at := range view.Tools {
+		mcpTool := newMCPTool(at)
+		mcpServer.AddTool(mcpTool, handleToolCall(prepared, at.Name))
 	}
 
 	return mcpServer
 }
 
-func newMCPTool(tool tooldef.ResolvedTool) mcp.Tool {
-	if len(tool.ParamsSchema()) == 0 {
+func newMCPTool(at toolset.AgentTool) mcp.Tool {
+	schema := at.ParamsSchema
+
+	if len(schema) == 0 {
 		return mcp.NewTool(
-			tool.Name,
-			mcp.WithDescription(tool.Description),
+			at.Name,
+			mcp.WithDescription(at.Description),
 		)
 	}
 
-	rawSchema, err := json.Marshal(tool.ParamsSchema())
+	rawSchema, err := json.Marshal(schema)
 	if err != nil {
 		return mcp.NewTool(
-			tool.Name,
-			mcp.WithDescription(tool.Description),
+			at.Name,
+			mcp.WithDescription(at.Description),
 		)
 	}
 
-	return mcp.NewToolWithRawSchema(tool.Name, tool.Description, rawSchema)
+	return mcp.NewToolWithRawSchema(at.Name, at.Description, rawSchema)
 }
 
-func handleToolCall(resolved toolset.ResolvedToolset, toolName string) server.ToolHandlerFunc {
+func handleToolCall(prepared toolset.PreparedToolset, toolName string) server.ToolHandlerFunc {
 	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ran, err := invoke.Run(resolved, toolName, argumentMap(request.Params.Arguments))
+		ran, err := invoke.Run(prepared, toolName, argumentMap(request.Params.Arguments))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
   "executables": {

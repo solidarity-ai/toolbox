@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"io"
+	"net/http"
 	"strings"
 )
 
@@ -19,6 +20,12 @@ type RequestInit struct {
 	Method  string
 	Headers *Headers
 	Body    io.Reader
+
+	// CheckRedirect is an optional redirect policy applied in addition to the
+	// default 20-redirect limit and cross-origin credential stripping. If set,
+	// it is called before following each redirect. A non-nil error aborts the
+	// redirect chain.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 // NewRequest creates a new Request for the given URL with optional init.

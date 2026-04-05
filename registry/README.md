@@ -2,34 +2,44 @@
 
 ## Purpose
 
-`registry` acquires, caches, and materializes packages.
+`registry` resolves module-path package references into cached, verified package
+artifacts plus provenance metadata.
 
 It owns:
 - package reference parsing/resolution
 - git/tag fetch logic
 - local cache layout
-- manifest loading
-- producing loaded package artifacts for the rest of the system
+- provenance/integrity verification for cached or fetched registry packages
+- version listing
 
-`registry` should return inert loaded artifacts, not executable behavior.
+`registry` should return resolved package artifacts and metadata, not
+request-scoped behavior.
 
 ## Who depends on this package
 
-### `api`
-Uses `registry` to resolve package refs or tool refs into loaded package artifacts before request-scoped assembly.
+### `assembler`
+Uses `registry.Resolver` to resolve registry-backed package declarations into
+loaded packages and provenance metadata.
 
-### `assets`
-Uses package material loaded by `registry` to resolve actual asset blobs/paths.
+### `toolsetfile`
+Passes a `registry.Resolver` into `assembler.Load` through the declarative
+toolset resolution flow.
+
+### `cmd/toolbox`
+Constructs the concrete resolver used by CLI commands.
 
 ## What they use it for
 
-- fetching package source at a pinned version
-- reading and validating manifests
-- obtaining tool definitions and assets from a package ref
-- cache-backed loading for repeated use
+- fetching a package at a pinned module path + version
+- verifying cached or fetched registry metadata
+- listing available versions
+- reusing cached results across repeated resolutions
 
 ## What this package does not own
 
+- local replacement directories
+- explicit archive-path declarations
+- multi-package assembly/order
 - request-scoped bindings
 - execution semantics
 - HTTP transport

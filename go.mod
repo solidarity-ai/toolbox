@@ -15,6 +15,7 @@ require (
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	golang.org/x/sync v0.20.0
 )
 
 require (
@@ -37,7 +38,7 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260316172706-e463d84ca32d // indirect
@@ -45,3 +46,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260402134142-59e419fd85c3

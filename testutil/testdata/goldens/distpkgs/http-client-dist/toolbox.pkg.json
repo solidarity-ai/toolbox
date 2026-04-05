@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "94d38e5d76460c8e433335e2a0fc31dc4a8420303b425cd9803a81fdb3ff4e8d",
+  "sha256": "35475e8d669e6c079277c98df668135fa44983a12841f30b523326dc846c6d0c",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },

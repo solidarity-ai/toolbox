@@ -6,10 +6,11 @@ import (
 
 	"github.com/solidarity-ai/toolbox/codemode"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestRunChainsToolCalls(t *testing.T) {
-	result, err := codemode.Run(tooltest.CalcToolset(t), `
+	result, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 const x: number = Number(tools.calc.add({ a: 5, b: 5 }));
 export default tools.calc.sub({ a: x, b: 1 });
 `)
@@ -23,7 +24,7 @@ export default tools.calc.sub({ a: x, b: 1 });
 }
 
 func TestRunAsyncToolCall(t *testing.T) {
-	result, err := codemode.Run(tooltest.CalcToolset(t), `
+	result, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 export default tools.calc.asyncAdd({ a: 7, b: 4 });
 `)
 	if err != nil {
@@ -36,7 +37,7 @@ export default tools.calc.asyncAdd({ a: 7, b: 4 });
 }
 
 func TestRunTypeMismatchBetweenToolsFails(t *testing.T) {
-	_, err := codemode.Run(tooltest.CalcToolset(t), `
+	_, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 const x = tools.calc.add({ a: 5, b: 5 });
 export default tools.calc.sub({ a: x, b: 1 });
 `)
@@ -52,7 +53,7 @@ export default tools.calc.sub({ a: x, b: 1 });
 }
 
 func TestRunRejectsDirectToolModuleImport(t *testing.T) {
-	_, err := codemode.Run(tooltest.CalcToolset(t), `
+	_, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 import tool from "./tools/calc.add.ts";
 export default tool({ a: 5, b: 5 }, {});
 `)
@@ -62,7 +63,7 @@ export default tool({ a: 5, b: 5 }, {});
 }
 
 func TestRunRejectsDirectSharedPackageImport(t *testing.T) {
-	_, err := codemode.Run(tooltest.CalcToolset(t), `
+	_, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 import { internalValue } from "./lib/internal.ts";
 export default internalValue();
 `)
@@ -72,7 +73,7 @@ export default internalValue();
 }
 
 func TestRunRejectsDirectInvokeHookAccess(t *testing.T) {
-	_, err := codemode.Run(tooltest.CalcToolset(t), `
+	_, err := codemode.Run(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}), `
 const invokeTool = (globalThis as any).__invokeTool;
 const x = Number(tools.calc.add({ a: 5, b: 5 }));
 export default invokeTool("calc.sub", { a: x, b: 1 });

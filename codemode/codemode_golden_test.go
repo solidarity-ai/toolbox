@@ -13,8 +13,6 @@ import (
 )
 
 func TestSDKAndSchemaGoldens(t *testing.T) {
-	builder := tooltest.CalcBuilder(t)
-
 	variants := []struct {
 		name string
 		cfg  toolset.Config
@@ -26,7 +24,7 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 		{
 			name: "bound",
 			cfg: toolset.Config{
-				Context: map[string]any{"fixed_a": 42},
+				EnvContext: map[string]any{"fixed_a": 42},
 				Tools: []toolset.BoundTool{
 					{ToolRef: "calc.add", Bindings: map[string]toolset.Binding{
 						"a": {Value: "context.fixed_a"},
@@ -37,7 +35,7 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 		{
 			name: "hidden",
 			cfg: toolset.Config{
-				Context: map[string]any{"fixed_a": 42},
+				EnvContext: map[string]any{"fixed_a": 42},
 				Tools: []toolset.BoundTool{
 					{ToolRef: "calc.add", Bindings: map[string]toolset.Binding{
 						"a": {Value: "context.fixed_a", Hidden: true},
@@ -49,62 +47,44 @@ func TestSDKAndSchemaGoldens(t *testing.T) {
 
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
-			resolved, err := builder.Resolve(v.cfg)
-			if err != nil {
-				t.Fatalf("resolve toolset: %v", err)
-			}
+			prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), v.cfg)
 
 			prefix := "calc-" + v.name
-			checkGolden(t, goldenPath(prefix+".sdk.ts"), typecheckSDKSource(resolved))
-			checkGolden(t, goldenPath(prefix+".d.ts"), DeclarationSource(resolved))
-			checkGolden(t, goldenPath(prefix+".schema.json"), schemaGoldenSource(t, resolved))
+			checkGolden(t, goldenPath(prefix+".sdk.ts"), typecheckSDKSource(prepared))
+			checkGolden(t, goldenPath(prefix+".d.ts"), DeclarationSource(prepared))
+			checkGolden(t, goldenPath(prefix+".schema.json"), schemaGoldenSource(t, prepared))
 		})
 	}
 }
 
 func TestEdgeCaseGoldens(t *testing.T) {
-	builder := tooltest.EdgeCasesBuilder(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("edge-cases"), toolset.Config{})
 
-	resolved, err := builder.Resolve(toolset.Config{})
-	if err != nil {
-		t.Fatalf("resolve toolset: %v", err)
-	}
-
-	checkGolden(t, goldenPath("edge-cases-passthrough.d.ts"), DeclarationSource(resolved))
-	checkGolden(t, goldenPath("edge-cases-passthrough.schema.json"), schemaGoldenSource(t, resolved))
+	checkGolden(t, goldenPath("edge-cases-passthrough.d.ts"), DeclarationSource(prepared))
+	checkGolden(t, goldenPath("edge-cases-passthrough.schema.json"), schemaGoldenSource(t, prepared))
 }
 
 func TestSharedTypesGoldens(t *testing.T) {
-	builder := tooltest.SharedTypesBuilder(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("shared-types"), toolset.Config{})
 
-	resolved, err := builder.Resolve(toolset.Config{})
-	if err != nil {
-		t.Fatalf("resolve toolset: %v", err)
-	}
-
-	checkGolden(t, goldenPath("shared-types-passthrough.d.ts"), DeclarationSource(resolved))
-	checkGolden(t, goldenPath("shared-types-passthrough.schema.json"), schemaGoldenSource(t, resolved))
+	checkGolden(t, goldenPath("shared-types-passthrough.d.ts"), DeclarationSource(prepared))
+	checkGolden(t, goldenPath("shared-types-passthrough.schema.json"), schemaGoldenSource(t, prepared))
 }
 
 func TestGithubIssuesGoldens(t *testing.T) {
-	builder := tooltest.GithubIssuesBuilder(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("github-issues"), toolset.Config{})
 
-	resolved, err := builder.Resolve(toolset.Config{})
-	if err != nil {
-		t.Fatalf("resolve toolset: %v", err)
-	}
-
-	checkGolden(t, goldenPath("github-issues-passthrough.d.ts"), DeclarationSource(resolved))
-	checkGolden(t, goldenPath("github-issues-passthrough.schema.json"), schemaGoldenSource(t, resolved))
+	checkGolden(t, goldenPath("github-issues-passthrough.d.ts"), DeclarationSource(prepared))
+	checkGolden(t, goldenPath("github-issues-passthrough.schema.json"), schemaGoldenSource(t, prepared))
 }
 
 func goldenPath(name string) string {
 	return filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode", name)
 }
 
-func schemaGoldenSource(t *testing.T, resolved toolset.ResolvedToolset) string {
+func schemaGoldenSource(t *testing.T, prepared toolset.PreparedToolset) string {
 	t.Helper()
-	view := resolved.AgentView()
+	view := prepared.AgentView()
 	schemaMap := buildSchemaMap(view)
 	schemaJSON, err := json.MarshalIndent(schemaMap, "", "  ")
 	if err != nil {

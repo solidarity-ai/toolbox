@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "be4213ddcc979b448b09669c19ccd8c0b11e8930307e9c37bee3a9d56e8f56e1",
+  "sha256": "9fd3521611ebc61941fc7b1cb4542ee8d15307eb42d03e148c5c5339aa180df3",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",

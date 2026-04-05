@@ -281,6 +281,7 @@ func TestPackBundlesExecutables(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/wasm-pkg",
   "name": "wasm-pkg",
   "runtime": "typescript+wasix-sandbox",
   "executables": { "guest": "dist/guest.wasm" },
@@ -377,6 +378,7 @@ func setupTestPackage(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -391,6 +393,7 @@ func setupTestPackageWithoutIdempotent(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [

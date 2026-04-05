@@ -13,8 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -300,7 +303,7 @@ func TestToolsetFileLoad(t *testing.T) {
 	})
 }
 
-func TestToolsetFileResolve(t *testing.T) {
+func TestToolsetFilePrepare(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -308,12 +311,12 @@ func TestToolsetFileResolve(t *testing.T) {
 	t.Run("NilToolsetRejected", func(t *testing.T) {
 		var file *ToolsetFile
 
-		got, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t)))
+		got, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t)))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-nil")
+			t.Fatal("Prepare() error = nil, want non-nil")
 		}
 		if len(got.Tools()) != 0 {
-			t.Fatalf("Resolve() tools = %#v, want empty", got.Tools())
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
 		}
 		assertErrorContains(t, err, "nil toolset file")
 	})
@@ -321,14 +324,14 @@ func TestToolsetFileResolve(t *testing.T) {
 	t.Run("UnvalidatedToolsetRejected", func(t *testing.T) {
 		file := &ToolsetFile{Packages: map[string]string{}, Tools: []ToolEntry{}}
 
-		got, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t)))
+		got, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t)))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-nil")
+			t.Fatal("Prepare() error = nil, want non-nil")
 		}
 		if len(got.Tools()) != 0 {
-			t.Fatalf("Resolve() tools = %#v, want empty", got.Tools())
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
 		}
-		assertErrorContains(t, err, "must be loaded and validated before resolve")
+		assertErrorContains(t, err, "must be loaded and validated before prepare")
 	})
 
 	t.Run("NilResolverReturnsErrNoResolver", func(t *testing.T) {
@@ -342,18 +345,18 @@ func TestToolsetFileResolve(t *testing.T) {
 		})
 		beforeTools := toolEntryStrings(file.Tools)
 
-		got, err := file.Resolve(ctx, nil)
+		got, err := file.Prepare(ctx, nil)
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want ErrNoResolver")
+			t.Fatal("Prepare() error = nil, want ErrNoResolver")
 		}
-		if !errors.Is(err, toolset.ErrNoResolver) {
+		if !errors.Is(err, assembler.ErrNoResolver) {
 			t.Fatalf("error = %v, want ErrNoResolver", err)
 		}
 		if len(got.Tools()) != 0 {
-			t.Fatalf("Resolve() tools = %#v, want empty", got.Tools())
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
 		}
 		if !reflect.DeepEqual(toolEntryStrings(file.Tools), beforeTools) {
-			t.Fatalf("declared tools changed after Resolve error: got %#v, want %#v", toolEntryStrings(file.Tools), beforeTools)
+			t.Fatalf("declared tools changed after Prepare error: got %#v, want %#v", toolEntryStrings(file.Tools), beforeTools)
 		}
 	})
 
@@ -364,35 +367,35 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
 			"packages": map[string]string{
-				"example.com/zeta/github-issues": "v2.0.0",
-				"example.com/acme/calc":          "v1.2.3",
+				"fixtures.local/github-issues": "v2.0.0",
+				"fixtures.local/calc":          "v1.2.3",
 			},
 			"tools": []map[string]string{
-				{"tool": "example.com/zeta/github-issues@v2.0.0/github-issues.get"},
-				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+				{"tool": "fixtures.local/github-issues@v2.0.0/github-issues.get"},
+				{"tool": "fixtures.local/calc@v1.2.3/calc.add"},
 			},
 		})
 		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
 			"replace": map[string]string{
-				"example.com/zeta/github-issues": githubIssuesDir,
+				"fixtures.local/github-issues": githubIssuesDir,
 			},
 		})
 
 		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
 		cache := newTempCache(t)
-		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
+		if err := cache.Put(registry.ModulePath("fixtures.local/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 		resolver := registry.NewResolver(cache, &recordingSource{err: fmt.Errorf("unexpected fetch for local replacement test")})
 
 		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
-			"example.com/zeta/github-issues@v2.0.0": {
+			"fixtures.local/github-issues@v2.0.0": {
 				ArchiveSHA256: strings.Repeat("a", 64),
 				GitSHA:        strings.Repeat("b", 40),
 				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
 				ResolvedAt:    "2026-03-28T12:05:00Z",
 			},
-			"example.com/acme/calc@v1.2.3": {
+			"fixtures.local/calc@v1.2.3": {
 				ArchiveSHA256: sha256HexForTest(archiveBytes),
 				GitSHA:        strings.Repeat("c", 40),
 				ResolvedFrom:  ToolsetLockResolvedFromGitSource,
@@ -407,18 +410,18 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
 		}
 
-		got, err := file.Resolve(ctx, resolver)
+		got, err := file.Prepare(ctx, resolver)
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 
-		gotIDs := resolvedToolIDs(got)
+		gotIDs := preparedToolIDs(got)
 		wantIDs := []string{"calc/calc.add", "calc/calc.sub", "calc/calc.asyncAdd", "github-issues/githubIssues.get"}
 		if !reflect.DeepEqual(gotIDs, wantIDs) {
-			t.Fatalf("resolved tools = %#v, want %#v", gotIDs, wantIDs)
+			t.Fatalf("prepared tools = %#v, want %#v", gotIDs, wantIDs)
 		}
-		if orderedPackages := resolvedPackageNames(got); !reflect.DeepEqual(orderedPackages, []string{"calc", "calc", "calc", "github-issues"}) {
-			t.Fatalf("resolved package order = %#v, want %#v", orderedPackages, []string{"calc", "calc", "calc", "github-issues"})
+		if orderedPackages := preparedPackageNames(got); !reflect.DeepEqual(orderedPackages, []string{"calc", "calc", "calc", "github-issues"}) {
+			t.Fatalf("prepared package order = %#v, want %#v", orderedPackages, []string{"calc", "calc", "calc", "github-issues"})
 		}
 
 		after, err := os.ReadFile(file.LockFilename())
@@ -426,7 +429,7 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
 		}
 		if string(after) != string(before) {
-			t.Fatalf("lockfile changed during mixed local+registry resolve:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+			t.Fatalf("lockfile changed during mixed local+registry prepare:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
 		}
 	})
 
@@ -437,24 +440,24 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
 			"packages": map[string]string{
-				"example.com/zeta/github-issues": "v2.0.0",
+				"fixtures.local/github-issues": "v2.0.0",
 			},
 			"tools": []map[string]string{{
-				"tool": "example.com/zeta/github-issues@v2.0.0/github-issues.get",
+				"tool": "fixtures.local/github-issues@v2.0.0/github-issues.get",
 			}},
 		})
 		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
 			"replace": map[string]string{
-				"example.com/zeta/github-issues": githubIssuesDir,
+				"fixtures.local/github-issues": githubIssuesDir,
 			},
 		})
 
-		got, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), &recordingSource{err: fmt.Errorf("unexpected fetch for replaced-only package")}))
+		got, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t), &recordingSource{err: fmt.Errorf("unexpected fetch for replaced-only package")}))
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 		if len(got.Tools()) == 0 {
-			t.Fatal("Resolve() returned no tools")
+			t.Fatal("Prepare() returned no tools")
 		}
 
 		lock, err := LoadLock(file.LockFilename())
@@ -491,11 +494,11 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{err: fmt.Errorf("should not fetch when local overlay is malformed")}
 
-		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		_, err = file.Prepare(ctx, registry.NewResolver(newTempCache(t), src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want local overlay error")
+			t.Fatal("Prepare() error = nil, want local overlay error")
 		}
-		assertErrorContains(t, err, "resolve toolset file")
+		assertErrorContains(t, err, "prepare toolset file")
 		assertErrorContains(t, err, "schema-validate toolset local file")
 		assertErrorContains(t, err, file.LocalFilename())
 		if len(src.calls) != 0 {
@@ -540,9 +543,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{err: fmt.Errorf("should not fetch later sorted package")}
 
-		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		_, err = file.Prepare(ctx, registry.NewResolver(newTempCache(t), src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want replace path error")
+			t.Fatal("Prepare() error = nil, want replace path error")
 		}
 		assertErrorContains(t, err, "resolve example.com/acme/first@v1.0.0 from local replace")
 		assertErrorContains(t, err, filepath.Clean(filepath.Join(filepath.Dir(file.LocalFilename()), "missing-package-dir")))
@@ -589,9 +592,9 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
 		}
 
-		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t)))
+		_, err = file.Prepare(ctx, registry.NewResolver(newTempCache(t)))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-package directory error")
+			t.Fatal("Prepare() error = nil, want non-package directory error")
 		}
 		assertErrorContains(t, err, "resolve example.com/acme/calc@v1.2.3 from local replace")
 		assertErrorContains(t, err, nonPackageDir)
@@ -605,14 +608,68 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 	})
 
-	t.Run("ResolvesFromPrePopulatedCacheMatchesImperativeBuilderInSortedPackageOrder", func(t *testing.T) {
+	t.Run("DuplicateLoadedPackageNamesAreRejectedWithoutAliases", func(t *testing.T) {
+		firstDir := filepath.Join(t.TempDir(), "first-calc")
+		secondDir := filepath.Join(t.TempDir(), "second-calc")
+		if err := os.MkdirAll(firstDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q): %v", firstDir, err)
+		}
+		if err := os.MkdirAll(secondDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q): %v", secondDir, err)
+		}
+
+		copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), firstDir)
+		copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), secondDir)
+
+		const firstModule = "example.com/acme/calc-one"
+		const secondModule = "example.com/other/calc-two"
+		rewriteSourceFixtureModule(t, firstDir, firstModule)
+		rewriteSourceFixtureModule(t, secondDir, secondModule)
+
+		file := mustLoadToolsetFileNamed(t, "duplicate-names.toolset.json", map[string]any{
+			"packages": map[string]string{
+				firstModule:  "v1.2.3",
+				secondModule: "v1.2.3",
+			},
+			"tools": []map[string]string{
+				{"tool": firstModule + "@v1.2.3/calc.add"},
+				{"tool": secondModule + "@v1.2.3/calc.add"},
+			},
+		})
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				firstModule:  firstDir,
+				secondModule: secondDir,
+			},
+		})
+
+		got, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t), &recordingSource{
+			err: fmt.Errorf("unexpected fetch for duplicate-name local replacements"),
+		}))
+		if err == nil {
+			t.Fatal("Prepare() error = nil, want duplicate package name error")
+		}
+		if len(got.Tools()) != 0 {
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
+		}
+		assertErrorContains(t, err, `package name "calc"`)
+		assertErrorContains(t, err, firstModule)
+		assertErrorContains(t, err, secondModule)
+		assertErrorContains(t, err, "require aliases")
+	})
+
+	t.Run("DuplicateLoadedPackageNamesAreAllowedWhenAliased", func(t *testing.T) {
+		t.Skip("toolset aliases are not implemented yet")
+	})
+
+	t.Run("PreparesFromPrePopulatedCacheMatchesImperativeBuilderInSortedPackageOrder", func(t *testing.T) {
 		fixtures := []struct {
 			module  string
 			version string
 			fixture string
 		}{
-			{module: "example.com/zeta/github-issues", version: "v2.0.0", fixture: "github-issues-dist"},
-			{module: "example.com/acme/calc", version: "v1.2.3", fixture: "calc-dist"},
+			{module: "fixtures.local/github-issues", version: "v2.0.0", fixture: "github-issues-dist"},
+			{module: "fixtures.local/calc", version: "v1.2.3", fixture: "calc-dist"},
 		}
 
 		cache := newTempCache(t)
@@ -653,37 +710,39 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		beforeTools := toolEntryStrings(file.Tools)
 
-		got, err := file.Resolve(ctx, resolver)
+		got, err := file.Prepare(ctx, resolver)
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 
-		wantBuilder := toolset.NewWithResolver(resolver)
-		if err := wantBuilder.AddFromRegistry(ctx, fixtures[1].module, fixtures[1].version); err != nil {
-			t.Fatalf("imperative AddFromRegistry(%s): %v", fixtures[1].module, err)
-		}
-		if err := wantBuilder.AddFromRegistry(ctx, fixtures[0].module, fixtures[0].version); err != nil {
-			t.Fatalf("imperative AddFromRegistry(%s): %v", fixtures[0].module, err)
-		}
-		want, err := wantBuilder.Resolve(toolset.Config{})
+		wantLoaded, err := assembler.Load(ctx, resolver, assembler.Declaration{
+			Packages: []assembler.PackageDeclaration{
+				{Module: tooldef.ModulePath(fixtures[1].module), Version: tooldef.Version(fixtures[1].version)},
+				{Module: tooldef.ModulePath(fixtures[0].module), Version: tooldef.Version(fixtures[0].version)},
+			},
+		})
 		if err != nil {
-			t.Fatalf("Resolve: %v", err)
+			t.Fatalf("assembler.Load: %v", err)
+		}
+		want, err := toolset.PrepareTools(context.Background(), wantLoaded.Tools(), toolset.Config{})
+		if err != nil {
+			t.Fatalf("PrepareTools: %v", err)
 		}
 
-		gotIDs := resolvedToolIDs(got)
-		wantIDs := resolvedToolIDs(want)
+		gotIDs := preparedToolIDs(got)
+		wantIDs := preparedToolIDs(want)
 		if !reflect.DeepEqual(gotIDs, wantIDs) {
-			t.Fatalf("resolved tools = %#v, want %#v", gotIDs, wantIDs)
+			t.Fatalf("prepared tools = %#v, want %#v", gotIDs, wantIDs)
 		}
 
-		orderedPackages := resolvedPackageNames(got)
+		orderedPackages := preparedPackageNames(got)
 		wantOrderedPackages := []string{"calc", "calc", "calc", "github-issues"}
 		if !reflect.DeepEqual(orderedPackages, wantOrderedPackages) {
-			t.Fatalf("resolved package order = %#v, want %#v", orderedPackages, wantOrderedPackages)
+			t.Fatalf("prepared package order = %#v, want %#v", orderedPackages, wantOrderedPackages)
 		}
 
 		if !reflect.DeepEqual(toolEntryStrings(file.Tools), beforeTools) {
-			t.Fatalf("declared tools changed after Resolve: got %#v, want %#v", toolEntryStrings(file.Tools), beforeTools)
+			t.Fatalf("declared tools changed after Prepare: got %#v, want %#v", toolEntryStrings(file.Tools), beforeTools)
 		}
 	})
 
@@ -704,12 +763,12 @@ func TestToolsetFileResolve(t *testing.T) {
 			"tools": []map[string]string{},
 		})
 
-		got, err := file.Resolve(ctx, resolver)
+		got, err := file.Prepare(ctx, resolver)
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-nil")
+			t.Fatal("Prepare() error = nil, want non-nil")
 		}
 		if len(got.Tools()) != 0 {
-			t.Fatalf("Resolve() tools = %#v, want empty", got.Tools())
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
 		}
 		assertErrorContains(t, err, fmt.Sprintf("resolve %s@%s", moduleFail, versionFail))
 		assertErrorContains(t, err, "cache hit but load failed")
@@ -728,12 +787,12 @@ func TestToolsetFileResolve(t *testing.T) {
 			"tools": []map[string]string{},
 		})
 
-		got, err := file.Resolve(ctx, resolver)
+		got, err := file.Prepare(ctx, resolver)
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-nil")
+			t.Fatal("Prepare() error = nil, want non-nil")
 		}
 		if len(got.Tools()) != 0 {
-			t.Fatalf("Resolve() tools = %#v, want empty", got.Tools())
+			t.Fatalf("Prepare() tools = %#v, want empty", got.Tools())
 		}
 		if !errors.Is(err, sourceErr) {
 			t.Fatalf("error = %v, want errors.Is(..., %v)", err, sourceErr)
@@ -758,17 +817,17 @@ func TestToolsetFileResolve(t *testing.T) {
 		resolver := registry.NewResolver(newTempCache(t), src)
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
 			"packages": map[string]string{
-				"example.com/acme/calc": "v1.2.3",
+				"fixtures.local/calc": "v1.2.3",
 			},
-			"tools": []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+			"tools": []map[string]string{{"tool": "fixtures.local/calc@v1.2.3/calc.add"}},
 		})
 
-		got, err := file.Resolve(ctx, resolver)
+		got, err := file.Prepare(ctx, resolver)
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 		if len(got.Tools()) == 0 {
-			t.Fatal("Resolve() returned no tools")
+			t.Fatal("Prepare() returned no tools")
 		}
 
 		raw, err := os.ReadFile(file.LockFilename())
@@ -779,14 +838,14 @@ func TestToolsetFileResolve(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
 		}
-		entry, ok := lock.Packages["example.com/acme/calc@v1.2.3"]
+		entry, ok := lock.Packages["fixtures.local/calc@v1.2.3"]
 		if !ok {
 			t.Fatalf("lock packages = %#v, want calc entry", lock.Packages)
 		}
 		if entry.ArchiveSHA256 != metadata.ArchiveSHA256 || entry.GitSHA != metadata.GitSHA || entry.ResolvedAt != metadata.ResolvedAt {
 			t.Fatalf("lock entry = %#v, want metadata %#v", entry, metadata)
 		}
-		if !strings.Contains(string(raw), "example.com/acme/calc@v1.2.3") {
+		if !strings.Contains(string(raw), "fixtures.local/calc@v1.2.3") {
 			t.Fatalf("lockfile bytes = %q, want package key", string(raw))
 		}
 	})
@@ -801,9 +860,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{result: registry.FetchResult{Archive: []byte("unused"), Manifest: []byte("unused")}}
 
-		_, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		_, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t), src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want lock validation error")
+			t.Fatal("Prepare() error = nil, want lock validation error")
 		}
 		assertErrorContains(t, err, "schema-validate toolset lock file")
 		assertErrorContains(t, err, file.LockFilename())
@@ -822,9 +881,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{result: registry.FetchResult{Archive: []byte("unused"), Manifest: []byte("unused")}}
 
-		_, err := file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		_, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t), src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want lock validation error")
+			t.Fatal("Prepare() error = nil, want lock validation error")
 		}
 		assertErrorContains(t, err, "validate toolset lock file")
 		assertErrorContains(t, err, `packages["bad-key"]`)
@@ -836,15 +895,15 @@ func TestToolsetFileResolve(t *testing.T) {
 	t.Run("MatchingExistingLockUsesExpectedMetadataAndAcceptsCacheHit", func(t *testing.T) {
 		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
 		cache := newTempCache(t)
-		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
+		if err := cache.Put(registry.ModulePath("fixtures.local/calc"), registry.Version("v1.2.3"), archiveBytes, manifestBytes); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
-			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
-			"tools":    []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+			"packages": map[string]string{"fixtures.local/calc": "v1.2.3"},
+			"tools":    []map[string]string{{"tool": "fixtures.local/calc@v1.2.3/calc.add"}},
 		})
 		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
-			"example.com/acme/calc@v1.2.3": {
+			"fixtures.local/calc@v1.2.3": {
 				ArchiveSHA256: sha256HexForTest(archiveBytes),
 				GitSHA:        strings.Repeat("c", 40),
 				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
@@ -856,9 +915,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{err: fmt.Errorf("should not fetch on matching cache hit")}
 
-		_, err := file.Resolve(ctx, registry.NewResolver(cache, src))
+		_, err := file.Prepare(ctx, registry.NewResolver(cache, src))
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 		if len(src.calls) != 0 {
 			t.Fatalf("source calls = %#v, want none", src.calls)
@@ -875,15 +934,15 @@ func TestToolsetFileResolve(t *testing.T) {
 	t.Run("CacheMismatchRefetchSuccessRewritesLockWithFreshMetadata", func(t *testing.T) {
 		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
 		cache := newTempCache(t)
-		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
+		if err := cache.Put(registry.ModulePath("fixtures.local/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
-			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"packages": map[string]string{"fixtures.local/calc": "v1.2.3"},
 			"tools":    []map[string]string{},
 		})
 		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
-			"example.com/acme/calc@v1.2.3": {
+			"fixtures.local/calc@v1.2.3": {
 				ArchiveSHA256: strings.Repeat("d", 64),
 				GitSHA:        strings.Repeat("e", 40),
 				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
@@ -891,13 +950,13 @@ func TestToolsetFileResolve(t *testing.T) {
 			},
 		}}
 		freshMetadata := registry.ResolveMetadata{
-			ArchiveSHA256: locked.Packages["example.com/acme/calc@v1.2.3"].ArchiveSHA256,
+			ArchiveSHA256: locked.Packages["fixtures.local/calc@v1.2.3"].ArchiveSHA256,
 			GitSHA:        strings.Repeat("f", 40),
 			ResolvedFrom:  registry.ResolvedFromGitSource,
 			ResolvedAt:    "2026-03-28T14:00:00Z",
 		}
 		freshMetadata.ArchiveSHA256 = sha256HexForTest(archiveBytes)
-		locked.Packages["example.com/acme/calc@v1.2.3"] = ToolsetLockEntry{
+		locked.Packages["fixtures.local/calc@v1.2.3"] = ToolsetLockEntry{
 			ArchiveSHA256: freshMetadata.ArchiveSHA256,
 			GitSHA:        strings.Repeat("e", 40),
 			ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
@@ -908,9 +967,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{result: registry.FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: freshMetadata}}
 
-		_, err := file.Resolve(ctx, registry.NewResolver(cache, src))
+		_, err := file.Prepare(ctx, registry.NewResolver(cache, src))
 		if err != nil {
-			t.Fatalf("Resolve() error: %v", err)
+			t.Fatalf("Prepare() error: %v", err)
 		}
 		if len(src.calls) != 1 {
 			t.Fatalf("source calls = %#v, want one refetch", src.calls)
@@ -919,7 +978,7 @@ func TestToolsetFileResolve(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadLock(%q): %v", file.LockFilename(), err)
 		}
-		entry := reloaded.Packages["example.com/acme/calc@v1.2.3"]
+		entry := reloaded.Packages["fixtures.local/calc@v1.2.3"]
 		if entry.ArchiveSHA256 != freshMetadata.ArchiveSHA256 || entry.GitSHA != freshMetadata.GitSHA || entry.ResolvedFrom != ToolsetLockResolvedFrom(freshMetadata.ResolvedFrom) || entry.ResolvedAt != freshMetadata.ResolvedAt {
 			t.Fatalf("lock entry = %#v, want fresh metadata %#v", entry, freshMetadata)
 		}
@@ -928,15 +987,15 @@ func TestToolsetFileResolve(t *testing.T) {
 	t.Run("PersistentLockMismatchFailsAndLeavesLockfileUntouched", func(t *testing.T) {
 		archiveBytes, manifestBytes := loadFixtureArchiveAndManifestBytes(t, "calc-dist")
 		cache := newTempCache(t)
-		if err := cache.Put(registry.ModulePath("example.com/acme/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
+		if err := cache.Put(registry.ModulePath("fixtures.local/calc"), registry.Version("v1.2.3"), []byte("stale archive bytes"), manifestBytes); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
-			"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+			"packages": map[string]string{"fixtures.local/calc": "v1.2.3"},
 			"tools":    []map[string]string{},
 		})
 		locked := &ToolsetLockFile{Packages: map[string]ToolsetLockEntry{
-			"example.com/acme/calc@v1.2.3": {
+			"fixtures.local/calc@v1.2.3": {
 				ArchiveSHA256: sha256HexForTest(archiveBytes),
 				GitSHA:        strings.Repeat("a", 40),
 				ResolvedFrom:  ToolsetLockResolvedFromGitHubRelease,
@@ -958,9 +1017,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		}
 		src := &recordingSource{result: registry.FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: badMetadata}}
 
-		_, err = file.Resolve(ctx, registry.NewResolver(cache, src))
+		_, err = file.Prepare(ctx, registry.NewResolver(cache, src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want mismatch error")
+			t.Fatal("Prepare() error = nil, want mismatch error")
 		}
 		assertErrorContains(t, err, "cache mismatch refetch failed integrity check")
 		assertErrorContains(t, err, "expected archive_sha256")
@@ -999,9 +1058,9 @@ func TestToolsetFileResolve(t *testing.T) {
 		sourceErr := errors.New("source boom")
 		src := &recordingSource{err: sourceErr}
 
-		_, err = file.Resolve(ctx, registry.NewResolver(newTempCache(t), src))
+		_, err = file.Prepare(ctx, registry.NewResolver(newTempCache(t), src))
 		if err == nil {
-			t.Fatal("Resolve() error = nil, want non-nil")
+			t.Fatal("Prepare() error = nil, want non-nil")
 		}
 		if !errors.Is(err, sourceErr) {
 			t.Fatalf("error = %v, want source boom", err)
@@ -1015,7 +1074,7 @@ func TestToolsetFileResolve(t *testing.T) {
 			t.Fatalf("ReadFile(%q): %v", file.LockFilename(), err)
 		}
 		if string(after) != string(before) {
-			t.Fatalf("lockfile changed on resolve failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
+			t.Fatalf("lockfile changed on prepare failure:\nbefore:\n%s\nafter:\n%s", string(before), string(after))
 		}
 	})
 }
@@ -1073,20 +1132,20 @@ func toolEntryStrings(entries []ToolEntry) []string {
 	return out
 }
 
-func resolvedToolIDs(resolved toolset.ResolvedToolset) []string {
-	tools := resolved.Tools()
+func preparedToolIDs(prepared toolset.PreparedToolset) []string {
+	tools := prepared.Tools()
 	out := make([]string, len(tools))
-	for i, resolvedTool := range tools {
-		out[i] = resolvedTool.Package.Name + "/" + resolvedTool.Name
+	for i, tool := range tools {
+		out[i] = tool.PackageMeta.Name + "/" + tool.Name
 	}
 	return out
 }
 
-func resolvedPackageNames(resolved toolset.ResolvedToolset) []string {
-	tools := resolved.Tools()
+func preparedPackageNames(prepared toolset.PreparedToolset) []string {
+	tools := prepared.Tools()
 	out := make([]string, len(tools))
-	for i, resolvedTool := range tools {
-		out[i] = resolvedTool.Package.Name
+	for i, tool := range tools {
+		out[i] = tool.PackageMeta.Name
 	}
 	return out
 }
@@ -1129,6 +1188,59 @@ func loadFixtureArchiveAndManifestBytes(t *testing.T, fixtureName string) ([]byt
 		t.Fatalf("read manifest fixture %s: %v", manifestPath, err)
 	}
 	return archiveBytes, manifestBytes
+}
+
+func loadSourceFixtureDir(t *testing.T, fixtureName string) string {
+	t.Helper()
+	for _, dir := range fixtures.SourceDirs() {
+		if filepath.Base(dir) == fixtureName {
+			return dir
+		}
+	}
+	t.Fatalf("source fixture %q not found", fixtureName)
+	return ""
+}
+
+func copyFixtureDir(t *testing.T, src, dst string) {
+	t.Helper()
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", src, err)
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := os.MkdirAll(dstPath, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%q): %v", dstPath, err)
+			}
+			copyFixtureDir(t, srcPath, dstPath)
+			continue
+		}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", srcPath, err)
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", dstPath, err)
+		}
+	}
+}
+
+func rewriteSourceFixtureModule(t *testing.T, dir, module string) {
+	t.Helper()
+	manifestPath := filepath.Join(dir, packaging.DevManifestFilename)
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", manifestPath, err)
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", manifestPath, err)
+	}
+	manifest["module"] = module
+	writeToolsetLocalJSON(t, manifestPath, manifest)
 }
 
 func writeToolsetJSON(t *testing.T, value any) string {

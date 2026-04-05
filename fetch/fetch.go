@@ -41,7 +41,18 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 		httpReq.Header.Set("Accept-Language", "*")
 	}
 
-	// Capture the optional caller-supplied redirect check (e.g. allowlist enforcement).
+	var prepareRequest func(*http.Request, []*http.Request) error
+	if init != nil && init.PrepareRequest != nil {
+		prepareRequest = init.PrepareRequest
+	}
+
+	if prepareRequest != nil {
+		if err := prepareRequest(httpReq, nil); err != nil {
+			return nil, fmt.Errorf("fetch: %w", err)
+		}
+	}
+
+	// Capture the optional caller-supplied redirect check.
 	var extraRedirectCheck func(*http.Request, []*http.Request) error
 	if init != nil && init.CheckRedirect != nil {
 		extraRedirectCheck = init.CheckRedirect
@@ -55,6 +66,11 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 			if shouldStripSensitiveHeadersOnRedirect(req, via) {
 				req.Header.Del("Authorization")
 				req.Header.Del("X-API-Key")
+			}
+			if prepareRequest != nil {
+				if err := prepareRequest(req, via); err != nil {
+					return err
+				}
 			}
 			if extraRedirectCheck != nil {
 				return extraRedirectCheck(req, via)

@@ -55,6 +55,15 @@ type OAuth2Provider struct {
 	TokenURL string `json:"token_url"`
 }
 
+// AppliedInjection records an exact credential mutation applied to a request so
+// it can be removed or replaced on a later redirect hop.
+type AppliedInjection struct {
+	headerName        string
+	headerValue       string
+	queryName         string
+	previousQueryVals []string
+}
+
 // KnownProviders maps well-known provider names to their OAuth2 endpoints.
 var KnownProviders = map[string]OAuth2Provider{
 	"google": {
@@ -201,6 +210,52 @@ func (ci *CredentialInjector) WithAccounts(accounts map[string]string) (*Credent
 	}, nil
 }
 
+// Apply matches req against configured rules, injects the appropriate
+// credential into the request, and returns a handle that can remove the exact
+// applied mutation later.
+func (ci *CredentialInjector) Apply(req *http.Request) (*AppliedInjection, error) {
+	rule, cred, err := ci.matchedCredential(req.URL)
+	if err != nil || rule == nil {
+		return nil, err
+	}
+	return ci.applyToRequest(rule, req, cred), nil
+}
+
+// Remove removes the exact credential mutation previously applied to req.
+func (a *AppliedInjection) Remove(req *http.Request) {
+	if a == nil || req == nil {
+		return
+	}
+	if a.headerName != "" {
+		key := http.CanonicalHeaderKey(a.headerName)
+		values := req.Header[key]
+		if len(values) > 0 {
+			filtered := make([]string, 0, len(values))
+			removed := false
+			for _, v := range values {
+				if !removed && v == a.headerValue {
+					removed = true
+					continue
+				}
+				filtered = append(filtered, v)
+			}
+			if len(filtered) == 0 {
+				req.Header.Del(key)
+			} else {
+				req.Header[key] = filtered
+			}
+		}
+	}
+	if a.queryName != "" && req.URL != nil {
+		q := req.URL.Query()
+		q.Del(a.queryName)
+		for _, v := range a.previousQueryVals {
+			q.Add(a.queryName, v)
+		}
+		req.URL.RawQuery = q.Encode()
+	}
+}
+
 // InjectRequest matches the request URL against configured rules and injects
 // the appropriate credential. It returns the (possibly modified) URL, headers,
 // whether injection occurred, and any error.
@@ -210,17 +265,9 @@ func (ci *CredentialInjector) InjectRequest(method, rawURL string, headers [][2]
 		return rawURL, headers, false, fmt.Errorf("parsing URL: %w", err)
 	}
 
-	rule := ci.matchRule(u.Hostname(), u.Path)
-	if rule == nil {
-		return rawURL, headers, false, nil
-	}
-	if strings.EqualFold(u.Scheme, "http") && !rule.AllowUnsafeHTTPInjection {
-		return rawURL, headers, false, fmt.Errorf("unsafe http credential injection blocked for %s", u.Host)
-	}
-
-	cred, err := ci.resolve(rule)
-	if err != nil {
-		return rawURL, headers, false, fmt.Errorf("resolving credential for %s: %w", rule.ModuleName, err)
+	rule, cred, err := ci.matchedCredential(u)
+	if err != nil || rule == nil {
+		return rawURL, headers, false, err
 	}
 
 	newURL, newHeaders := ci.inject(rule, rawURL, u, headers, cred)
@@ -245,6 +292,22 @@ func (ci *CredentialInjector) matchRule(host, path string) *InjectionRule {
 		return r
 	}
 	return nil
+}
+
+func (ci *CredentialInjector) matchedCredential(u *url.URL) (*InjectionRule, string, error) {
+	rule := ci.matchRule(u.Hostname(), u.Path)
+	if rule == nil {
+		return nil, "", nil
+	}
+	if strings.EqualFold(u.Scheme, "http") && !rule.AllowUnsafeHTTPInjection {
+		return nil, "", fmt.Errorf("unsafe http credential injection blocked for %s", u.Host)
+	}
+
+	cred, err := ci.resolve(rule)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolving credential for %s: %w", rule.ModuleName, err)
+	}
+	return rule, cred, nil
 }
 
 // hostMatchesAny checks if host matches any of the patterns.
@@ -390,16 +453,6 @@ func (ci *CredentialInjector) StripInjected(req *http.Request) {
 	ci.stripAllInjected(req)
 }
 
-// StripRedirected removes injected credentials from redirected requests when
-// the redirect target is no longer within injection scope or when the redirect
-// downgrades from HTTPS to HTTP.
-func (ci *CredentialInjector) StripRedirected(req *http.Request, via []*http.Request) {
-	if !isHTTPSDowngrade(req, via) && ci.matchRule(req.URL.Hostname(), req.URL.Path) != nil {
-		return
-	}
-	ci.stripAllInjected(req)
-}
-
 func (ci *CredentialInjector) stripAllInjected(req *http.Request) {
 	stripped := make(map[string]bool)
 	for _, rule := range ci.rules {
@@ -419,14 +472,6 @@ func (ci *CredentialInjector) stripAllInjected(req *http.Request) {
 			req.URL.RawQuery = q.Encode()
 		}
 	}
-}
-
-func isHTTPSDowngrade(req *http.Request, via []*http.Request) bool {
-	if len(via) == 0 {
-		return false
-	}
-	prev := via[len(via)-1]
-	return strings.EqualFold(prev.URL.Scheme, "https") && strings.EqualFold(req.URL.Scheme, "http")
 }
 
 // apiKeyHeaderName returns the header name for api_key_header injection,
@@ -454,4 +499,29 @@ func (ci *CredentialInjector) inject(rule *InjectionRule, rawURL string, u *url.
 		rawURL = u.String()
 	}
 	return rawURL, headers
+}
+
+func (ci *CredentialInjector) applyToRequest(rule *InjectionRule, req *http.Request, cred string) *AppliedInjection {
+	switch rule.Method {
+	case InjectionMethodBearerHeader:
+		value := "Bearer " + cred
+		req.Header.Add("Authorization", value)
+		return &AppliedInjection{headerName: "Authorization", headerValue: value}
+	case InjectionMethodBasicAuth:
+		value := "Basic " + cred
+		req.Header.Add("Authorization", value)
+		return &AppliedInjection{headerName: "Authorization", headerValue: value}
+	case InjectionMethodAPIKeyHeader:
+		headerName := rule.apiKeyHeaderName()
+		req.Header.Add(headerName, cred)
+		return &AppliedInjection{headerName: headerName, headerValue: cred}
+	case InjectionMethodAPIKeyQuery:
+		q := req.URL.Query()
+		prev := append([]string(nil), q["key"]...)
+		q.Set("key", cred)
+		req.URL.RawQuery = q.Encode()
+		return &AppliedInjection{queryName: "key", previousQueryVals: prev}
+	default:
+		return nil
+	}
 }

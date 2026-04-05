@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,53 +214,41 @@ func makeFetch(injector *transport.CredentialInjector, allowlist *transport.Host
 		return goFetch
 	}
 	return func(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
-		// Check allowlist FIRST — before credential injection to avoid side effects.
-		if allowlist != nil {
-			host := extractHost(rawURL)
-			if !allowlist.Allows(host) {
-				return quickts.FetchResult{}, fmt.Errorf("host %s not in allowlist", host)
+		var applied *transport.AppliedInjection
+		prepareRequest := func(req *http.Request, via []*http.Request) error {
+			if allowlist != nil && !allowlist.Allows(req.URL.Hostname()) {
+				return fmt.Errorf("host %s not in allowlist", req.URL.Hostname())
 			}
-		}
-		newURL := rawURL
-		newHeadersJSON := headersJSON
-		if injector != nil {
-			var pairs [][2]string
-			json.Unmarshal([]byte(headersJSON), &pairs) //nolint: errcheck — empty on failure is fine
-			var err error
-			var newHeaders [][2]string
-			newURL, newHeaders, _, err = injector.InjectRequest(method, rawURL, pairs)
+			if applied != nil {
+				applied.Remove(req)
+				applied = nil
+			}
+			if isHTTPSDowngrade(req, via) {
+				return nil
+			}
+			if injector == nil {
+				return nil
+			}
+			next, err := injector.Apply(req)
 			if err != nil {
-				return quickts.FetchResult{}, fmt.Errorf("credential injection failed")
+				return fmt.Errorf("credential injection failed")
 			}
-			injected, _ := json.Marshal(newHeaders)
-			newHeadersJSON = string(injected)
+			applied = next
+			return nil
 		}
-		var strip func(*http.Request, []*http.Request)
-		if injector != nil {
-			strip = injector.StripRedirected
-		}
-		return goFetchWithAllowlist(newURL, method, newHeadersJSON, body, allowlist, strip)
+		return goFetchWithAllowlist(rawURL, method, headersJSON, body, prepareRequest)
 	}
-}
-
-// extractHost parses a URL and returns the hostname (without port).
-func extractHost(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	return u.Hostname()
 }
 
 // goFetch performs an HTTP request using the fetch package.
 // It's the Go-side implementation behind the JS fetch() global.
 func goFetch(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
-	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil, nil)
+	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil)
 }
 
-// goFetchWithAllowlist is like goFetch but enforces a host allowlist on redirect hops
-// and strips injected credentials when redirect targets are no longer trusted.
-func goFetchWithAllowlist(rawURL, method, headersJSON, body string, allowlist *transport.HostAllowlist, stripInjected func(*http.Request, []*http.Request)) (quickts.FetchResult, error) {
+// goFetchWithAllowlist is like goFetch but allows the caller to prepare the
+// initial request and each redirected request before they are sent.
+func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareRequest func(*http.Request, []*http.Request) error) (quickts.FetchResult, error) {
 	reqHeaders := fetch.NewHeaders()
 	var pairs [][2]string
 	if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
@@ -276,20 +263,10 @@ func goFetchWithAllowlist(rawURL, method, headersJSON, body string, allowlist *t
 	}
 
 	init := &fetch.RequestInit{
-		Method:  method,
-		Headers: reqHeaders,
-		Body:    bodyReader,
-	}
-	if allowlist != nil || stripInjected != nil {
-		init.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			if allowlist != nil && !allowlist.Allows(req.URL.Hostname()) {
-				return fmt.Errorf("redirect to %s blocked by allowlist", req.URL.Hostname())
-			}
-			if stripInjected != nil && len(via) > 0 {
-				stripInjected(req, via)
-			}
-			return nil
-		}
+		Method:         method,
+		Headers:        reqHeaders,
+		Body:           bodyReader,
+		PrepareRequest: prepareRequest,
 	}
 
 	resp, err := fetch.Fetch(context.Background(), rawURL, init)
@@ -311,4 +288,12 @@ func goFetchWithAllowlist(rawURL, method, headersJSON, body string, allowlist *t
 		Body:       string(respBody),
 		URL:        resp.URL(),
 	}, nil
+}
+
+func isHTTPSDowngrade(req *http.Request, via []*http.Request) bool {
+	if len(via) == 0 {
+		return false
+	}
+	prev := via[len(via)-1]
+	return strings.EqualFold(prev.URL.Scheme, "https") && strings.EqualFold(req.URL.Scheme, "http")
 }

@@ -21,10 +21,15 @@ type RequestInit struct {
 	Headers *Headers
 	Body    io.Reader
 
+	// PrepareRequest is an optional hook applied to the initial request and
+	// each redirected request after default headers have been set. A non-nil
+	// error aborts the request.
+	PrepareRequest func(req *http.Request, via []*http.Request) error
+
 	// CheckRedirect is an optional redirect policy applied in addition to the
-	// default 20-redirect limit and cross-origin credential stripping. If set,
-	// it is called before following each redirect. A non-nil error aborts the
-	// redirect chain.
+	// default 20-redirect limit, sensitive-header stripping, and PrepareRequest.
+	// If set, it is called before following each redirect. A non-nil error
+	// aborts the redirect chain.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 

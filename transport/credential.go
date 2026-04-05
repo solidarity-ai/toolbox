@@ -436,6 +436,11 @@ func (ci *CredentialInjector) refreshOAuth2(rule *InjectionRule, cacheKey string
 	if err != nil {
 		return "", fmt.Errorf("token refresh failed for %s — run 'toolbox auth' to re-authorize: %w", rule.ModuleName, err)
 	}
+	if tok.RefreshToken != "" && tok.RefreshToken != string(refreshToken) {
+		if err := ci.secrets.Set(ctx, refreshTokenKey, []byte(tok.RefreshToken)); err != nil {
+			return "", fmt.Errorf("persist rotated refresh token for %s: %w", rule.ModuleName, err)
+		}
+	}
 
 	ci.tokens.Set(cacheKey, tok.AccessToken, tok.Expiry)
 

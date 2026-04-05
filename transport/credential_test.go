@@ -1,6 +1,7 @@
 package transport_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -565,6 +566,112 @@ func TestCredentialInjector_TokenRefreshOnExpiry(t *testing.T) {
 
 	if c := calls.Load(); c != 2 {
 		t.Fatalf("token endpoint called %d times, want 2 (initial + refresh)", c)
+	}
+}
+
+func TestCredentialInjector_PersistsRotatedRefreshToken(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int64
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.FormValue("refresh_token") {
+		case "test-refresh-token":
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "first-access-token",
+				"refresh_token": "rotated-refresh-token",
+				"token_type":    "Bearer",
+				"expires_in":    1,
+			})
+		case "rotated-refresh-token":
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "second-access-token",
+				"token_type":   "Bearer",
+				"expires_in":   3600,
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error":             "invalid_grant",
+				"error_description": "refresh token is no longer valid",
+			})
+		}
+	}))
+	t.Cleanup(tokenSrv.Close)
+
+	store := testutil.NewTestSecretStore()
+	seedOAuth2Secrets(t, store, "google", "default")
+
+	rules := []transport.InjectionRule{
+		{
+			Hosts:          []string{"*.googleapis.com"},
+			PathPrefix:     "/",
+			ModuleName:     "google",
+			CredentialName: "default",
+			SecretPrefix:   credpath.SharedPrefix("google", "default"),
+			Type:           transport.CredentialTypeOAuth2,
+			Method:         transport.InjectionMethodBearerHeader,
+			Provider: &transport.OAuth2Provider{
+				TokenURL: tokenSrv.URL + "/token",
+			},
+		},
+	}
+
+	ci := transport.NewCredentialInjector(rules, store)
+
+	_, headers, injected, err := ci.InjectRequest("GET", "https://admin.googleapis.com/v1/users", nil)
+	if err != nil {
+		t.Fatalf("first InjectRequest: %v", err)
+	}
+	if !injected {
+		t.Fatal("first call: expected injected=true")
+	}
+
+	var authHeader string
+	for _, h := range headers {
+		if strings.EqualFold(h[0], "Authorization") {
+			authHeader = h[1]
+		}
+	}
+	if authHeader != "Bearer first-access-token" {
+		t.Fatalf("first Authorization = %q, want Bearer first-access-token", authHeader)
+	}
+
+	refreshToken, err := store.Get(context.Background(), credpath.Shared("google", "default", "refresh_token"))
+	if err != nil {
+		t.Fatalf("Get(refresh_token): %v", err)
+	}
+	if string(refreshToken) != "rotated-refresh-token" {
+		t.Fatalf("stored refresh_token = %q, want %q", string(refreshToken), "rotated-refresh-token")
+	}
+
+	_, headers, injected, err = ci.InjectRequest("GET", "https://admin.googleapis.com/v1/users", nil)
+	if err != nil {
+		t.Fatalf("second InjectRequest: %v", err)
+	}
+	if !injected {
+		t.Fatal("second call: expected injected=true")
+	}
+
+	authHeader = ""
+	for _, h := range headers {
+		if strings.EqualFold(h[0], "Authorization") {
+			authHeader = h[1]
+		}
+	}
+	if authHeader != "Bearer second-access-token" {
+		t.Fatalf("second Authorization = %q, want Bearer second-access-token", authHeader)
+	}
+
+	if c := calls.Load(); c != 2 {
+		t.Fatalf("token endpoint called %d times, want 2", c)
 	}
 }
 

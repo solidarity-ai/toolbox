@@ -706,6 +706,108 @@ func TestRunAuthOAuth2EndToEnd(t *testing.T) {
 	}
 }
 
+func TestRunAuthOAuth2ManualPasteHeadless(t *testing.T) {
+	var (
+		mu                sync.Mutex
+		receivedCode      string
+		receivedGrantType string
+	)
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		receivedGrantType = r.FormValue("grant_type")
+		receivedCode = r.FormValue("code")
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-at",
+			"refresh_token": "test-rt",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString("oauth-headless"), "test_oauth"), []byte("test-client-id")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, credpath.OAuth2ClientSecret(testModuleString("oauth-headless"), "test_oauth"), []byte("test-client-secret")); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("oauth-headless"),
+			Name:    "oauth-headless",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{
+				{
+					Name: "test_oauth",
+					Type: "oauth2",
+					Provider: &tooldef.OAuth2ProviderConfig{
+						AuthURL:  authServer.URL + "/authorize",
+						TokenURL: tokenServer.URL + "/token",
+					},
+					Inject: tooldef.PackageInject{
+						Hosts:  []string{"api.example.com"},
+						Method: "bearer_header",
+					},
+				},
+			},
+		},
+	}
+
+	originalOpenBrowser := openBrowser
+	defer func() { openBrowser = originalOpenBrowser }()
+
+	var openedAuthURL string
+	openBrowser = func(authURL string) {
+		openedAuthURL = authURL
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepo(loaded, repo, strings.NewReader("manual-auth-code\n"), &stdout, &stderr, "", "")
+	if err != nil {
+		t.Fatalf("runAuthWithRepo() error: %v", err)
+	}
+
+	refreshToken, err := store.Get(ctx, credpath.OAuth2RefreshToken(testModuleString("oauth-headless"), "test_oauth", "default"))
+	if err != nil {
+		t.Fatalf("Get(refresh_token) error: %v", err)
+	}
+	if string(refreshToken) != "test-rt" {
+		t.Fatalf("stored refresh_token = %q, want %q", string(refreshToken), "test-rt")
+	}
+
+	mu.Lock()
+	gotGrantType := receivedGrantType
+	gotCode := receivedCode
+	mu.Unlock()
+	if gotGrantType != "authorization_code" {
+		t.Fatalf("grant_type = %q, want %q", gotGrantType, "authorization_code")
+	}
+	if gotCode != "manual-auth-code" {
+		t.Fatalf("code = %q, want %q", gotCode, "manual-auth-code")
+	}
+	if openedAuthURL == "" {
+		t.Fatal("openBrowser was not called")
+	}
+	if !strings.Contains(stdout.String(), "Or paste the authorization code here:") {
+		t.Fatalf("stdout missing manual paste prompt, got: %s", stdout.String())
+	}
+}
+
 func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 	var (
 		mu           sync.Mutex
@@ -800,9 +902,9 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 			}
 			resp.Body.Close()
 
-			// This line arrives after callback success but before the next prompt.
-			// It must remain available for the following credential.
-			if _, err := io.WriteString(writer, "next-api-key\n"); err != nil {
+			// A late pasted auth code must be ignored by the next prompt. The
+			// actual next credential input that follows still needs to be read.
+			if _, err := io.WriteString(writer, "test-auth-code\nnext-api-key\n"); err != nil {
 				t.Errorf("write api key input: %v", err)
 			}
 			_ = writer.Close()

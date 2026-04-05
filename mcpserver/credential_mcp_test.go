@@ -541,6 +541,79 @@ func TestMCP_StripInjected_BearerWhenRedirectEscapesPathPrefix(t *testing.T) {
 	}
 }
 
+func TestMCP_ReinjectsBearerWhenRedirectLandsOnDifferentMatchingRule(t *testing.T) {
+	t.Parallel()
+
+	gotPrivateAuth := newHeaderCapture()
+	gotPartnerAuth := newHeaderCapture()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/private/start":
+			gotPrivateAuth.Store(r.Header.Get("Authorization"))
+			http.Redirect(w, r, "/partner/landed", http.StatusFound)
+		case "/partner/landed":
+			gotPartnerAuth.Store(r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"redirected":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	srvURL, _ := url.Parse(srv.URL)
+
+	store := testutil.NewTestSecretStore()
+	store.Seed(map[string][]byte{
+		credpath.BearerToken("private-api", "private", "default"): []byte("private-token"),
+		credpath.BearerToken("partner-api", "partner", "default"): []byte("partner-token"),
+	})
+
+	ci := transport.NewCredentialInjector(
+		[]transport.InjectionRule{
+			{
+				Hosts:                    []string{srvURL.Hostname()},
+				PathPrefix:               "/private/",
+				ModuleName:               "private-api",
+				CredentialName:           "private",
+				SecretPrefix:             credpath.AccountPrefix("private-api", "private", "default"),
+				Type:                     transport.CredentialTypeBearer,
+				Method:                   transport.InjectionMethodBearerHeader,
+				AllowUnsafeHTTPInjection: true,
+			},
+			{
+				Hosts:                    []string{srvURL.Hostname()},
+				PathPrefix:               "/partner/",
+				ModuleName:               "partner-api",
+				CredentialName:           "partner",
+				SecretPrefix:             credpath.AccountPrefix("partner-api", "partner", "default"),
+				Type:                     transport.CredentialTypeBearer,
+				Method:                   transport.InjectionMethodBearerHeader,
+				AllowUnsafeHTTPInjection: true,
+			},
+		},
+		store,
+	)
+
+	harness := newFetchTestHarness(t, toolset.PackageCredentialPolicy{Injector: ci})
+
+	result := harness.CallTool("fetchTest.get", map[string]any{
+		"url": srv.URL + "/private/start",
+	})
+	text := mcpResultText(t, result)
+
+	if !strings.Contains(text, "redirected") {
+		t.Fatalf("expected redirected response, got: %s", text)
+	}
+	if gotPrivateAuth.Load() != "Bearer private-token" {
+		t.Fatalf("origin received Authorization %q, want %q", gotPrivateAuth.Load(), "Bearer private-token")
+	}
+	if gotPartnerAuth.Load() != "Bearer partner-token" {
+		t.Fatalf("redirect destination received Authorization %q, want %q", gotPartnerAuth.Load(), "Bearer partner-token")
+	}
+}
+
 func TestMCP_CredentialInjection_APIKey(t *testing.T) {
 	t.Parallel()
 

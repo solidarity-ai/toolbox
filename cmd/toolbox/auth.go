@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/solidarity-ai/toolbox/credentialrepo"
@@ -289,7 +291,7 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	flowCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	tok, err := oauth2flow.Run(flowCtx, cfg, receiver, verifier, opts, func(authorizationURL string) {
+	code, err := oauth2flow.AuthorizeCode(flowCtx, cfg, receiver, verifier, opts, func(authorizationURL string) {
 		fmt.Fprintf(stdout, "Authorizing %s (oauth2)\n", cred.Name)
 		if cred.Provider != nil && cred.Provider.Name != "" {
 			fmt.Fprintf(stdout, "  Provider: %s\n", cred.Provider.Name)
@@ -308,6 +310,13 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	})
 	if err != nil {
 		return fmt.Errorf("oauth2 authorization: %w", err)
+	}
+
+	input.IgnoreOnce(code)
+
+	tok, err := cfg.Exchange(flowCtx, code, oauth2.VerifierOption(verifier))
+	if err != nil {
+		return fmt.Errorf("oauth2 authorization: exchange token: %w", err)
 	}
 
 	if tok.RefreshToken == "" {
@@ -462,22 +471,33 @@ func getRequiredSecret(ctx context.Context, repo *credentialrepo.Repository, ref
 }
 
 type authInput struct {
-	reader io.Reader
-	lines  chan authInputResult
-}
-
-type authInputResult struct {
-	line string
-	err  error
+	requests    chan readRequest
+	lines       chan authInputResult
+	interactive bool
+	mu          sync.Mutex
+	ignore      map[string]int
 }
 
 func newAuthInput(reader io.Reader) *authInput {
 	input := &authInput{
-		reader: reader,
-		lines:  make(chan authInputResult, 1),
+		requests:    make(chan readRequest),
+		lines:       make(chan authInputResult),
+		interactive: readerIsInteractiveTTY(reader),
+		ignore:      make(map[string]int),
 	}
-	go input.pump()
+	go input.pump(reader)
+	go input.dispatch()
 	return input
+}
+
+func (i *authInput) IgnoreOnce(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.ignore[line]++
 }
 
 func (i *authInput) Read(_ []byte) (int, error) {
@@ -485,30 +505,143 @@ func (i *authInput) Read(_ []byte) (int, error) {
 }
 
 func (i *authInput) ReadLine(ctx context.Context) (string, error) {
+	resp := make(chan authInputResult, 1)
+
 	select {
-	case res, ok := <-i.lines:
-		if !ok {
-			return "", io.EOF
-		}
-		if res.err != nil {
-			return "", res.err
-		}
-		return strings.TrimSpace(res.line), nil
+	case i.requests <- readRequest{ctx: ctx, resp: resp}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+
+	select {
+	case res := <-resp:
+		return res.line, res.err
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
 }
 
-func (i *authInput) pump() {
+type readRequest struct {
+	ctx  context.Context
+	resp chan authInputResult
+}
+
+type authInputResult struct {
+	line string
+	err  error
+}
+
+func (i *authInput) pump(reader io.Reader) {
 	defer close(i.lines)
 
-	scanner := bufio.NewScanner(i.reader)
+	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		i.lines <- authInputResult{line: scanner.Text()}
+		i.lines <- authInputResult{line: strings.TrimSpace(scanner.Text())}
 	}
 	if err := scanner.Err(); err != nil {
 		i.lines <- authInputResult{err: err}
 	}
+}
+
+func (i *authInput) dispatch() {
+	var (
+		backlog  []authInputResult
+		pending  *readRequest
+		closed   bool
+		closeErr error
+		linesCh  = i.lines
+	)
+
+	for {
+		if pending != nil && pending.ctx.Err() != nil {
+			pending = nil
+		}
+
+		if pending != nil && len(backlog) > 0 {
+			res := backlog[0]
+			backlog = backlog[1:]
+			pending.resp <- res
+			pending = nil
+			continue
+		}
+
+		if closed && pending != nil {
+			pending.resp <- authInputResult{err: closeErr}
+			pending = nil
+			continue
+		}
+
+		select {
+		case req := <-i.requests:
+			if pending != nil && pending.ctx.Err() != nil {
+				pending = nil
+			}
+			if closed && len(backlog) == 0 {
+				req.resp <- authInputResult{err: closeErr}
+				continue
+			}
+			if pending == nil {
+				pending = &req
+				continue
+			}
+			backlogReqErr := authInputResult{err: fmt.Errorf("auth input already has a pending reader")}
+			req.resp <- backlogReqErr
+		case line, ok := <-linesCh:
+			if !ok {
+				closed = true
+				closeErr = io.EOF
+				linesCh = nil
+				continue
+			}
+			if line.err != nil {
+				closed = true
+				closeErr = line.err
+				linesCh = nil
+				continue
+			}
+			if i.shouldIgnore(line.line) {
+				continue
+			}
+			if pending != nil && pending.ctx.Err() != nil {
+				pending = nil
+			}
+			if pending != nil {
+				pending.resp <- line
+				pending = nil
+				continue
+			}
+			if !i.interactive {
+				backlog = append(backlog, line)
+			}
+		}
+	}
+}
+
+func (i *authInput) shouldIgnore(line string) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if remaining := i.ignore[line]; remaining > 0 {
+		if remaining == 1 {
+			delete(i.ignore, line)
+		} else {
+			i.ignore[line] = remaining - 1
+		}
+		return true
+	}
+	return false
+}
+
+func readerIsInteractiveTTY(reader io.Reader) bool {
+	file, ok := reader.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func checkAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Repository, stdout io.Writer) error {

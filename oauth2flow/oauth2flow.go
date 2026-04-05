@@ -27,12 +27,23 @@ type CodeReceiver interface {
 //  4. Wait for the code via receiver.ReceiveCode
 //  5. Exchange the code for tokens via cfg.Exchange
 func Run(ctx context.Context, cfg *oauth2.Config, receiver CodeReceiver, verifier string, opts []oauth2.AuthCodeOption, onAuthURL func(string)) (*oauth2.Token, error) {
+	code, err := AuthorizeCode(ctx, cfg, receiver, verifier, opts, onAuthURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+}
+
+// AuthorizeCode runs the authorization URL + receiver portion of the flow and
+// returns the authorization code before token exchange.
+func AuthorizeCode(ctx context.Context, cfg *oauth2.Config, receiver CodeReceiver, verifier string, opts []oauth2.AuthCodeOption, onAuthURL func(string)) (string, error) {
 	cfg.RedirectURL = receiver.RedirectURI()
 
 	// Generate random state to prevent CSRF on the callback.
 	var stateBytes [16]byte
 	if _, err := rand.Read(stateBytes[:]); err != nil {
-		return nil, err
+		return "", err
 	}
 	state := base64.RawURLEncoding.EncodeToString(stateBytes[:])
 
@@ -45,8 +56,8 @@ func Run(ctx context.Context, cfg *oauth2.Config, receiver CodeReceiver, verifie
 
 	code, err := receiver.ReceiveCode(ctx, state)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	return code, nil
 }

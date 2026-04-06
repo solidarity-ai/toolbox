@@ -89,6 +89,25 @@ Per-tool descriptions and some defaults may come from tool source during local d
 }
 ```
 
+Tools may optionally set `max_fetch_response_bytes` in their manifest entry to
+override the default `fetch()` response-body limit for that tool. If omitted,
+Toolbox uses a default limit of 10 MiB.
+
+```json
+{
+  "name": "large-export-tool",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/export.download.ts",
+      "idempotent": true,
+      "effect": "readOnly",
+      "max_fetch_response_bytes": 25000000
+    }
+  ]
+}
+```
+
 ## Tool Definitions
 
 Each tool is a TypeScript file in the `tools/` directory. The filename is the resource path + method.
@@ -229,6 +248,11 @@ Makes an HTTP request. Routed through Go's proxy for credential replacement, sco
 - `opts` — standard fetch options: method, headers, body
 - Returns: response object with status, headers, body
 - Credentials are replaced automatically by the proxy — tool code never sees real secrets
+- Response bodies are limited to 10 MiB by default; if the body exceeds the
+  limit, `fetch()` fails with an explicit error instead of returning truncated
+  partial data
+- A tool can raise or lower that limit with `max_fetch_response_bytes` on its
+  manifest entry
 
 ### `exec(binary, args)`
 

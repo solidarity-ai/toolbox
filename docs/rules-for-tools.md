@@ -11,9 +11,18 @@
 4. when considering a function description, understand that a param might be
    hidden, and thus the description might be wrong.
 5. always add a @effect to a function
-6. If the tool call is truly idempotent, that is it's pure or it uses an
-   idempotency key, then it should be marked as idempotent. This enables agents
-& harnesses to quickly a decision on retrying failed tool calls.
+6. `readOnly` means the tool does not cause side effects. It does not imply
+   `@idempotent`.
+7. If something advances a cursor, consumes a message, marks data seen, takes a
+   lease, or otherwise changes server state, then it is not actually
+   `readOnly`.
+8. `@idempotent` is stronger. Mark it when the same call with the same inputs
+   can be treated as interchangeable for retries, reuse, or refetch decisions
+   because the result is pure, tied to immutable input, or protected by an
+   idempotency key or equivalent deduplication contract.
+9. Do not mark ordinary live reads `@idempotent` just because they are
+   `readOnly`. If the backing data may have changed, callers may need to
+   refetch instead of reusing an earlier result.
 
 ## Examples
 
@@ -59,11 +68,28 @@ export default function add(a: number, b: number): string {
 ## Example 2: Choosing effect
 
 - readOnly means there is no side effect.
+- readOnly does not mean the result stays current or can be reused later
+  without refetching.
+- idempotent means the same input can be treated as yielding the same stable
+  answer or equivalent stable contract.
+- if a so-called read advances a cursor, consumes an event, records an ack, or
+  otherwise changes server state, it is mislabeled and should not be marked
+  readOnly.
 - reversible means that it would be trivial to undo the consequences at a later time.
 - irreversible means that it would be hard or impossible to undo the consequences at a later time.
 //TODO: format this into a table with func, effect, and explanation of why it's read-only/reversible/irreversible
 - e.g. sending an email is irreversible. creating a draft email is reversible. deleting an email is irreversible.
 - . sending a tweet is irreversible, even if is deletable (it is made public and therefore cannot be undone).
+- e.g. `calc.add` is readOnly and idempotent.
+- e.g. `git.commit.get(sha)` is readOnly and idempotent because the input
+  points at immutable data.
+- e.g. `issues.get(id)`, `users.list`, and `tickets.search` are usually
+  readOnly but not idempotent, because the data may have changed and the caller
+  may need to refetch.
+- e.g. `payments.charge.create` may be irreversible but still idempotent if
+  the API requires an idempotency key and guarantees deduplication.
+- e.g. `notifications.poll` is not readOnly if polling advances a server-side
+  cursor or lease.
 - It should be readOnly, reversible, or irreversible.
   
 IMPORTANT: Build something that wouldn't embarrass the author if publicly published.

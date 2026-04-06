@@ -11,15 +11,16 @@ import (
 
 // LoadedTool is the execution-ready tool shape materialized from a loaded package.
 type LoadedTool struct {
-	Name           string
-	Description    string
-	Sig            *toolbox.FuncSignature
-	Effect         tooldef.Effect
-	Idempotent     *bool
-	ResourceParams []tooldef.ResourceParam
-	PackageMeta    *tooldef.Package
-	TS             *tooldef.TSToolDef
-	TSWasm         *tooldef.TSWasmToolDef
+	Name                  string
+	Description           string
+	Sig                   *toolbox.FuncSignature
+	Effect                tooldef.Effect
+	Idempotent            *bool
+	MaxFetchResponseBytes *int64
+	ResourceParams        []tooldef.ResourceParam
+	PackageMeta           *tooldef.Package
+	TS                    *tooldef.TSToolDef
+	TSWasm                *tooldef.TSWasmToolDef
 }
 
 // LoadedTools derives loaded tool records from a loaded package.
@@ -31,13 +32,14 @@ func LoadedTools(p packaging.LoadedPackage) []LoadedTool {
 			description = inferToolName(pkgTool.EntryTS)
 		}
 		loaded := LoadedTool{
-			Name:           inferToolName(pkgTool.EntryTS),
-			Description:    description,
-			Sig:            pkgTool.Sig,
-			Effect:         pkgTool.Effect,
-			Idempotent:     pkgTool.Idempotent,
-			ResourceParams: pkgTool.ResourceParams,
-			PackageMeta:    &p.Package,
+			Name:                  inferToolName(pkgTool.EntryTS),
+			Description:           description,
+			Sig:                   pkgTool.Sig,
+			Effect:                pkgTool.Effect,
+			Idempotent:            pkgTool.Idempotent,
+			MaxFetchResponseBytes: pkgTool.MaxFetchResponseBytes,
+			ResourceParams:        pkgTool.ResourceParams,
+			PackageMeta:           &p.Package,
 		}
 
 		baseDef := tooldef.TSToolDef{

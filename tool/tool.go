@@ -76,13 +76,14 @@ type ResourceParam struct {
 }
 
 type PackageTool struct {
-	EntryTS        string                 `json:"entry_ts"`
-	Idempotent     *bool                  `json:"idempotent,omitempty"`
-	Effect         Effect                 `json:"effect,omitempty"`
-	Description    string                 `json:"description,omitempty"`
-	ParamsSchema   map[string]any         `json:"paramsSchema,omitempty"`
-	Sig            *toolbox.FuncSignature `json:"-"`
-	ResourceParams []ResourceParam        `json:"resourceParams,omitempty"`
+	EntryTS               string                 `json:"entry_ts"`
+	Idempotent            *bool                  `json:"idempotent,omitempty"`
+	Effect                Effect                 `json:"effect,omitempty"`
+	Description           string                 `json:"description,omitempty"`
+	MaxFetchResponseBytes *int64                 `json:"max_fetch_response_bytes,omitempty"`
+	ParamsSchema          map[string]any         `json:"paramsSchema,omitempty"`
+	Sig                   *toolbox.FuncSignature `json:"-"`
+	ResourceParams        []ResourceParam        `json:"resourceParams,omitempty"`
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

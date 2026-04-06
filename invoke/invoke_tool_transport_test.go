@@ -8,7 +8,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/credpath"
 	"github.com/solidarity-ai/toolbox/invoke"
@@ -88,6 +90,84 @@ func TestE2E_UsesPreparedToolInjector(t *testing.T) {
 	auth := gotAuth.Load().(string)
 	if auth != "Bearer prepared-token" {
 		t.Fatalf("upstream got Authorization %q, want %q", auth, "Bearer prepared-token")
+	}
+}
+
+func TestE2E_FetchResponseTooLargeErrors(t *testing.T) {
+	t.Parallel()
+
+	const bodySize = (10 << 20) + 1
+	body := strings.Repeat("x", bodySize)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(upstream.Close)
+
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{newFetchLengthTool(t, nil)})
+
+	_, err := invoke.Run(prepared, "fetchSize.check", map[string]any{
+		"url": upstream.URL,
+	})
+	if err == nil {
+		t.Fatal("expected oversized response error, got nil")
+	}
+	if !strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("expected response body limit error, got: %v", err)
+	}
+}
+
+func TestE2E_FetchResponseToolOverride(t *testing.T) {
+	t.Parallel()
+
+	const bodySize = (10 << 20) + 1
+	body := strings.Repeat("x", bodySize)
+	limit := int64(bodySize + 1024)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(upstream.Close)
+
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{newFetchLengthTool(t, &limit)})
+
+	result, err := invoke.Run(prepared, "fetchSize.check", map[string]any{
+		"url": upstream.URL,
+	})
+	if err != nil {
+		t.Fatalf("invoke.Run returned error: %v", err)
+	}
+	if result != `{"status":200,"len":10485761}` {
+		t.Fatalf("unexpected result: %s", result)
+	}
+}
+
+func newFetchLengthTool(t *testing.T, maxFetchResponseBytes *int64) assembler.LoadedTool {
+	t.Helper()
+
+	const source = `export default async function tool(url: string): Promise<string> {
+  const response = await fetch(url);
+  const body = await response.text();
+  return JSON.stringify({ status: response.status, len: body.length });
+}`
+
+	return assembler.LoadedTool{
+		Name:                  "fetchSize.check",
+		Description:           "Fetches a URL and returns the response length",
+		Sig:                   tooltest.NewTSSig(t, source),
+		MaxFetchResponseBytes: maxFetchResponseBytes,
+		PackageMeta: &tooldef.Package{
+			Name:    "fetch-size",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+		},
+		TS: &tooldef.TSToolDef{
+			Entry: "tools/fetch-size.check.ts",
+			Files: fstest.MapFS{
+				"tools/fetch-size.check.ts": &fstest.MapFile{Data: []byte(source)},
+			},
+		},
 	}
 }
 

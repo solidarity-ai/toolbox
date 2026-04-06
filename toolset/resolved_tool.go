@@ -30,6 +30,8 @@ func (t PreparedTool) Injector() *transport.CredentialInjector { return t.inject
 
 func (t PreparedTool) Allowlist() *transport.HostAllowlist { return t.allowlist }
 
+func (t PreparedTool) MaxFetchResponseBytes() *int64 { return t.LoadedTool.MaxFetchResponseBytes }
+
 func (t PreparedTool) ValidateCall(agentParams map[string]any) (map[string]any, error) {
 	if len(t.bindings) == 0 {
 		return agentParams, nil

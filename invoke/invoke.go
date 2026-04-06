@@ -23,6 +23,8 @@ import (
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
+const defaultMaxFetchResponseBody = 10 << 20 // 10 MiB
+
 var (
 	checkSessionsMu sync.RWMutex
 	checkSessions   = map[*tooldef.Package]*toolbox.CheckSession{}
@@ -53,7 +55,7 @@ func Run(prepared toolset.PreparedToolset, toolName string, args map[string]any)
 // executeTool runs one already-selected tool with fully prepared params.
 // It does not perform tool lookup, binding evaluation, or toolset validation.
 func executeTool(tool toolset.PreparedTool, fullParams map[string]any, memFS *vfs.MemFS, injector *transport.CredentialInjector, allowlist *transport.HostAllowlist) (string, error) {
-	fetchFn := makeFetch(injector, allowlist)
+	fetchFn := makeFetch(injector, allowlist, tool.MaxFetchResponseBytes())
 	if tool.TSWasm != nil {
 		if memFS != nil {
 			return runTSWasmToolWithVFS(tool, fullParams, memFS, fetchFn)
@@ -209,9 +211,11 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 
 // makeFetch returns a fetch function that optionally injects credentials
 // and enforces a host allowlist.
-func makeFetch(injector *transport.CredentialInjector, allowlist *transport.HostAllowlist) func(string, string, string, string) (quickts.FetchResult, error) {
+func makeFetch(injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, maxResponseBodyBytes *int64) func(string, string, string, string) (quickts.FetchResult, error) {
 	if injector == nil && allowlist == nil {
-		return goFetch
+		return func(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
+			return goFetch(rawURL, method, headersJSON, body, maxResponseBodyBytes)
+		}
 	}
 	return func(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
 		var applied *transport.AppliedInjection
@@ -236,19 +240,19 @@ func makeFetch(injector *transport.CredentialInjector, allowlist *transport.Host
 			applied = next
 			return nil
 		}
-		return goFetchWithAllowlist(rawURL, method, headersJSON, body, prepareRequest)
+		return goFetchWithAllowlist(rawURL, method, headersJSON, body, prepareRequest, maxResponseBodyBytes)
 	}
 }
 
 // goFetch performs an HTTP request using the fetch package.
 // It's the Go-side implementation behind the JS fetch() global.
-func goFetch(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
-	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil)
+func goFetch(rawURL, method, headersJSON, body string, maxResponseBodyBytes *int64) (quickts.FetchResult, error) {
+	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil, maxResponseBodyBytes)
 }
 
 // goFetchWithAllowlist is like goFetch but allows the caller to prepare the
 // initial request and each redirected request before they are sent.
-func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareRequest func(*http.Request, []*http.Request) error) (quickts.FetchResult, error) {
+func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareRequest func(*http.Request, []*http.Request) error, maxResponseBodyBytes *int64) (quickts.FetchResult, error) {
 	reqHeaders := fetch.NewHeaders()
 	var pairs [][2]string
 	if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
@@ -275,10 +279,16 @@ func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareReque
 	}
 	defer resp.Body().Close()
 
-	const maxResponseBody = 10 << 20 // 10 MB
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body(), maxResponseBody))
+	limit := int64(defaultMaxFetchResponseBody)
+	if maxResponseBodyBytes != nil {
+		limit = *maxResponseBodyBytes
+	}
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body(), limit+1))
 	if err != nil {
 		return quickts.FetchResult{}, fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(respBody)) > limit {
+		return quickts.FetchResult{}, fmt.Errorf("response body exceeds %d bytes", limit)
 	}
 
 	return quickts.FetchResult{

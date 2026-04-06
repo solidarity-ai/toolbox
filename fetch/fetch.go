@@ -78,6 +78,9 @@ func Fetch(ctx context.Context, url string, init *RequestInit) (*Response, error
 			return nil
 		},
 	}
+	if init != nil && init.Transport != nil {
+		client.Transport = init.Transport
+	}
 
 	httpResp, err := client.Do(httpReq)
 	if err != nil {

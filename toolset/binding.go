@@ -2,6 +2,7 @@ package toolset
 
 import (
 	"context"
+	"net/http"
 
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/transport"
@@ -40,4 +41,5 @@ type Config struct {
 	ResourceBindings       map[string]Binding // Resource-level bindings by canonical name
 	EnvContext             map[string]any     // Flat key-value environment context from harness
 	CredentialPolicySource PackageCredentialPolicySource
+	FetchTransport         http.RoundTripper // optional; used by tests to intercept fetch calls
 }

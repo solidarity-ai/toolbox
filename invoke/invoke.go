@@ -49,13 +49,13 @@ func Run(prepared toolset.PreparedToolset, toolName string, args map[string]any)
 	if err != nil {
 		return "", err
 	}
-	return executeTool(tool, fullParams, nil, injector, allowlist)
+	return executeTool(tool, fullParams, nil, injector, allowlist, prepared.FetchTransport())
 }
 
 // executeTool runs one already-selected tool with fully prepared params.
 // It does not perform tool lookup, binding evaluation, or toolset validation.
-func executeTool(tool toolset.PreparedTool, fullParams map[string]any, memFS *vfs.MemFS, injector *transport.CredentialInjector, allowlist *transport.HostAllowlist) (string, error) {
-	fetchFn := makeFetch(injector, allowlist, tool.MaxFetchResponseBytes())
+func executeTool(tool toolset.PreparedTool, fullParams map[string]any, memFS *vfs.MemFS, injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, rt http.RoundTripper) (string, error) {
+	fetchFn := makeFetch(injector, allowlist, tool.MaxFetchResponseBytes(), rt)
 	if tool.TSWasm != nil {
 		if memFS != nil {
 			return runTSWasmToolWithVFS(tool, fullParams, memFS, fetchFn)
@@ -113,7 +113,7 @@ func RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[stri
 	if err != nil {
 		return "", err
 	}
-	return executeTool(tool, fullParams, memFS, injector, allowlist)
+	return executeTool(tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
 }
 
 func runTSWasmTool(tool toolset.PreparedTool, args map[string]any, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (string, error) {
@@ -211,8 +211,8 @@ func runtimeFlag(rt tooldef.ToolRuntime) string {
 
 // makeFetch returns a fetch function that optionally injects credentials
 // and enforces a host allowlist.
-func makeFetch(injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, maxResponseBodyBytes *int64) func(string, string, string, string) (quickts.FetchResult, error) {
-	if injector == nil && allowlist == nil {
+func makeFetch(injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, maxResponseBodyBytes *int64, rt http.RoundTripper) func(string, string, string, string) (quickts.FetchResult, error) {
+	if injector == nil && allowlist == nil && rt == nil {
 		return func(rawURL, method, headersJSON, body string) (quickts.FetchResult, error) {
 			return goFetch(rawURL, method, headersJSON, body, maxResponseBodyBytes)
 		}
@@ -240,19 +240,19 @@ func makeFetch(injector *transport.CredentialInjector, allowlist *transport.Host
 			applied = next
 			return nil
 		}
-		return goFetchWithAllowlist(rawURL, method, headersJSON, body, prepareRequest, maxResponseBodyBytes)
+		return goFetchWithAllowlist(rawURL, method, headersJSON, body, prepareRequest, maxResponseBodyBytes, rt)
 	}
 }
 
 // goFetch performs an HTTP request using the fetch package.
 // It's the Go-side implementation behind the JS fetch() global.
 func goFetch(rawURL, method, headersJSON, body string, maxResponseBodyBytes *int64) (quickts.FetchResult, error) {
-	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil, maxResponseBodyBytes)
+	return goFetchWithAllowlist(rawURL, method, headersJSON, body, nil, maxResponseBodyBytes, nil)
 }
 
 // goFetchWithAllowlist is like goFetch but allows the caller to prepare the
 // initial request and each redirected request before they are sent.
-func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareRequest func(*http.Request, []*http.Request) error, maxResponseBodyBytes *int64) (quickts.FetchResult, error) {
+func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareRequest func(*http.Request, []*http.Request) error, maxResponseBodyBytes *int64, rt http.RoundTripper) (quickts.FetchResult, error) {
 	reqHeaders := fetch.NewHeaders()
 	var pairs [][2]string
 	if err := json.Unmarshal([]byte(headersJSON), &pairs); err == nil {
@@ -271,6 +271,7 @@ func goFetchWithAllowlist(rawURL, method, headersJSON, body string, prepareReque
 		Headers:        reqHeaders,
 		Body:           bodyReader,
 		PrepareRequest: prepareRequest,
+		Transport:      rt,
 	}
 
 	resp, err := fetch.Fetch(context.Background(), rawURL, init)

@@ -31,6 +31,10 @@ type RequestInit struct {
 	// If set, it is called before following each redirect. A non-nil error
 	// aborts the redirect chain.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
+
+	// Transport, if non-nil, overrides the default http.Client transport.
+	// Used by tests to intercept requests after PrepareRequest has run.
+	Transport http.RoundTripper
 }
 
 // NewRequest creates a new Request for the given URL with optional init.

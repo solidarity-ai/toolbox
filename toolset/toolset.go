@@ -3,6 +3,7 @@ package toolset
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 )
@@ -18,8 +19,15 @@ type AccountParam struct {
 
 // PreparedToolset carries the visible tools and their compiled bindings.
 type PreparedToolset struct {
-	tools  []PreparedTool
-	byName map[string]int
+	tools          []PreparedTool
+	byName         map[string]int
+	fetchTransport http.RoundTripper
+}
+
+// FetchTransport returns the optional http.RoundTripper configured via
+// Config.FetchTransport. Used to intercept fetch calls in tests.
+func (r PreparedToolset) FetchTransport() http.RoundTripper {
+	return r.fetchTransport
 }
 
 // PrepareTools prepares a pre-built list of loaded tools with the given config.
@@ -101,8 +109,9 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 	}
 
 	return PreparedToolset{
-		tools:  out,
-		byName: byName,
+		tools:          out,
+		byName:         byName,
+		fetchTransport: cfg.FetchTransport,
 	}, nil
 }
 

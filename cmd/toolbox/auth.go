@@ -320,7 +320,7 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 		fmt.Fprintln(stdout)
 		fmt.Fprintf(stdout, "Opening browser to authorize...\n")
 		fmt.Fprintf(stdout, "If the browser does not open, visit:\n%s\n", authorizationURL)
-		fmt.Fprintf(stdout, "\nOr paste the authorization code here: ")
+		fmt.Fprintf(stdout, "\nOr paste the full redirect URL or authorization code here: ")
 		openBrowser(authorizationURL)
 	})
 	if err != nil {
@@ -673,6 +673,16 @@ func (i *authInput) shouldIgnore(line string) bool {
 			i.ignore[line] = remaining - 1
 		}
 		return true
+	}
+	if normalized, err := oauth2flow.NormalizeAuthorizationCodeInput(line, ""); err == nil && normalized != line {
+		if remaining := i.ignore[normalized]; remaining > 0 {
+			if remaining == 1 {
+				delete(i.ignore, normalized)
+			} else {
+				i.ignore[normalized] = remaining - 1
+			}
+			return true
+		}
 	}
 	return false
 }

@@ -1177,13 +1177,31 @@ func TestRunAuthOAuth2ManualPasteHeadless(t *testing.T) {
 	originalOpenBrowser := openBrowser
 	defer func() { openBrowser = originalOpenBrowser }()
 
+	reader, writer := io.Pipe()
+	defer reader.Close()
+
 	var openedAuthURL string
 	openBrowser = func(authURL string) {
 		openedAuthURL = authURL
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+
+		go func() {
+			callbackURL := fmt.Sprintf("%s?code=manual-auth-code&state=%s", redirectURI, state)
+			if _, err := io.WriteString(writer, callbackURL+"\n"); err != nil {
+				t.Errorf("write manual callback URL: %v", err)
+			}
+			_ = writer.Close()
+		}()
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runAuthWithRepo(loaded, repo, strings.NewReader("manual-auth-code\n"), &stdout, &stderr, "", "")
+	err := runAuthWithRepo(loaded, repo, reader, &stdout, &stderr, "", "")
 	if err != nil {
 		t.Fatalf("runAuthWithRepo() error: %v", err)
 	}
@@ -1209,7 +1227,7 @@ func TestRunAuthOAuth2ManualPasteHeadless(t *testing.T) {
 	if openedAuthURL == "" {
 		t.Fatal("openBrowser was not called")
 	}
-	if !strings.Contains(stdout.String(), "Or paste the authorization code here:") {
+	if !strings.Contains(stdout.String(), "Or paste the full redirect URL or authorization code here:") {
 		t.Fatalf("stdout missing manual paste prompt, got: %s", stdout.String())
 	}
 }
@@ -1308,9 +1326,9 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 			}
 			resp.Body.Close()
 
-			// A late pasted auth code must be ignored by the next prompt. The
+			// A late pasted auth code URL must be ignored by the next prompt. The
 			// actual next credential input that follows still needs to be read.
-			if _, err := io.WriteString(writer, "test-auth-code\nnext-api-key\n"); err != nil {
+			if _, err := io.WriteString(writer, callbackURL+"\nnext-api-key\n"); err != nil {
 				t.Errorf("write api key input: %v", err)
 			}
 			_ = writer.Close()

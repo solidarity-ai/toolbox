@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 )
 
@@ -36,18 +37,15 @@ func (r *ManualReceiver) RedirectURI() string { return r.redirectURI }
 // ReadLine(context.Context), that path is used so cancellations do not leave
 // behind blocked reads on a shared input stream. Otherwise it falls back to a
 // background scanner goroutine around the raw io.Reader.
-func (r *ManualReceiver) ReceiveCode(ctx context.Context, _ string) (string, error) {
+func (r *ManualReceiver) ReceiveCode(ctx context.Context, expectedState string) (string, error) {
 	if lineReader, ok := r.reader.(interface {
 		ReadLine(context.Context) (string, error)
 	}); ok {
-		code, err := lineReader.ReadLine(ctx)
+		line, err := lineReader.ReadLine(ctx)
 		if err != nil {
 			return "", err
 		}
-		if code == "" {
-			return "", fmt.Errorf("oauth2flow: empty authorization code")
-		}
-		return code, nil
+		return NormalizeAuthorizationCodeInput(line, expectedState)
 	}
 
 	type result struct {
@@ -58,9 +56,9 @@ func (r *ManualReceiver) ReceiveCode(ctx context.Context, _ string) (string, err
 	go func() {
 		scanner := bufio.NewScanner(r.reader)
 		if scanner.Scan() {
-			code := strings.TrimSpace(scanner.Text())
-			if code == "" {
-				ch <- result{err: fmt.Errorf("oauth2flow: empty authorization code")}
+			code, err := NormalizeAuthorizationCodeInput(scanner.Text(), expectedState)
+			if err != nil {
+				ch <- result{err: err}
 				return
 			}
 			ch <- result{code: code}
@@ -79,6 +77,54 @@ func (r *ManualReceiver) ReceiveCode(ctx context.Context, _ string) (string, err
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+}
+
+// NormalizeAuthorizationCodeInput accepts either a raw OAuth2 authorization
+// code or a full redirect URL and returns the authorization code. If the input
+// is a redirect URL and includes state, the state must match expectedState.
+func NormalizeAuthorizationCodeInput(line, expectedState string) (string, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", fmt.Errorf("oauth2flow: empty authorization code")
+	}
+
+	if code, ok, err := extractAuthorizationCodeFromURL(line, expectedState); ok || err != nil {
+		return code, err
+	}
+	return line, nil
+}
+
+func extractAuthorizationCodeFromURL(line, expectedState string) (string, bool, error) {
+	parsed, err := url.Parse(line)
+	if err != nil {
+		return "", false, nil
+	}
+	if parsed.Scheme == "" {
+		return "", false, nil
+	}
+	if parsed.Host == "" && !strings.EqualFold(parsed.Scheme, "urn") {
+		return "", false, nil
+	}
+
+	values := parsed.Query()
+	code := values.Get("code")
+	state := values.Get("state")
+	if code == "" && parsed.Fragment != "" {
+		fragmentValues, err := url.ParseQuery(parsed.Fragment)
+		if err == nil {
+			code = fragmentValues.Get("code")
+			if state == "" {
+				state = fragmentValues.Get("state")
+			}
+		}
+	}
+	if code == "" {
+		return "", false, nil
+	}
+	if expectedState != "" && state != "" && state != expectedState {
+		return "", true, fmt.Errorf("oauth2flow: state mismatch (possible CSRF)")
+	}
+	return code, true, nil
 }
 
 // Close is a no-op.

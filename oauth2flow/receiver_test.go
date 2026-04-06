@@ -83,6 +83,42 @@ func TestManualReceiver_ReadsCode(t *testing.T) {
 	}
 }
 
+func TestManualReceiver_ExtractsCodeFromRedirectURL(t *testing.T) {
+	t.Parallel()
+
+	reader := strings.NewReader("http://127.0.0.1:8080/callback?code=my-auth-code&state=test-state\n")
+	recv := oauth2flow.NewManualReceiver(reader, "http://127.0.0.1:8080/callback")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	code, err := recv.ReceiveCode(ctx, "test-state")
+	if err != nil {
+		t.Fatalf("ReceiveCode: %v", err)
+	}
+	if code != "my-auth-code" {
+		t.Fatalf("code = %q, want %q", code, "my-auth-code")
+	}
+}
+
+func TestManualReceiver_RejectsRedirectURLWithMismatchedState(t *testing.T) {
+	t.Parallel()
+
+	reader := strings.NewReader("http://127.0.0.1:8080/callback?code=my-auth-code&state=wrong-state\n")
+	recv := oauth2flow.NewManualReceiver(reader, "http://127.0.0.1:8080/callback")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := recv.ReceiveCode(ctx, "expected-state")
+	if err == nil {
+		t.Fatal("expected state mismatch error")
+	}
+	if !strings.Contains(err.Error(), "state mismatch") {
+		t.Fatalf("ReceiveCode error = %v, want state mismatch", err)
+	}
+}
+
 func TestManualReceiver_DefaultOOBRedirectURI(t *testing.T) {
 	t.Parallel()
 

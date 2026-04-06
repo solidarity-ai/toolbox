@@ -57,11 +57,12 @@ type DevManifest struct {
 
 // DevManifestCredential declares a credential requirement in the dev manifest.
 type DevManifestCredential struct {
-	Name     string            `json:"name"`
-	Type     string            `json:"type"`
-	Provider json.RawMessage   `json:"provider,omitempty"`
-	Scopes   []string          `json:"scopes,omitempty"`
-	Inject   DevManifestInject `json:"inject"`
+	Name         string            `json:"name"`
+	Type         string            `json:"type"`
+	Instructions string            `json:"instructions,omitempty"`
+	Provider     json.RawMessage   `json:"provider,omitempty"`
+	Scopes       []string          `json:"scopes,omitempty"`
+	Inject       DevManifestInject `json:"inject"`
 }
 
 // DevManifestInject describes injection targets in the dev manifest.
@@ -179,9 +180,10 @@ func Compile(dev DevManifest) tooldef.Package {
 	}
 	for _, cred := range dev.Credentials {
 		pc := tooldef.PackageCredential{
-			Name:   cred.Name,
-			Type:   cred.Type,
-			Scopes: cred.Scopes,
+			Name:         cred.Name,
+			Type:         cred.Type,
+			Instructions: cred.Instructions,
+			Scopes:       cred.Scopes,
 			Inject: tooldef.PackageInject{
 				Hosts:                    cred.Inject.Hosts,
 				Method:                   cred.Inject.Method,

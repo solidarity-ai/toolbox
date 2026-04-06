@@ -132,6 +132,7 @@ func TestParseDev(t *testing.T) {
     {
       "name": "default",
       "type": "oauth2",
+      "instructions": "Create OAuth client credentials in Google Cloud Console.",
       "provider": "google",
       "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
       "inject": {
@@ -160,10 +161,11 @@ func TestParseDev(t *testing.T) {
 				},
 				Credentials: []DevManifestCredential{
 					{
-						Name:     "default",
-						Type:     "oauth2",
-						Provider: json.RawMessage(`"google"`),
-						Scopes:   []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+						Name:         "default",
+						Type:         "oauth2",
+						Instructions: "Create OAuth client credentials in Google Cloud Console.",
+						Provider:     json.RawMessage(`"google"`),
+						Scopes:       []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
 						Inject: DevManifestInject{
 							Hosts:      []string{"*.googleapis.com"},
 							Method:     "bearer_header",
@@ -726,6 +728,7 @@ func TestParsePkg(t *testing.T) {
     {
       "name": "default",
       "type": "oauth2",
+      "instructions": "Create OAuth client credentials in Google Cloud Console.",
       "provider": { "name": "google" },
       "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
       "inject": {
@@ -746,10 +749,11 @@ func TestParsePkg(t *testing.T) {
 				},
 				Credentials: []tooldef.PackageCredential{
 					{
-						Name:     "default",
-						Type:     "oauth2",
-						Provider: &tooldef.OAuth2ProviderConfig{Name: "google"},
-						Scopes:   []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+						Name:         "default",
+						Type:         "oauth2",
+						Instructions: "Create OAuth client credentials in Google Cloud Console.",
+						Provider:     &tooldef.OAuth2ProviderConfig{Name: "google"},
+						Scopes:       []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
 						Inject: tooldef.PackageInject{
 							Hosts:      []string{"*.googleapis.com"},
 							Method:     "bearer_header",

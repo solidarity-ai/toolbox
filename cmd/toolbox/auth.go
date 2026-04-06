@@ -180,6 +180,7 @@ func runAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Reposi
 	ctx := context.Background()
 
 	for _, cred := range creds {
+		writeCredentialInstructions(stdout, cred, "")
 		switch cred.Type {
 		case "oauth2":
 			if err := authOAuth2(ctx, repo, input, loaded.Package, cred, account, stdout, stderr); err != nil {
@@ -706,6 +707,7 @@ func checkAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Repo
 			fmt.Fprintf(stdout, "%s (%s): \u2713 configured\n", check.Credential.Name, check.Credential.Type)
 		} else {
 			fmt.Fprintf(stdout, "%s (%s): \u2717 not configured\n", check.Credential.Name, check.Credential.Type)
+			writeCredentialInstructions(stdout, check.Credential, "  ")
 		}
 		for _, shared := range check.Shared {
 			if shared.Present {
@@ -731,6 +733,22 @@ func checkAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Repo
 	}
 
 	return nil
+}
+
+func writeCredentialInstructions(stdout io.Writer, cred tooldef.PackageCredential, indent string) {
+	instructions := strings.TrimSpace(cred.Instructions)
+	if instructions == "" {
+		return
+	}
+	fmt.Fprintf(stdout, "%sInstructions:\n", indent)
+	for _, line := range strings.Split(instructions, "\n") {
+		if strings.TrimSpace(line) == "" {
+			fmt.Fprintln(stdout)
+			continue
+		}
+		fmt.Fprintf(stdout, "%s  %s\n", indent, line)
+	}
+	fmt.Fprintln(stdout)
 }
 
 func resolveProviderEndpoints(cred tooldef.PackageCredential) (authURL, tokenURL string, err error) {

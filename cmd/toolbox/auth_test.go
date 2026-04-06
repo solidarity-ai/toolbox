@@ -101,6 +101,41 @@ func TestRunAuthAPIKeyEndToEnd(t *testing.T) {
 	}
 }
 
+func TestRunAuthShowsCredentialInstructions(t *testing.T) {
+	repo, _ := newTestCredentialRepo(t)
+
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("my-package"),
+			Name:    "my-package",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{
+				{
+					Name:         "weather_api",
+					Type:         "api_key",
+					Instructions: "Get an API key from https://example.com/settings/api-keys.",
+					Inject: tooldef.PackageInject{
+						Hosts:  []string{"api.weather.com"},
+						Method: "api_key_header",
+					},
+				},
+			},
+		},
+	}
+
+	stdin := strings.NewReader("sk-test-key-12345\n")
+	var stdout, stderr bytes.Buffer
+
+	if err := runAuthWithRepo(loaded, repo, stdin, &stdout, &stderr, "", ""); err != nil {
+		t.Fatalf("runAuthWithRepo() error: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Instructions:\n  Get an API key from https://example.com/settings/api-keys.\n\nEnter API key for weather_api: ") {
+		t.Fatalf("stdout = %q, want credential instructions before prompt", out)
+	}
+}
+
 func TestRunAuthNoCredentials(t *testing.T) {
 	repo, _ := newTestCredentialRepo(t)
 
@@ -440,6 +475,40 @@ func TestRunAuthCheckTreatsEmptyStoredSecretAsMissing(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "github_token (bearer): ✗ not configured") {
 		t.Fatalf("stdout = %q, want empty secret treated as missing", out)
+	}
+}
+
+func TestRunAuthCheckShowsCredentialInstructionsWhenMissing(t *testing.T) {
+	repo, _ := newTestCredentialRepo(t)
+
+	loaded := packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule("my-package"),
+			Name:    "my-package",
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name:         "github_token",
+				Type:         "bearer",
+				Instructions: "Create a personal access token in GitHub settings.",
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.github.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+
+	var stdout bytes.Buffer
+	if err := checkAuthWithRepo(loaded, repo, &stdout); err != nil {
+		t.Fatalf("checkAuthWithRepo() error: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "github_token (bearer): ✗ not configured") {
+		t.Fatalf("stdout = %q, want missing credential status", out)
+	}
+	if !strings.Contains(out, "  Instructions:\n    Create a personal access token in GitHub settings.\n") {
+		t.Fatalf("stdout = %q, want credential instructions in check output", out)
 	}
 }
 

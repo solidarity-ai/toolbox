@@ -21,11 +21,12 @@ type Package struct {
 
 // PackageCredential declares a credential a package needs and how to inject it.
 type PackageCredential struct {
-	Name     string                `json:"name"`
-	Type     string                `json:"type"`
-	Provider *OAuth2ProviderConfig `json:"provider,omitempty"`
-	Scopes   []string              `json:"scopes,omitempty"`
-	Inject   PackageInject         `json:"inject"`
+	Name         string                `json:"name"`
+	Type         string                `json:"type"`
+	Instructions string                `json:"instructions,omitempty"`
+	Provider     *OAuth2ProviderConfig `json:"provider,omitempty"`
+	Scopes       []string              `json:"scopes,omitempty"`
+	Inject       PackageInject         `json:"inject"`
 }
 
 // OAuth2ProviderConfig holds OAuth2 provider endpoint configuration.

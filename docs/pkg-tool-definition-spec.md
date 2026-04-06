@@ -89,6 +89,37 @@ Per-tool descriptions and some defaults may come from tool source during local d
 }
 ```
 
+### Source package with credentials:
+
+```json
+{
+  "name": "github",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "instructions": "Create a personal access token in GitHub settings.",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/issues.list.ts",
+      "idempotent": false,
+      "effect": "readOnly"
+    }
+  ]
+}
+```
+
+`credentials[].instructions` is optional. When present, Toolbox shows it to the
+user during credential setup and in missing-credential status output so the
+user knows where to get or create the required credential.
+
 Tools may optionally set `max_fetch_response_bytes` in their manifest entry to
 override the default `fetch()` response-body limit for that tool. If omitted,
 Toolbox uses a default limit of 10 MiB.

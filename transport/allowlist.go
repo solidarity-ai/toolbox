@@ -7,7 +7,8 @@ type HostAllowlist struct {
 }
 
 // NewHostAllowlist creates an allowlist from host patterns.
-// Supports exact match ("api.slack.com") and wildcard prefix ("*.googleapis.com").
+// Supports exact match ("api.slack.com"), wildcard prefix ("*.googleapis.com"),
+// and global wildcard ("*").
 func NewHostAllowlist(patterns []string) *HostAllowlist {
 	return &HostAllowlist{patterns: patterns}
 }
@@ -15,7 +16,7 @@ func NewHostAllowlist(patterns []string) *HostAllowlist {
 // Allows returns true if the given host is permitted.
 func (a *HostAllowlist) Allows(host string) bool {
 	for _, p := range a.patterns {
-		if hostMatches(p, host) {
+		if p == "*" || hostMatches(p, host) {
 			return true
 		}
 	}

@@ -329,6 +329,9 @@ func seedAPIKey(store *testutil.TestSecretStore, module, cred, account, apiKey s
 // config, creates an MCP server and harness, and returns the harness.
 func newFetchTestHarness(t *testing.T, policy toolset.PackageCredentialPolicy) *mcptest.Harness {
 	t.Helper()
+	if policy.Allowlist == nil {
+		policy.Allowlist = transport.NewHostAllowlist([]string{"127.0.0.1", "localhost"})
+	}
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), singlePackageConfig("fixtures.local/fetch-test", policy))
 	srv := mcpserver.New(prepared)
 	return mcptest.NewHarness(t, srv)

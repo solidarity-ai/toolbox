@@ -71,7 +71,8 @@ func TestE2E_UsesPreparedToolInjector(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{
 		CredentialPolicySource: credentialrepo.StaticPolicySource{
 			tooldef.ModulePath("fixtures.local/fetch-test"): {
-				Injector: ci,
+				Injector:  ci,
+				Allowlist: transport.NewHostAllowlist([]string{upstreamURL.Hostname()}),
 			},
 		},
 	})
@@ -159,8 +160,9 @@ func newFetchLengthTool(t *testing.T, maxFetchResponseBytes *int64) assembler.Lo
 		Sig:                   tooltest.NewTSSig(t, source),
 		MaxFetchResponseBytes: maxFetchResponseBytes,
 		PackageMeta: &tooldef.Package{
-			Name:    "fetch-size",
-			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Name:         "fetch-size",
+			Runtime:      tooldef.RuntimeTypeScriptSandbox,
+			AllowedHosts: []string{"*"},
 		},
 		TS: &tooldef.TSToolDef{
 			Entry: "tools/fetch-size.check.ts",
@@ -168,6 +170,28 @@ func newFetchLengthTool(t *testing.T, maxFetchResponseBytes *int64) assembler.Lo
 				"tools/fetch-size.check.ts": &fstest.MapFile{Data: []byte(source)},
 			},
 		},
+	}
+}
+
+func TestE2E_DeniesNetworkWhenAllowedHostsOmitted(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{})
+
+	_, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+		"url": upstream.URL + "/api/data",
+	})
+	if err == nil {
+		t.Fatal("expected allowlist error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not in allowlist") {
+		t.Fatalf("expected allowlist failure, got: %v", err)
 	}
 }
 

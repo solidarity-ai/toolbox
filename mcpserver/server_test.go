@@ -5,16 +5,20 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
@@ -420,7 +424,18 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{})))
+	srvURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{
+		CredentialPolicySource: credentialrepo.StaticPolicySource{
+			tooldef.ModulePath("fixtures.local/fetch-test"): {
+				Allowlist: transport.NewHostAllowlist([]string{srvURL.Hostname()}),
+			},
+		},
+	})))
 
 	// Invoke the fetch-test.get tool with the test server URL.
 	result := h.CallTool("fetchTest.get", map[string]any{

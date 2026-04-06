@@ -518,6 +518,46 @@ func TestCredentialInjector_PathPrefixMatching(t *testing.T) {
 	}
 }
 
+func TestCredentialInjector_PathPrefixMatchesRootURLWithoutSlash(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	store.Seed(map[string][]byte{
+		credpath.Shared("root-api", "default", "api_key"): []byte("ROOT-KEY"),
+	})
+
+	rules := []transport.InjectionRule{
+		{
+			Hosts:          []string{"api.example.com"},
+			PathPrefix:     "/",
+			ModuleName:     "root-api",
+			CredentialName: "default",
+			SecretPrefix:   credpath.SharedPrefix("root-api", "default"),
+			Type:           transport.CredentialTypeAPIKey,
+			Method:         transport.InjectionMethodAPIKeyHeader,
+		},
+	}
+
+	ci := transport.NewCredentialInjector(rules, store)
+	_, headers, injected, err := ci.InjectRequest("GET", "https://api.example.com", nil)
+	if err != nil {
+		t.Fatalf("InjectRequest(root): %v", err)
+	}
+	if !injected {
+		t.Fatal("expected injected=true for root URL")
+	}
+
+	var gotAPIKey string
+	for _, h := range headers {
+		if strings.EqualFold(h[0], "X-API-Key") {
+			gotAPIKey = h[1]
+		}
+	}
+	if gotAPIKey != "ROOT-KEY" {
+		t.Fatalf("X-API-Key header = %q, want %q", gotAPIKey, "ROOT-KEY")
+	}
+}
+
 func TestCredentialInjector_APIKeyHeaderInjection(t *testing.T) {
 	t.Parallel()
 

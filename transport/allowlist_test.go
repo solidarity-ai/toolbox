@@ -41,6 +41,25 @@ func TestHostAllowlist_WildcardMatch(t *testing.T) {
 	}
 }
 
+func TestHostAllowlist_GlobalWildcardMatch(t *testing.T) {
+	t.Parallel()
+	al := NewHostAllowlist([]string{"*"})
+
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"example.com", true},
+		{"localhost", true},
+		{"127.0.0.1", true},
+	}
+	for _, tt := range tests {
+		if got := al.Allows(tt.host); got != tt.want {
+			t.Errorf("Allows(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}
+
 func TestHostAllowlist_EmptyDeniesAll(t *testing.T) {
 	t.Parallel()
 	al := NewHostAllowlist(nil)

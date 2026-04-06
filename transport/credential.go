@@ -360,6 +360,9 @@ func (ci *CredentialInjector) matchRule(u *url.URL) *InjectionRule {
 	}
 	host := u.Hostname()
 	path := u.Path
+	if path == "" {
+		path = "/"
+	}
 	for i := range ci.rules {
 		r := &ci.rules[i]
 		if !ci.hostMatchesAny(r.Hosts, host) {

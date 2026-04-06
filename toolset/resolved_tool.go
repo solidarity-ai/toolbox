@@ -140,7 +140,7 @@ func buildPreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBi
 		hiddenParams:       hidden,
 		credentialAccounts: policy.CredentialAccounts,
 		injector:           policy.Injector,
-		allowlist:          policy.Allowlist,
+		allowlist:          effectiveAllowlist(tool.PackageMeta, policy.Allowlist),
 		context:            context,
 	}
 
@@ -151,6 +151,16 @@ func buildPreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBi
 	prepared.accountParams = accountParams
 
 	return prepared, nil
+}
+
+func effectiveAllowlist(pkg *tooldef.Package, override *transport.HostAllowlist) *transport.HostAllowlist {
+	if override != nil {
+		return override
+	}
+	if pkg == nil {
+		return transport.NewHostAllowlist(nil)
+	}
+	return transport.NewHostAllowlist(pkg.AllowedHosts)
 }
 
 func credentialNames(creds []tooldef.PackageCredential) []string {

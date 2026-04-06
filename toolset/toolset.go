@@ -112,7 +112,10 @@ func NewPreparedToolset(tools []assembler.LoadedTool) PreparedToolset {
 	out := make([]PreparedTool, len(tools))
 	byName := make(map[string]int, len(tools))
 	for i, tool := range tools {
-		out[i] = PreparedTool{LoadedTool: tool}
+		out[i] = PreparedTool{
+			LoadedTool: tool,
+			allowlist:  effectiveAllowlist(tool.PackageMeta, nil),
+		}
 		byName[tool.Name] = i
 	}
 	return PreparedToolset{tools: out, byName: byName}

@@ -61,6 +61,31 @@ func TestCallbackReceiver_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestCallbackReceiver_ReportsProviderError(t *testing.T) {
+	t.Parallel()
+
+	recv, err := oauth2flow.NewCallbackReceiver()
+	if err != nil {
+		t.Fatalf("NewCallbackReceiver: %v", err)
+	}
+	defer recv.Close()
+
+	go func() {
+		http.Get(recv.RedirectURI() + "?error=access_denied&error_description=user+denied&state=test-state")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = recv.ReceiveCode(ctx, "test-state")
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "user denied") {
+		t.Fatalf("ReceiveCode error = %v, want provider error details", err)
+	}
+}
+
 func TestManualReceiver_ReadsCode(t *testing.T) {
 	t.Parallel()
 
@@ -243,5 +268,37 @@ func TestRaceReceiver_AllFail(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "all receivers failed") {
 		t.Fatalf("error = %v, want 'all receivers failed'", err)
+	}
+}
+
+func TestRaceReceiver_ProviderErrorWinsImmediately(t *testing.T) {
+	t.Parallel()
+
+	callbackRecv, err := oauth2flow.NewCallbackReceiver()
+	if err != nil {
+		t.Fatalf("NewCallbackReceiver: %v", err)
+	}
+	defer callbackRecv.Close()
+
+	slow := &mockReceiver{code: "slow-code", delay: 5 * time.Second}
+	race := oauth2flow.NewRaceReceiver(callbackRecv.RedirectURI(), callbackRecv, slow)
+	defer race.Close()
+
+	go func() {
+		http.Get(callbackRecv.RedirectURI() + "?error=access_denied&error_description=user+denied&state=test-state")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err = race.ReceiveCode(ctx, "test-state")
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if !strings.Contains(err.Error(), "access_denied") {
+		t.Fatalf("ReceiveCode error = %v, want provider error", err)
+	}
+	if strings.Contains(err.Error(), "all receivers failed") {
+		t.Fatalf("ReceiveCode error = %v, want direct provider error", err)
 	}
 }

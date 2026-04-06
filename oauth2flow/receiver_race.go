@@ -2,6 +2,7 @@ package oauth2flow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -45,6 +46,10 @@ func (r *RaceReceiver) ReceiveCode(ctx context.Context, expectedState string) (s
 		res := <-ch
 		if res.err == nil {
 			return res.code, nil
+		}
+		var providerErr *providerAuthorizationError
+		if errors.As(res.err, &providerErr) {
+			return "", res.err
 		}
 		lastErr = res.err
 	}

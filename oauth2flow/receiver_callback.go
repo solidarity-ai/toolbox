@@ -11,6 +11,7 @@ import (
 type callbackResult struct {
 	code  string
 	state string
+	err   error
 }
 
 // CallbackReceiver starts an ephemeral HTTP server on 127.0.0.1 and
@@ -31,8 +32,16 @@ func NewCallbackReceiver() (*CallbackReceiver, error) {
 	ch := make(chan callbackResult, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		code := r.URL.Query().Get("code")
-		if code == "" {
+		code, matched, err := parseAuthorizationResponseValues(r.URL.Query(), "")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			select {
+			case ch <- callbackResult{state: r.URL.Query().Get("state"), err: err}:
+			default:
+			}
+			return
+		}
+		if !matched || code == "" {
 			http.Error(w, "missing code parameter", http.StatusBadRequest)
 			return
 		}
@@ -63,6 +72,9 @@ func (r *CallbackReceiver) ReceiveCode(ctx context.Context, expectedState string
 	case result := <-r.resultCh:
 		if result.state != expectedState {
 			return "", fmt.Errorf("oauth2flow: state mismatch (possible CSRF)")
+		}
+		if result.err != nil {
+			return "", result.err
 		}
 		return result.code, nil
 	case <-ctx.Done():

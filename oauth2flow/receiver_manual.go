@@ -106,23 +106,51 @@ func extractAuthorizationCodeFromURL(line, expectedState string) (string, bool, 
 		return "", false, nil
 	}
 
-	values := parsed.Query()
-	code := values.Get("code")
-	state := values.Get("state")
-	if code == "" && parsed.Fragment != "" {
+	if code, matched, err := parseAuthorizationResponseValues(parsed.Query(), expectedState); matched || err != nil {
+		return code, matched, err
+	}
+	if parsed.Fragment != "" {
 		fragmentValues, err := url.ParseQuery(parsed.Fragment)
 		if err == nil {
-			code = fragmentValues.Get("code")
-			if state == "" {
-				state = fragmentValues.Get("state")
-			}
+			return parseAuthorizationResponseValues(fragmentValues, expectedState)
 		}
 	}
-	if code == "" {
+	return "", false, nil
+}
+
+type providerAuthorizationError struct {
+	code        string
+	description string
+	uri         string
+}
+
+func (e *providerAuthorizationError) Error() string {
+	msg := fmt.Sprintf("oauth2flow: provider returned error %s", e.code)
+	if e.description != "" {
+		msg += ": " + e.description
+	}
+	if e.uri != "" {
+		msg += " (" + e.uri + ")"
+	}
+	return msg
+}
+
+func parseAuthorizationResponseValues(values url.Values, expectedState string) (string, bool, error) {
+	code := values.Get("code")
+	errorCode := values.Get("error")
+	state := values.Get("state")
+	if code == "" && errorCode == "" {
 		return "", false, nil
 	}
 	if expectedState != "" && state != "" && state != expectedState {
 		return "", true, fmt.Errorf("oauth2flow: state mismatch (possible CSRF)")
+	}
+	if errorCode != "" {
+		return "", true, &providerAuthorizationError{
+			code:        errorCode,
+			description: values.Get("error_description"),
+			uri:         values.Get("error_uri"),
+		}
 	}
 	return code, true, nil
 }

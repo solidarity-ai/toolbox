@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,10 +82,6 @@ var KnownProviders = map[string]OAuth2Provider{
 	},
 }
 
-// denyPaths contains path segments that must never receive injected credentials.
-// These are OAuth2/auth endpoints where leaking tokens would be a security risk.
-var denyPaths = []string{"/oauth2/", "/oauth/", "/token", "/.well-known/", "/authorize"}
-
 // CachedToken holds a cached access token with its expiry.
 type CachedToken struct {
 	AccessToken string
@@ -95,6 +92,13 @@ type CachedToken struct {
 type TokenCache struct {
 	mu     sync.RWMutex
 	tokens map[string]CachedToken
+}
+
+// deniedProviderEndpoint identifies an exact OAuth provider endpoint that
+// must never receive injected credentials.
+type deniedProviderEndpoint struct {
+	host string
+	path string
 }
 
 // NewTokenCache returns an initialized TokenCache.
@@ -150,11 +154,12 @@ func ValidateAccountString(account string) error {
 // CredentialInjector injects credentials into outbound HTTP requests based on
 // configured rules without exposing credentials to tool code.
 type CredentialInjector struct {
-	rules         []InjectionRule
-	secrets       secrets.SecretStore
-	tokens        *TokenCache
-	refreshClient *http.Client
-	sf            *singleflight.Group
+	rules                   []InjectionRule
+	deniedProviderEndpoints map[deniedProviderEndpoint]struct{}
+	secrets                 secrets.SecretStore
+	tokens                  *TokenCache
+	refreshClient           *http.Client
+	sf                      *singleflight.Group
 }
 
 // CredentialInjectorOption configures a CredentialInjector.
@@ -170,11 +175,12 @@ func WithRefreshClient(c *http.Client) CredentialInjectorOption {
 // NewCredentialInjector creates a CredentialInjector with the given rules and secret store.
 func NewCredentialInjector(rules []InjectionRule, store secrets.SecretStore, opts ...CredentialInjectorOption) *CredentialInjector {
 	ci := &CredentialInjector{
-		rules:         rules,
-		secrets:       store,
-		tokens:        NewTokenCache(),
-		refreshClient: &http.Client{Timeout: 10 * time.Second},
-		sf:            &singleflight.Group{},
+		rules:                   rules,
+		deniedProviderEndpoints: buildDeniedProviderEndpoints(rules),
+		secrets:                 store,
+		tokens:                  NewTokenCache(),
+		refreshClient:           &http.Client{Timeout: 10 * time.Second},
+		sf:                      &singleflight.Group{},
 	}
 	for _, opt := range opts {
 		opt(ci)
@@ -203,12 +209,84 @@ func (ci *CredentialInjector) WithAccounts(accounts map[string]string) (*Credent
 	}
 
 	return &CredentialInjector{
-		rules:         scopedRules,
-		secrets:       ci.secrets,
-		tokens:        ci.tokens, // shared — keys differ by prefix
-		refreshClient: ci.refreshClient,
-		sf:            ci.sf, // shared — keys differ by prefix
+		rules:                   scopedRules,
+		deniedProviderEndpoints: ci.deniedProviderEndpoints,
+		secrets:                 ci.secrets,
+		tokens:                  ci.tokens, // shared — keys differ by prefix
+		refreshClient:           ci.refreshClient,
+		sf:                      ci.sf, // shared — keys differ by prefix
 	}, nil
+}
+
+func buildDeniedProviderEndpoints(rules []InjectionRule) map[deniedProviderEndpoint]struct{} {
+	endpoints := make(map[deniedProviderEndpoint]struct{})
+	for _, rule := range rules {
+		if rule.Type != CredentialTypeOAuth2 || rule.Provider == nil {
+			continue
+		}
+		for _, rawURL := range []string{rule.Provider.AuthURL, rule.Provider.TokenURL} {
+			endpoint, ok := parseDeniedProviderEndpoint(rawURL)
+			if !ok {
+				continue
+			}
+			endpoints[endpoint] = struct{}{}
+		}
+	}
+	return endpoints
+}
+
+func parseDeniedProviderEndpoint(rawURL string) (deniedProviderEndpoint, bool) {
+	if rawURL == "" {
+		return deniedProviderEndpoint{}, false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return deniedProviderEndpoint{}, false
+	}
+	return deniedProviderEndpoint{
+		host: canonicalEndpointHost(u),
+		path: canonicalEndpointPath(u),
+	}, true
+}
+
+func canonicalEndpointHost(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port == "" || port == defaultPortForScheme(u.Scheme) {
+		return host
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func canonicalEndpointPath(u *url.URL) string {
+	path := u.EscapedPath()
+	if path == "" {
+		return "/"
+	}
+	return path
+}
+
+func defaultPortForScheme(scheme string) string {
+	switch strings.ToLower(scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func (ci *CredentialInjector) isDeniedProviderEndpoint(u *url.URL) bool {
+	if u == nil || len(ci.deniedProviderEndpoints) == 0 {
+		return false
+	}
+	endpoint := deniedProviderEndpoint{
+		host: canonicalEndpointHost(u),
+		path: canonicalEndpointPath(u),
+	}
+	_, denied := ci.deniedProviderEndpoints[endpoint]
+	return denied
 }
 
 // Apply matches req against configured rules, injects the appropriate
@@ -275,13 +353,13 @@ func (ci *CredentialInjector) InjectRequest(method, rawURL string, headers [][2]
 	return newURL, newHeaders, true, nil
 }
 
-// matchRule finds the first rule matching the given host and path.
-func (ci *CredentialInjector) matchRule(host, path string) *InjectionRule {
-	for _, dp := range denyPaths {
-		if strings.Contains(path, dp) {
-			return nil
-		}
+// matchRule finds the first rule matching the given request URL.
+func (ci *CredentialInjector) matchRule(u *url.URL) *InjectionRule {
+	if ci.isDeniedProviderEndpoint(u) {
+		return nil
 	}
+	host := u.Hostname()
+	path := u.Path
 	for i := range ci.rules {
 		r := &ci.rules[i]
 		if !ci.hostMatchesAny(r.Hosts, host) {
@@ -296,7 +374,7 @@ func (ci *CredentialInjector) matchRule(host, path string) *InjectionRule {
 }
 
 func (ci *CredentialInjector) matchedCredential(u *url.URL) (*InjectionRule, string, error) {
-	rule := ci.matchRule(u.Hostname(), u.Path)
+	rule := ci.matchRule(u)
 	if rule == nil {
 		return nil, "", nil
 	}
@@ -460,7 +538,7 @@ func (ci *CredentialInjector) refreshOAuth2(rule *InjectionRule, cacheKey string
 // credentials are intended for that host). Call on non-redirected requests or
 // when the redirect provenance is not available.
 func (ci *CredentialInjector) StripInjected(req *http.Request) {
-	if ci.matchRule(req.URL.Hostname(), req.URL.Path) != nil {
+	if ci.matchRule(req.URL) != nil {
 		return
 	}
 	ci.stripAllInjected(req)

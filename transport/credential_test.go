@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,12 @@ import (
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/transport"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 // mockTokenServer starts an httptest server that responds to OAuth2 token
 // requests, returning the given accessToken. It increments *calls on each
@@ -33,6 +40,23 @@ func mockTokenServer(t *testing.T, accessToken string, expiresIn int, calls *ato
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func mockRefreshClient(accessToken string, calls *atomic.Int64) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if calls != nil {
+				calls.Add(1)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"access_token":"` + accessToken + `","token_type":"Bearer","expires_in":3600}`)),
+			}, nil
+		}),
+	}
 }
 
 func seedOAuth2Secrets(t *testing.T, store *testutil.TestSecretStore, moduleName, credName string) {
@@ -219,45 +243,133 @@ func TestCredentialInjector_NoMatchingRule(t *testing.T) {
 	}
 }
 
-func TestCredentialInjector_DenyListPaths(t *testing.T) {
+func TestCredentialInjector_DeniesKnownProviderEndpoints(t *testing.T) {
 	t.Parallel()
-
-	var calls atomic.Int64
-	tokenSrv := mockTokenServer(t, "secret", 3600, &calls)
 
 	store := testutil.NewTestSecretStore()
 	seedOAuth2Secrets(t, store, "google", "default")
+	provider := transport.KnownProviders["google"]
+	var refreshCalls atomic.Int64
 
 	rules := []transport.InjectionRule{
 		{
-			Hosts:          []string{"*.googleapis.com"},
+			Hosts:          []string{"accounts.google.com", "oauth2.googleapis.com"},
 			PathPrefix:     "/",
 			ModuleName:     "google",
 			CredentialName: "default",
 			SecretPrefix:   credpath.SharedPrefix("google", "default"),
 			Type:           transport.CredentialTypeOAuth2,
 			Method:         transport.InjectionMethodBearerHeader,
-			Provider: &transport.OAuth2Provider{
-				TokenURL: tokenSrv.URL + "/token",
-			},
+			Provider:       &provider,
 		},
 	}
 
-	ci := transport.NewCredentialInjector(rules, store)
+	ci := transport.NewCredentialInjector(rules, store, transport.WithRefreshClient(mockRefreshClient("secret", &refreshCalls)))
 
-	denyPaths := []string{
-		"https://accounts.googleapis.com/oauth2/token",
-		"https://accounts.googleapis.com/oauth2/v4/token",
-		"https://accounts.googleapis.com/token",
-		"https://oauth2.googleapis.com/token",
+	denyURLs := []string{
+		provider.AuthURL + "?client_id=test-client",
+		provider.TokenURL,
 	}
-	for _, u := range denyPaths {
+	for _, u := range denyURLs {
 		_, _, injected, err := ci.InjectRequest("POST", u, nil)
 		if err != nil {
 			t.Fatalf("InjectRequest(%s): %v", u, err)
 		}
 		if injected {
-			t.Errorf("credentials should NOT be injected for deny-listed path %s", u)
+			t.Errorf("credentials should NOT be injected for provider endpoint %s", u)
+		}
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("refresh client called %d times, want 0", got)
+	}
+}
+
+func TestCredentialInjector_DeniesCustomProviderEndpoints(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	seedOAuth2Secrets(t, store, "slack", "default")
+
+	provider := &transport.OAuth2Provider{
+		AuthURL:  "https://auth.example.com/oauth/v2/authorize",
+		TokenURL: "https://auth.example.com/api/oauth.v2.access",
+	}
+
+	rules := []transport.InjectionRule{
+		{
+			Hosts:          []string{"auth.example.com"},
+			PathPrefix:     "/",
+			ModuleName:     "slack",
+			CredentialName: "default",
+			SecretPrefix:   credpath.SharedPrefix("slack", "default"),
+			Type:           transport.CredentialTypeOAuth2,
+			Method:         transport.InjectionMethodBearerHeader,
+			Provider:       provider,
+		},
+	}
+
+	var refreshCalls atomic.Int64
+	ci := transport.NewCredentialInjector(rules, store, transport.WithRefreshClient(mockRefreshClient("secret", &refreshCalls)))
+
+	for _, u := range []string{
+		provider.AuthURL + "?state=abc123",
+		provider.TokenURL,
+	} {
+		_, _, injected, err := ci.InjectRequest("POST", u, nil)
+		if err != nil {
+			t.Fatalf("InjectRequest(%s): %v", u, err)
+		}
+		if injected {
+			t.Errorf("credentials should NOT be injected for custom provider endpoint %s", u)
+		}
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("refresh client called %d times, want 0", got)
+	}
+}
+
+func TestCredentialInjector_DoesNotDenyPathsContainingAuthSubstrings(t *testing.T) {
+	t.Parallel()
+
+	store := testutil.NewTestSecretStore()
+	store.Seed(map[string][]byte{
+		credpath.Shared("payments", "default", "token"): []byte("substring-safe-token"),
+	})
+
+	rules := []transport.InjectionRule{
+		{
+			Hosts:          []string{"api.example.com"},
+			PathPrefix:     "/",
+			ModuleName:     "payments",
+			CredentialName: "default",
+			SecretPrefix:   credpath.SharedPrefix("payments", "default"),
+			Type:           transport.CredentialTypeBearer,
+			Method:         transport.InjectionMethodBearerHeader,
+		},
+	}
+
+	ci := transport.NewCredentialInjector(rules, store)
+
+	for _, rawURL := range []string{
+		"https://api.example.com/v1/tokenize",
+		"https://api.example.com/authorize-payment",
+	} {
+		_, headers, injected, err := ci.InjectRequest("GET", rawURL, nil)
+		if err != nil {
+			t.Fatalf("InjectRequest(%s): %v", rawURL, err)
+		}
+		if !injected {
+			t.Fatalf("expected injected=true for %s", rawURL)
+		}
+
+		var authHeader string
+		for _, h := range headers {
+			if strings.EqualFold(h[0], "Authorization") {
+				authHeader = h[1]
+			}
+		}
+		if authHeader != "Bearer substring-safe-token" {
+			t.Fatalf("Authorization header for %s = %q, want %q", rawURL, authHeader, "Bearer substring-safe-token")
 		}
 	}
 }

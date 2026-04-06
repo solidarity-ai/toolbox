@@ -137,13 +137,23 @@ func (r *Repository) RenameAccount(ctx context.Context, pkg tooldef.Package, cre
 	if err := transport.ValidateAccountString(newName); err != nil {
 		return nil, fmt.Errorf("invalid new account name: %w", err)
 	}
+	if oldName == newName {
+		return nil, fmt.Errorf("old and new account names must differ")
+	}
 
 	creds, err := selectCredentials(pkg, credentialName)
 	if err != nil {
 		return nil, err
 	}
 
-	var results []RenameResult
+	type renamePlan struct {
+		credentialName string
+		oldPrefix      string
+		newPrefix      string
+		keys           []string
+	}
+
+	plans := make([]renamePlan, 0, len(creds))
 	for _, cred := range creds {
 		oldPrefix := AccountsPrefix(pkg, cred.Name) + oldName + "/"
 		keys, err := r.List(ctx, oldPrefix)
@@ -155,13 +165,31 @@ func (r *Repository) RenameAccount(ctx context.Context, pkg tooldef.Package, cre
 		}
 
 		newPrefix := AccountsPrefix(pkg, cred.Name) + newName + "/"
-		for _, key := range keys {
-			suffix := strings.TrimPrefix(key, oldPrefix)
+		destKeys, err := r.List(ctx, newPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("listing secrets for %s/%s: %w", cred.Name, newName, err)
+		}
+		if len(destKeys) > 0 {
+			return nil, fmt.Errorf("account %q already exists for credential %s", newName, cred.Name)
+		}
+
+		plans = append(plans, renamePlan{
+			credentialName: cred.Name,
+			oldPrefix:      oldPrefix,
+			newPrefix:      newPrefix,
+			keys:           keys,
+		})
+	}
+
+	var results []RenameResult
+	for _, plan := range plans {
+		for _, key := range plan.keys {
+			suffix := strings.TrimPrefix(key, plan.oldPrefix)
 			value, err := r.Get(ctx, Ref(key))
 			if err != nil {
 				return nil, fmt.Errorf("reading %s: %w", key, err)
 			}
-			newKey := Ref(newPrefix + suffix)
+			newKey := Ref(plan.newPrefix + suffix)
 			if err := r.Set(ctx, newKey, value); err != nil {
 				return nil, fmt.Errorf("writing %s: %w", newKey, err)
 			}
@@ -171,8 +199,8 @@ func (r *Repository) RenameAccount(ctx context.Context, pkg tooldef.Package, cre
 		}
 
 		results = append(results, RenameResult{
-			CredentialName: cred.Name,
-			Moved:          len(keys),
+			CredentialName: plan.credentialName,
+			Moved:          len(plan.keys),
 		})
 	}
 

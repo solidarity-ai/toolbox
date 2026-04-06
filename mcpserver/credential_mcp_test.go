@@ -15,6 +15,7 @@ import (
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/credpath"
+	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
@@ -831,6 +832,39 @@ func assertNoAccountParam(t *testing.T, harness *mcptest.Harness, toolName, para
 	}
 }
 
+// assertAccountParamOnlyAllows checks that the tool schema has a {cred}_account
+// property narrowed to one allowed value. Literal narrowing may render as
+// either {"const": "..."} or {"enum": ["..."]}.
+func assertAccountParamOnlyAllows(t *testing.T, harness *mcptest.Harness, toolName, paramName, want string) {
+	t.Helper()
+	props := findToolInputSchema(t, harness, toolName)
+	raw, ok := props[paramName]
+	if !ok {
+		t.Fatalf("expected %q property in tool %q schema, but it was missing. Properties: %v", paramName, toolName, props)
+	}
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("property %q is %T, want map[string]any", paramName, raw)
+	}
+	if got, ok := schema["const"]; ok {
+		if got != want {
+			t.Fatalf("property %q const = %v, want %q", paramName, got, want)
+		}
+		return
+	}
+	enumRaw, ok := schema["enum"]
+	if !ok {
+		t.Fatalf("property %q has neither const nor enum. Schema: %v", paramName, schema)
+	}
+	enumSlice, ok := enumRaw.([]any)
+	if !ok {
+		t.Fatalf("property %q enum is %T, want []any", paramName, enumRaw)
+	}
+	if len(enumSlice) != 1 || fmt.Sprintf("%v", enumSlice[0]) != want {
+		t.Fatalf("property %q enum = %v, want [%q]", paramName, enumSlice, want)
+	}
+}
+
 // loadAuthTestFixtureMCP loads the auth-test fixture package and builds injection rules.
 func loadAuthTestFixtureMCP(t *testing.T) (packaging.LoadedPackage, []transport.InjectionRule) {
 	t.Helper()
@@ -1021,6 +1055,117 @@ func TestMCP_MultiAccount_TwoAccounts_SameCredential(t *testing.T) {
 			t.Errorf("expected 'credential injection failed' error, got: %s", errText)
 		}
 	})
+}
+
+// TestMCP_MultiAccount_EnvContextBoundAccountPreventsOtherSelection verifies
+// that when a multi-account credential is bound from EnvContext, the caller
+// cannot switch to another account and credential injection still uses the
+// bound account. The bound account param may be hidden or visible-but-narrowed.
+func TestMCP_MultiAccount_EnvContextBoundAccountPreventsOtherSelection(t *testing.T) {
+	t.Parallel()
+
+	loaded, rules := loadAuthTestFixtureMCP(t)
+	module := loaded.Package.Module.String()
+
+	store := testutil.NewTestSecretStore()
+	store.Seed(map[string][]byte{
+		credpath.APIKey(module, "test_api", "prod"):    []byte("KEY-PROD"),
+		credpath.APIKey(module, "test_api", "staging"): []byte("KEY-STAGING"),
+	})
+
+	credAccounts, err := credentialrepo.DiscoverCredentialAccounts(
+		context.Background(), loaded.Package, store)
+	if err != nil {
+		t.Fatalf("DiscoverCredentialAccounts: %v", err)
+	}
+	if len(credAccounts["test_api"]) != 2 {
+		t.Fatalf("expected 2 accounts for test_api, got %v", credAccounts["test_api"])
+	}
+
+	gotAPIKey := newHeaderCapture()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey.Store(r.Header.Get("X-API-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	ci := transport.NewCredentialInjector(rules, store)
+	al := transport.NewHostAllowlist(loaded.Package.AllowedHosts)
+
+	tests := []struct {
+		name       string
+		hidden     bool
+		assertView func(t *testing.T, harness *mcptest.Harness)
+	}{
+		{
+			name:   "hidden_binding",
+			hidden: true,
+			assertView: func(t *testing.T, harness *mcptest.Harness) {
+				t.Helper()
+				assertNoAccountParam(t, harness, "authTest.get", "test_api_account")
+			},
+		},
+		{
+			name:   "visible_narrowed_binding",
+			hidden: false,
+			assertView: func(t *testing.T, harness *mcptest.Harness) {
+				t.Helper()
+				assertAccountParamOnlyAllows(t, harness, "authTest.get", "test_api_account", "prod")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("auth-test"), toolset.Config{
+				EnvContext: map[string]any{
+					"bound_test_api_account": "prod",
+				},
+				Tools: []toolset.BoundTool{
+					{
+						ToolRef: "authTest.get",
+						Bindings: map[string]toolset.Binding{
+							"test_api_account": {Value: "context.bound_test_api_account", Hidden: tt.hidden},
+						},
+					},
+				},
+				CredentialPolicySource: credentialrepo.StaticPolicySource{
+					loaded.Package.Module: {
+						CredentialAccounts: credAccounts,
+						Injector:           ci,
+						Allowlist:          al,
+					},
+				},
+			})
+			harness := mcptest.NewHarness(t, mcpserver.New(prepared))
+
+			tt.assertView(t, harness)
+
+			gotAPIKey.Store("")
+			result := harness.CallTool("authTest.get", map[string]any{
+				"url":              upstream.URL + "/api/data",
+				"test_api_account": "staging",
+			})
+			text := mcpResultText(t, result)
+
+			if gotAPIKey.Load() != "KEY-PROD" {
+				t.Fatalf("upstream received X-API-Key %q, want %q", gotAPIKey.Load(), "KEY-PROD")
+			}
+
+			status, body := parseFetchResultMCP(t, text)
+			if status != 200 {
+				t.Fatalf("expected status 200, got %d", status)
+			}
+			if !strings.Contains(body, "ok") {
+				t.Fatalf("expected upstream response, got: %s", body)
+			}
+			if strings.Contains(text, "KEY-PROD") || strings.Contains(text, "KEY-STAGING") {
+				t.Fatalf("API key leaked to tool result: %s", text)
+			}
+		})
+	}
 }
 
 // TestMCP_MultiAccount_TwoCredentials_DifferentTypes exercises injection when

@@ -23,6 +23,11 @@
 9. Do not mark ordinary live reads `@idempotent` just because they are
    `readOnly`. If the backing data may have changed, callers may need to
    refetch instead of reusing an earlier result.
+10. If multiple tools share utilities, put the shared code in a helper module
+    and include it via `additionalTypeScriptGlobs` in `toolbox.devpkg.json`
+    rather than copying the same helper logic into multiple tool entry files.
+    `additionalTypeScriptGlobs` supports `**` globs, for example
+    `"additionalTypeScriptGlobs": ["lib/**/*.ts"]`.
 
 ## Examples
 

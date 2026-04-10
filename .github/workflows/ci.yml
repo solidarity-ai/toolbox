@@ -90,13 +90,13 @@ jobs:
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-arm64
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-x64
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-win32-x64.exe
-          node release/scripts/prepare-npm-dist.mjs --version v0.0.0-preview.test --channel preview --binaries-dir release/.tmp/binaries --out-dir release/.tmp/dist-preview
+          npm --prefix release run prepare-dist -- --version v0.0.0-preview.test --channel preview --binaries-dir release/.tmp/binaries --out-dir release/.tmp/dist-preview
           mkdir -p release/.tmp/stable-binaries
           cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-darwin-arm64
           cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-darwin-x64
           cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-linux-arm64
           cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-linux-x64
-          node release/scripts/prepare-npm-dist.mjs --version v0.0.0 --channel stable --binaries-dir release/.tmp/stable-binaries --out-dir release/.tmp/dist-stable
+          npm --prefix release run prepare-dist -- --version v0.0.0 --channel stable --binaries-dir release/.tmp/stable-binaries --out-dir release/.tmp/dist-stable
 
       - name: Publish order dry run preview
         env:

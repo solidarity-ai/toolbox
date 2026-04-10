@@ -1,12 +1,14 @@
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const { createClient } = require("../index");
+import { createClient } from "../dist/index.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../../../");
 let cachedBinaryPath;
 

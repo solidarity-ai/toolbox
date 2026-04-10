@@ -31,7 +31,7 @@ func TestRunVisibleToolWithoutExecutableErrors(t *testing.T) {
 		{
 			Name:        "broken.noop",
 			Description: "Broken tool",
-			PackageMeta:     &pkg,
+			PackageMeta: &pkg,
 		},
 	})
 

@@ -12,7 +12,6 @@ permissions:
 jobs:
   build-binaries:
     name: Build ${{ matrix.binary_name }}
-    if: ${{ !matrix.preview_only || contains(github.ref_name, '-') }}
     runs-on: ${{ matrix.runner }}
     env:
       GOPRIVATE: github.com/mackross/*
@@ -22,19 +21,14 @@ jobs:
         include:
           - runner: ubuntu-24.04
             binary_name: toolbox-linux-x64
-            preview_only: false
           - runner: ubuntu-24.04-arm
             binary_name: toolbox-linux-arm64
-            preview_only: false
           - runner: macos-13
             binary_name: toolbox-darwin-x64
-            preview_only: false
           - runner: macos-14
             binary_name: toolbox-darwin-arm64
-            preview_only: false
           - runner: windows-2022
             binary_name: toolbox-win32-x64.exe
-            preview_only: true
     steps:
       - uses: actions/checkout@v4
 

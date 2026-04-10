@@ -58,3 +58,46 @@ jobs:
         run: go test ./... -count=1 -timeout 300s
         env:
           GOPRIVATE: github.com/mackross/*
+
+  release-workspace:
+    name: Release workspace
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/mackross/*
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build toolbox for Node tests
+        working-directory: cmd/toolbox
+        run: |
+          mkdir -p ../../release/.tmp
+          go build -o ../../release/.tmp/toolbox .
+
+      - name: Prepare npm dist smoke
+        run: |
+          mkdir -p release/.tmp/binaries
+          cp release/.tmp/toolbox release/.tmp/binaries/toolbox-darwin-arm64
+          cp release/.tmp/toolbox release/.tmp/binaries/toolbox-darwin-x64
+          cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-arm64
+          cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-x64
+          cp release/.tmp/toolbox release/.tmp/binaries/toolbox-win32-x64.exe
+          node release/scripts/prepare-npm-dist.mjs --version v0.0.0-test --binaries-dir release/.tmp/binaries --out-dir release/.tmp/dist
+
+      - name: Publish order dry run
+        env:
+          NPM_CONFIG_CACHE: ${{ github.workspace }}/release/.tmp/npm-cache
+        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist --dry-run
+
+      - name: Release workspace tests
+        env:
+          TOOLBOX_BINARY_PATH: ${{ github.workspace }}/release/.tmp/toolbox
+        run: npm --prefix release test

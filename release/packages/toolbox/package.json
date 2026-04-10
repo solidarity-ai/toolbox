@@ -1,0 +1,22 @@
+{
+  "name": "@include-tools/toolbox",
+  "version": "0.0.0-development",
+  "description": "Node wrapper and bundled binary resolver for toolbox",
+  "main": "index.js",
+  "bin": {
+    "toolbox": "./bin/toolbox.js"
+  },
+  "files": [
+    "bin",
+    "index.js",
+    "lib",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@include-tools/toolbox-darwin-arm64": "0.0.0-development",
+    "@include-tools/toolbox-darwin-x64": "0.0.0-development",
+    "@include-tools/toolbox-linux-arm64": "0.0.0-development",
+    "@include-tools/toolbox-linux-x64": "0.0.0-development",
+    "@include-tools/toolbox-win32-x64": "0.0.0-development"
+  }
+}

@@ -114,6 +114,32 @@ func TestRunVersionsRejectsInvalidModuleArgument(t *testing.T) {
 	}
 }
 
+func TestRunSDKBridgeServeStdio(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"system.version\"}\n")
+
+	if err := runWithIO([]string{"_sdkbridge", "serve-stdio"}, input, &stdout, &stderr); err != nil {
+		t.Fatalf("runWithIO() error: %v\nstderr=%s", err, stderr.String())
+	}
+
+	var resp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      string `json:"id"`
+		Result  struct {
+			Version string `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &resp); err != nil {
+		t.Fatalf("json.Unmarshal(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if resp.JSONRPC != "2.0" || resp.ID != "req-1" {
+		t.Fatalf("response = %#v, want jsonrpc=2.0 id=req-1", resp)
+	}
+	if resp.Result.Version == "" {
+		t.Fatalf("version result = %#v, want non-empty version", resp.Result)
+	}
+}
+
 func TestRunResolveWritesLockfile(t *testing.T) {
 	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

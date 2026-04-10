@@ -1,0 +1,13 @@
+{
+  "name": "toolbox-release-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test ./packages/toolbox/test/*.test.js",
+    "prepare-dist": "node ./scripts/prepare-npm-dist.mjs",
+    "build-assets": "node ./scripts/build-release-assets.mjs",
+    "publish-dist": "node ./scripts/publish-npm.mjs"
+  }
+}

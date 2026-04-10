@@ -70,26 +70,46 @@ func Load(filename string) (*ToolsetFile, error) {
 		return nil, fmt.Errorf("read toolset file %q: %w", filename, err)
 	}
 
-	var instance map[string]any
-	if err := json.Unmarshal(data, &instance); err != nil {
-		return nil, fmt.Errorf("parse toolset file %q: %w", filename, err)
-	}
-	if err := resolvedToolboxToolsetSchema.Validate(instance); err != nil {
-		return nil, fmt.Errorf("validate toolset file %q: %w", filename, err)
-	}
-
-	var file ToolsetFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("parse toolset file %q: %w", filename, err)
-	}
-
-	if err := file.validate(); err != nil {
+	file, err := parse(data, filename)
+	if err != nil {
 		return nil, err
 	}
 
 	file.filename = filename
 	file.lockFilename = lockFilename
 	file.localFilename = localFilename
+	return file, nil
+}
+
+// Parse decodes and validates a toolset document without binding it to a
+// specific on-disk filename. This is useful for machine-facing APIs that need
+// to accept inline toolset JSON.
+func Parse(data []byte) (*ToolsetFile, error) {
+	return parse(data, "")
+}
+
+func parse(data []byte, filename string) (*ToolsetFile, error) {
+	label := "toolset document"
+	if filename != "" {
+		label = fmt.Sprintf("toolset file %q", filename)
+	}
+
+	var instance map[string]any
+	if err := json.Unmarshal(data, &instance); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", label, err)
+	}
+	if err := resolvedToolboxToolsetSchema.Validate(instance); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", label, err)
+	}
+
+	var file ToolsetFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", label, err)
+	}
+
+	if err := file.validate(); err != nil {
+		return nil, err
+	}
 	return &file, nil
 }
 
@@ -302,7 +322,7 @@ func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
 		return nil, fmt.Errorf("load toolset local file: nil toolset file")
 	}
 	if f.localFilename == "" {
-		return nil, fmt.Errorf("load toolset local file: toolset file must be loaded before local overlay can be derived")
+		return nil, nil
 	}
 
 	file, err := LoadLocal(f.localFilename)

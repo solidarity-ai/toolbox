@@ -14,6 +14,7 @@ import (
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/sdkbridge"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -48,6 +49,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runMCP(args[1:], stdin, stdout, stderr)
 	case "auth":
 		return runAuth(args[1:], stdin, stdout, stderr)
+	case "_sdkbridge":
+		return runSDKBridge(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -201,10 +204,8 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 
 	ctx := context.Background()
 
-	store := secrets.NewLocalSecretStore("", "")
-
 	cfg := toolset.Config{
-		CredentialPolicySource: credentialrepo.New(store),
+		CredentialPolicySource: newCredentialPolicySource(),
 	}
 
 	prepared, err := ts.Prepare(ctx, resolver, cfg)
@@ -215,6 +216,45 @@ func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(prepared))
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
+}
+
+func runSDKBridge(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("_sdkbridge: missing subcommand")
+	}
+
+	switch args[0] {
+	case "serve-stdio":
+		return runSDKBridgeServeStdio(args[1:], stdin, stdout, stderr)
+	default:
+		return fmt.Errorf("_sdkbridge: unknown subcommand %q", args[0])
+	}
+}
+
+func runSDKBridgeServeStdio(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("_sdkbridge serve-stdio", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("_sdkbridge serve-stdio: unexpected args: %s", strings.Join(fs.Args(), " "))
+	}
+
+	resolver, err := newResolver()
+	if err != nil {
+		return err
+	}
+
+	bridge := sdkbridge.New(sdkbridge.Options{
+		Resolver:               resolver,
+		CredentialPolicySource: newCredentialPolicySource(),
+	})
+	return bridge.ServeStdio(context.Background(), stdin, stdout)
+}
+
+func newCredentialPolicySource() toolset.PackageCredentialPolicySource {
+	return credentialrepo.New(secrets.NewLocalSecretStore("", ""))
 }
 
 func newResolver() (*registry.Resolver, error) {

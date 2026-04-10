@@ -1,7 +1,12 @@
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 
-const PLATFORM_PACKAGES = {
+import type { CreateClientOptions } from "../index.js";
+
+const require = createRequire(import.meta.url);
+
+export const PLATFORM_PACKAGES: Record<string, string> = {
   "darwin-arm64": "@include-tools/toolbox-darwin-arm64",
   "darwin-x64": "@include-tools/toolbox-darwin-x64",
   "linux-arm64": "@include-tools/toolbox-linux-arm64",
@@ -9,11 +14,11 @@ const PLATFORM_PACKAGES = {
   "win32-x64": "@include-tools/toolbox-win32-x64",
 };
 
-function currentTarget() {
+export function currentTarget(): string {
   return `${process.platform}-${process.arch}`;
 }
 
-function resolvePlatformPackageName() {
+export function resolvePlatformPackageName(): string {
   const target = currentTarget();
   const packageName = PLATFORM_PACKAGES[target];
   if (!packageName) {
@@ -22,7 +27,7 @@ function resolvePlatformPackageName() {
   return packageName;
 }
 
-function findBinaryPath(options = {}) {
+export function findBinaryPath(options: CreateClientOptions = {}): string {
   const explicitPath = options.binaryPath || process.env.TOOLBOX_BINARY_PATH;
   if (explicitPath) {
     const resolved = path.resolve(explicitPath);
@@ -33,15 +38,20 @@ function findBinaryPath(options = {}) {
   }
 
   const packageName = resolvePlatformPackageName();
-  let exported;
+  let exported: unknown;
   try {
     exported = require(packageName);
   } catch (error) {
-    throw new Error(`unable to resolve ${packageName}: ${error.message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`unable to resolve ${packageName}: ${message}`);
   }
 
-  const binaryPath = typeof exported === "string" ? exported : exported && exported.binaryPath;
-  if (!binaryPath) {
+  const binaryPath = typeof exported === "string"
+    ? exported
+    : exported && typeof exported === "object" && "binaryPath" in exported
+      ? exported.binaryPath
+      : undefined;
+  if (typeof binaryPath !== "string" || binaryPath.length === 0) {
     throw new Error(`${packageName} does not export a binaryPath`);
   }
   if (!fs.existsSync(binaryPath)) {
@@ -49,10 +59,3 @@ function findBinaryPath(options = {}) {
   }
   return binaryPath;
 }
-
-module.exports = {
-  PLATFORM_PACKAGES,
-  currentTarget,
-  findBinaryPath,
-  resolvePlatformPackageName,
-};

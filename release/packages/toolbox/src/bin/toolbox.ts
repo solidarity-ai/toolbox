@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-const { spawnSync } = require("node:child_process");
+import { spawnSync } from "node:child_process";
 
-const { findBinaryPath } = require("../lib/platform");
+import { findBinaryPath } from "../lib/platform.js";
 
 const result = spawnSync(findBinaryPath(), process.argv.slice(2), {
   stdio: "inherit",

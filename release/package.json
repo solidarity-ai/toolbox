@@ -5,8 +5,9 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "node --test ./packages/toolbox/test/*.test.js",
-    "prepare-dist": "node ./scripts/prepare-npm-dist.mjs",
+    "build": "npm --prefix ./packages/toolbox install --no-package-lock --omit=optional && npm --prefix ./packages/toolbox run build",
+    "test": "npm run build && node --test ./packages/toolbox/test/*.test.js",
+    "prepare-dist": "npm run build && node ./scripts/prepare-npm-dist.mjs",
     "build-assets": "node ./scripts/build-release-assets.mjs",
     "publish-dist": "node ./scripts/publish-npm.mjs"
   }

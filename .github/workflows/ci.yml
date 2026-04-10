@@ -95,7 +95,7 @@ jobs:
       - name: Publish order dry run
         env:
           NPM_CONFIG_CACHE: ${{ github.workspace }}/release/.tmp/npm-cache
-        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist --dry-run
+        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist --channel preview --dry-run
 
       - name: Release workspace tests
         env:

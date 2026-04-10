@@ -73,10 +73,20 @@ jobs:
       - name: Prepare npm dist
         run: node release/scripts/prepare-npm-dist.mjs --version "${GITHUB_REF_NAME}" --binaries-dir release/raw-binaries --out-dir release/dist/npm
 
+      - name: Resolve npm channel
+        id: npm-channel
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "channel=preview" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish npm packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: node release/scripts/publish-npm.mjs --dist-dir release/dist/npm
+        run: node release/scripts/publish-npm.mjs --dist-dir release/dist/npm --channel "${{ steps.npm-channel.outputs.channel }}"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

@@ -8,6 +8,11 @@ const argv = parseArgs(process.argv.slice(2));
 const distDir = path.resolve(requiredArg(argv, "dist-dir"));
 const dryRun = argv["dry-run"] === "true";
 const explicitTag = argv.tag;
+const explicitChannel = argv.channel;
+
+if (explicitTag && explicitChannel) {
+  throw new Error("provide at most one of --tag or --channel");
+}
 
 const publishOrder = [
   "toolbox-darwin-arm64",
@@ -27,7 +32,11 @@ for (const pkg of publishOrder) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
   const args = ["publish", "--access", "public"];
-  const publishTag = explicitTag || defaultTagForVersion(manifest.version);
+  const publishTag = resolvePublishTag({
+    version: manifest.version,
+    explicitTag,
+    explicitChannel,
+  });
   if (publishTag) {
     args.push("--tag", publishTag);
   }
@@ -63,6 +72,32 @@ function requiredArg(args, name) {
   return value;
 }
 
-function defaultTagForVersion(version) {
-  return version.includes("-") ? "next" : "";
+function resolvePublishTag({ version, explicitTag, explicitChannel }) {
+  if (explicitTag) {
+    return explicitTag;
+  }
+
+  const channel = explicitChannel || inferChannel(version);
+  validateChannelVersion(channel, version);
+  if (channel === "preview") {
+    return "next";
+  }
+  if (channel === "stable") {
+    return "latest";
+  }
+  throw new Error(`unknown channel ${channel}`);
+}
+
+function inferChannel(version) {
+  return version.includes("-") ? "preview" : "stable";
+}
+
+function validateChannelVersion(channel, version) {
+  const prerelease = version.includes("-");
+  if (channel === "preview" && !prerelease) {
+    throw new Error(`preview channel requires a prerelease version, got ${version}`);
+  }
+  if (channel === "stable" && prerelease) {
+    throw new Error(`stable channel requires a stable version, got ${version}`);
+  }
 }

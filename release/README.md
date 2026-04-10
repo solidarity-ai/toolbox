@@ -11,3 +11,7 @@ contains only packaging and publish machinery.
 Use `--channel preview` to publish to the npm dist-tag `next`, so consumers
 install preview builds as `@include-tools/toolbox@next`. Use `--channel stable`
 to publish the same package names to the default stable channel.
+
+The GitHub release workflow is intended to use npm trusted publishing (OIDC).
+That requires adding a trusted publisher for each package on npmjs.com and
+running the publish job on a GitHub-hosted runner with `id-token: write`.

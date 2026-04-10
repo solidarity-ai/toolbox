@@ -7,10 +7,12 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-binaries:
     name: Build ${{ matrix.binary_name }}
+    if: ${{ !matrix.preview_only || contains(github.ref_name, '-') }}
     runs-on: ${{ matrix.runner }}
     env:
       GOPRIVATE: github.com/mackross/*
@@ -20,14 +22,19 @@ jobs:
         include:
           - runner: ubuntu-24.04
             binary_name: toolbox-linux-x64
+            preview_only: false
           - runner: ubuntu-24.04-arm
             binary_name: toolbox-linux-arm64
+            preview_only: false
           - runner: macos-13
             binary_name: toolbox-darwin-x64
+            preview_only: false
           - runner: macos-14
             binary_name: toolbox-darwin-arm64
+            preview_only: false
           - runner: windows-2022
             binary_name: toolbox-win32-x64.exe
+            preview_only: true
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +65,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Download binary artifacts
@@ -66,12 +73,6 @@ jobs:
         with:
           path: release/raw-binaries
           merge-multiple: true
-
-      - name: Build release assets
-        run: node release/scripts/build-release-assets.mjs --version "${GITHUB_REF_NAME}" --binaries-dir release/raw-binaries --out-dir release/assets
-
-      - name: Prepare npm dist
-        run: node release/scripts/prepare-npm-dist.mjs --version "${GITHUB_REF_NAME}" --binaries-dir release/raw-binaries --out-dir release/dist/npm
 
       - name: Resolve npm channel
         id: npm-channel
@@ -83,9 +84,13 @@ jobs:
             echo "channel=stable" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build release assets
+        run: node release/scripts/build-release-assets.mjs --version "${GITHUB_REF_NAME}" --channel "${{ steps.npm-channel.outputs.channel }}" --binaries-dir release/raw-binaries --out-dir release/assets
+
+      - name: Prepare npm dist
+        run: node release/scripts/prepare-npm-dist.mjs --version "${GITHUB_REF_NAME}" --channel "${{ steps.npm-channel.outputs.channel }}" --binaries-dir release/raw-binaries --out-dir release/dist/npm
+
       - name: Publish npm packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node release/scripts/publish-npm.mjs --dist-dir release/dist/npm --channel "${{ steps.npm-channel.outputs.channel }}"
 
       - name: Create GitHub release

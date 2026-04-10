@@ -9,14 +9,18 @@ const argv = parseArgs(process.argv.slice(2));
 const outDir = path.resolve(argv["out-dir"] || path.join(process.cwd(), "release-assets"));
 const binariesDir = path.resolve(requiredArg(argv, "binaries-dir"));
 const version = requiredArg(argv, "version");
+const channel = resolveChannel({
+  explicitChannel: argv.channel,
+  version: normalizeVersion(version),
+});
 
 const targets = [
   { binary: "toolbox-darwin-arm64", asset: `toolbox_${version}_darwin_arm64.tar.gz`, format: "tar" },
   { binary: "toolbox-darwin-x64", asset: `toolbox_${version}_darwin_x64.tar.gz`, format: "tar" },
   { binary: "toolbox-linux-arm64", asset: `toolbox_${version}_linux_arm64.tar.gz`, format: "tar" },
   { binary: "toolbox-linux-x64", asset: `toolbox_${version}_linux_x64.tar.gz`, format: "tar" },
-  { binary: "toolbox-win32-x64.exe", asset: `toolbox_${version}_win32_x64.zip`, format: "zip" },
-];
+  { binary: "toolbox-win32-x64.exe", asset: `toolbox_${version}_win32_x64.zip`, format: "zip", previewOnly: true },
+].filter((target) => channel === "preview" || !target.previewOnly);
 
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
@@ -65,4 +69,31 @@ function requiredArg(args, name) {
     throw new Error(`missing --${name}`);
   }
   return value;
+}
+
+function normalizeVersion(version) {
+  return version.startsWith("v") ? version.slice(1) : version;
+}
+
+function resolveChannel({ explicitChannel, version }) {
+  const channel = explicitChannel || inferChannel(version);
+  validateChannelVersion(channel, version);
+  return channel;
+}
+
+function inferChannel(version) {
+  return version.includes("-") ? "preview" : "stable";
+}
+
+function validateChannelVersion(channel, version) {
+  const prerelease = version.includes("-");
+  if (channel === "preview" && !prerelease) {
+    throw new Error(`preview channel requires a prerelease version, got ${version}`);
+  }
+  if (channel === "stable" && prerelease) {
+    throw new Error(`stable channel requires a stable version, got ${version}`);
+  }
+  if (channel !== "preview" && channel !== "stable") {
+    throw new Error(`unknown channel ${channel}`);
+  }
 }

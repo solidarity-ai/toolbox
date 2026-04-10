@@ -74,7 +74,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Build toolbox for Node tests
         working-directory: cmd/toolbox
@@ -90,12 +90,23 @@ jobs:
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-arm64
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-linux-x64
           cp release/.tmp/toolbox release/.tmp/binaries/toolbox-win32-x64.exe
-          node release/scripts/prepare-npm-dist.mjs --version v0.0.0-test --binaries-dir release/.tmp/binaries --out-dir release/.tmp/dist
+          node release/scripts/prepare-npm-dist.mjs --version v0.0.0-preview.test --channel preview --binaries-dir release/.tmp/binaries --out-dir release/.tmp/dist-preview
+          mkdir -p release/.tmp/stable-binaries
+          cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-darwin-arm64
+          cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-darwin-x64
+          cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-linux-arm64
+          cp release/.tmp/toolbox release/.tmp/stable-binaries/toolbox-linux-x64
+          node release/scripts/prepare-npm-dist.mjs --version v0.0.0 --channel stable --binaries-dir release/.tmp/stable-binaries --out-dir release/.tmp/dist-stable
 
-      - name: Publish order dry run
+      - name: Publish order dry run preview
         env:
           NPM_CONFIG_CACHE: ${{ github.workspace }}/release/.tmp/npm-cache
-        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist --channel preview --dry-run
+        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist-preview --channel preview --dry-run
+
+      - name: Publish order dry run stable
+        env:
+          NPM_CONFIG_CACHE: ${{ github.workspace }}/release/.tmp/npm-cache
+        run: node release/scripts/publish-npm.mjs --dist-dir release/.tmp/dist-stable --channel stable --dry-run
 
       - name: Release workspace tests
         env:

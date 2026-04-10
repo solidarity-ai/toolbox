@@ -9,19 +9,19 @@ const distDir = path.resolve(requiredArg(argv, "dist-dir"));
 const dryRun = argv["dry-run"] === "true";
 const explicitTag = argv.tag;
 const explicitChannel = argv.channel;
+const rootManifest = JSON.parse(
+  fs.readFileSync(path.join(distDir, "packages", "toolbox", "package.json"), "utf8"),
+);
+const channel = resolveChannel({
+  explicitChannel,
+  version: rootManifest.version,
+});
 
 if (explicitTag && explicitChannel) {
   throw new Error("provide at most one of --tag or --channel");
 }
 
-const publishOrder = [
-  "toolbox-darwin-arm64",
-  "toolbox-darwin-x64",
-  "toolbox-linux-arm64",
-  "toolbox-linux-x64",
-  "toolbox-win32-x64",
-  "toolbox",
-];
+const publishOrder = publishOrderForChannel(channel);
 
 for (const pkg of publishOrder) {
   const cwd = path.join(distDir, "packages", pkg);
@@ -92,6 +92,12 @@ function inferChannel(version) {
   return version.includes("-") ? "preview" : "stable";
 }
 
+function resolveChannel({ explicitChannel, version }) {
+  const channel = explicitChannel || inferChannel(version);
+  validateChannelVersion(channel, version);
+  return channel;
+}
+
 function validateChannelVersion(channel, version) {
   const prerelease = version.includes("-");
   if (channel === "preview" && !prerelease) {
@@ -100,4 +106,21 @@ function validateChannelVersion(channel, version) {
   if (channel === "stable" && prerelease) {
     throw new Error(`stable channel requires a stable version, got ${version}`);
   }
+  if (channel !== "preview" && channel !== "stable") {
+    throw new Error(`unknown channel ${channel}`);
+  }
+}
+
+function publishOrderForChannel(channel) {
+  const order = [
+    "toolbox-darwin-arm64",
+    "toolbox-darwin-x64",
+    "toolbox-linux-arm64",
+    "toolbox-linux-x64",
+  ];
+  if (channel === "preview") {
+    order.push("toolbox-win32-x64");
+  }
+  order.push("toolbox");
+  return order;
 }

@@ -11,24 +11,10 @@ permissions:
 
 jobs:
   build-binaries:
-    name: Build ${{ matrix.binary_name }}
-    runs-on: ${{ matrix.runner }}
+    name: Build release binaries
+    runs-on: ubuntu-24.04
     env:
       GOPRIVATE: github.com/mackross/*
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            binary_name: toolbox-linux-x64
-          - runner: ubuntu-24.04-arm
-            binary_name: toolbox-linux-arm64
-          - runner: macos-15-intel
-            binary_name: toolbox-darwin-x64
-          - runner: macos-15
-            binary_name: toolbox-darwin-arm64
-          - runner: windows-2022
-            binary_name: toolbox-win32-x64.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -37,18 +23,23 @@ jobs:
           go-version: "1.26.1"
           cache: true
 
-      - name: Build toolbox
+      - name: Build toolbox binaries
         shell: bash
-        working-directory: cmd/toolbox
         run: |
-          mkdir -p ../../dist
-          go build -o "../../dist/${{ matrix.binary_name }}" .
+          mkdir -p dist
+          # Toolbox is pure Go today, so cross-compiling from one Linux runner is faster.
+          # Expand this back to per-platform runners if the release binary starts requiring native builds.
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/toolbox-linux-x64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/toolbox-linux-arm64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o dist/toolbox-darwin-x64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/toolbox-darwin-arm64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/toolbox-win32-x64.exe ./cmd/toolbox
 
-      - name: Upload binary artifact
+      - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary_name }}
-          path: dist/${{ matrix.binary_name }}
+          name: raw-binaries
+          path: dist/*
 
   publish:
     name: Publish release
@@ -65,8 +56,8 @@ jobs:
       - name: Download binary artifacts
         uses: actions/download-artifact@v4
         with:
+          name: raw-binaries
           path: release/raw-binaries
-          merge-multiple: true
 
       - name: Resolve npm channel
         id: npm-channel

@@ -73,7 +73,7 @@ jobs:
         run: node release/scripts/build-release-assets.mjs --version "${GITHUB_REF_NAME}" --channel "${{ steps.npm-channel.outputs.channel }}" --binaries-dir release/raw-binaries --out-dir release/assets
 
       - name: Prepare npm dist
-        run: npm --prefix release run prepare-dist -- --version "${GITHUB_REF_NAME}" --channel "${{ steps.npm-channel.outputs.channel }}" --binaries-dir release/raw-binaries --out-dir release/dist/npm
+        run: npm --prefix release run prepare-dist -- --version "${GITHUB_REF_NAME}" --channel "${{ steps.npm-channel.outputs.channel }}" --binaries-dir raw-binaries --out-dir dist/npm
 
       - name: Publish npm packages
         run: node release/scripts/publish-npm.mjs --dist-dir release/dist/npm --channel "${{ steps.npm-channel.outputs.channel }}"

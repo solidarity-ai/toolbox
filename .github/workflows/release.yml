@@ -23,9 +23,9 @@ jobs:
             binary_name: toolbox-linux-x64
           - runner: ubuntu-24.04-arm
             binary_name: toolbox-linux-arm64
-          - runner: macos-13
+          - runner: macos-15-intel
             binary_name: toolbox-darwin-x64
-          - runner: macos-14
+          - runner: macos-15
             binary_name: toolbox-darwin-arm64
           - runner: windows-2022
             binary_name: toolbox-win32-x64.exe

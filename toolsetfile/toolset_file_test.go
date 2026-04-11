@@ -1090,6 +1090,58 @@ func (s *recordingSource) Fetch(_ context.Context, module registry.ModulePath, v
 	return s.result, s.err
 }
 
+func TestToolsetFilePutPackageVersion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("AddsNewPackageWithoutChangingExistingTools", func(t *testing.T) {
+		file := mustLoadToolsetFile(t, map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{
+				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+			},
+		})
+
+		if err := file.PutPackageVersion("example.com/acme/echo", "v2.0.0"); err != nil {
+			t.Fatalf("PutPackageVersion(): %v", err)
+		}
+		if got := file.Packages["example.com/acme/echo"]; got != "v2.0.0" {
+			t.Fatalf("packages[echo] = %q, want v2.0.0", got)
+		}
+		if got := file.Tools[0].Tool; got != "example.com/acme/calc@v1.2.3/calc.add" {
+			t.Fatalf("tools[0] = %q, want existing tool unchanged", got)
+		}
+	})
+
+	t.Run("UpdatesExistingPackageAndRewritesToolVersions", func(t *testing.T) {
+		file := mustLoadToolsetFile(t, map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{
+				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+				{"tool": "example.com/acme/calc@v1.2.3/calc.sub"},
+			},
+		})
+
+		if err := file.PutPackageVersion("example.com/acme/calc", "v1.3.0"); err != nil {
+			t.Fatalf("PutPackageVersion(): %v", err)
+		}
+		if got := file.Packages["example.com/acme/calc"]; got != "v1.3.0" {
+			t.Fatalf("packages[calc] = %q, want v1.3.0", got)
+		}
+		gotTools := []string{file.Tools[0].Tool, file.Tools[1].Tool}
+		wantTools := []string{
+			"example.com/acme/calc@v1.3.0/calc.add",
+			"example.com/acme/calc@v1.3.0/calc.sub",
+		}
+		if !reflect.DeepEqual(gotTools, wantTools) {
+			t.Fatalf("tools = %#v, want %#v", gotTools, wantTools)
+		}
+	})
+}
+
 func mustLoadToolsetFileNamed(t *testing.T, basename string, value any) *ToolsetFile {
 	t.Helper()
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/solidarity-ai/toolbox/packaging"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -89,6 +90,39 @@ func (c *Cache) ArchiveSHA256(module ModulePath, version Version) (string, error
 		return "", fmt.Errorf("read cached archive %s: %w", paths.archive, err)
 	}
 	return sha256Hex(archiveBytes), nil
+}
+
+// ListVersions returns cached versions for a module, sorted newest-first.
+func (c *Cache) ListVersions(module ModulePath) ([]Version, error) {
+	dir := filepath.Join(c.root, module.String(), "@v")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read cached versions for %s: %w", module, err)
+	}
+
+	versions := make([]Version, 0, len(entries))
+	seen := make(map[Version]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".info") {
+			continue
+		}
+		raw := strings.TrimSuffix(entry.Name(), ".info")
+		version, err := tooldef.ParseVersion(raw)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[version]; ok {
+			continue
+		}
+		seen[version] = struct{}{}
+		versions = append(versions, version)
+	}
+
+	sortVersionsDesc(versions)
+	return versions, nil
 }
 
 type cachePaths struct {

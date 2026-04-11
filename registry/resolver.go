@@ -18,8 +18,8 @@ type ResolveResult struct {
 
 // Resolver orchestrates cache-check → source-fetch → cache-write → load
 // for registry packages. Sources are tried in order; a source returning
-// ErrReleaseNotFound causes the next source to be tried, while any other
-// error short-circuits the chain immediately.
+// ErrReleaseNotFound or ErrSourceUnavailable causes the next source to be
+// tried, while any other error short-circuits the chain immediately.
 type Resolver struct {
 	cache   *Cache
 	sources []PackageSource
@@ -98,10 +98,10 @@ func (r *Resolver) fetchFromSources(ctx context.Context, module ModulePath, vers
 		if err == nil {
 			return fetch, nil
 		}
-		if !errors.Is(err, ErrReleaseNotFound) {
+		if !errors.Is(err, ErrReleaseNotFound) && !errors.Is(err, ErrSourceUnavailable) {
 			return FetchResult{}, fmt.Errorf("source[%d]: %w", i, err)
 		}
-		// ErrReleaseNotFound — try next source
+		// ErrReleaseNotFound or ErrSourceUnavailable — try next source
 	}
 
 	return FetchResult{}, fmt.Errorf("all %d sources exhausted: %w", len(r.sources), ErrReleaseNotFound)
@@ -117,8 +117,6 @@ func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Versi
 	versions := make([]Version, 0)
 	seen := make(map[Version]struct{})
 	versionSources := 0
-	anySuccess := false
-	var firstErr error
 	for i, src := range r.sources {
 		lister, ok := src.(VersionSource)
 		if !ok {
@@ -127,15 +125,11 @@ func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Versi
 		versionSources++
 		listed, err := lister.ListVersions(ctx, module)
 		if err != nil {
-			if errors.Is(err, ErrReleaseNotFound) {
+			if errors.Is(err, ErrReleaseNotFound) || errors.Is(err, ErrSourceUnavailable) {
 				continue
 			}
-			if firstErr == nil {
-				firstErr = fmt.Errorf("list versions for %s: source[%d]: %w", module, i, err)
-			}
-			continue
+			return nil, fmt.Errorf("list versions for %s: source[%d]: %w", module, i, err)
 		}
-		anySuccess = true
 		for _, version := range listed {
 			if _, ok := seen[version]; ok {
 				continue
@@ -148,9 +142,6 @@ func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Versi
 		return nil, fmt.Errorf("list versions for %s: no version-capable sources configured", module)
 	}
 	if len(versions) == 0 {
-		if firstErr != nil && !anySuccess {
-			return nil, firstErr
-		}
 		return nil, fmt.Errorf("list versions for %s: %w", module, ErrReleaseNotFound)
 	}
 	sortVersionsDesc(versions)

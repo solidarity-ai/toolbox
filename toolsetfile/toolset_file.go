@@ -205,6 +205,29 @@ func (f *ToolsetFile) SetPackageVersion(module tooldef.ModulePath, version toold
 	return f.validate()
 }
 
+// PutPackageVersion declares or updates a package version. If the package is
+// already declared, any existing tool FQNs for that module are rewritten to the
+// same version, preserving tool order.
+func (f *ToolsetFile) PutPackageVersion(module tooldef.ModulePath, version tooldef.Version) error {
+	if f == nil {
+		return fmt.Errorf("put package version: nil toolset file")
+	}
+	if f.Packages == nil {
+		f.Packages = map[string]string{}
+	}
+
+	key := module.String()
+	f.Packages[key] = version.String()
+	for i := range f.Tools {
+		if f.Tools[i].parsed.Module != module {
+			continue
+		}
+		f.Tools[i].parsed.Version = version
+		f.Tools[i].Tool = f.Tools[i].parsed.String()
+	}
+	return f.validate()
+}
+
 // Write validates the toolset contents and writes a stable JSON encoding while
 // preserving the declared tool order.
 func (f *ToolsetFile) Write(filename string) error {

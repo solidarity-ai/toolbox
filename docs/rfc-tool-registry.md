@@ -188,19 +188,21 @@ When no built artifacts are available, the client falls back to git-source resol
 
 This fallback ensures the system works with any git host, even without CI. But the recommended path is always: publish built artifacts.
 
-#### Registry proxy (optional, for discovery and stats)
+#### Registry proxy (default, for discovery and stats)
 
-The toolbox client ships with a **default proxy** (`https://proxy.include.tools`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own proxy or disable it entirely:
+The toolbox client ships with a **default registry** (`https://packages.include.tools`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own registry or disable it entirely:
 
 ```
-TOOLBOX_PROXY=https://proxy.include.tools   # default, ships with toolbox
-TOOLBOX_PROXY=https://proxy.internal.co   # organization override
-TOOLBOX_PROXY=off                          # disable, fetch directly from sources
+TOOLBOX_REGISTRY=https://packages.include.tools  # default, ships with toolbox
+TOOLBOX_REGISTRY=https://registry.internal.co    # organization override
+TOOLBOX_REGISTRY=off                             # disable, fetch directly from sources
 ```
 
-The proxy does **not** host package archives itself — it passes through download links to the underlying package source and provides value-added services:
+The registry does **not** host package archives itself. It passes through
+download links to the underlying package source and provides value-added
+services:
 
-The proxy provides:
+The registry provides:
 
 **1. Discovery and search.** A search API over known packages:
 
@@ -271,7 +273,7 @@ When a toolset references a package, resolution follows this order:
 ```
 1. Check replace directives (local dev overrides)
 2. Check local cache (content-addressable store)
-3. Fetch from proxy (default: proxy.include.tools, unless overridden or disabled)
+3. Fetch from registry (default: packages.include.tools, unless overridden or disabled)
 4. Fetch from package source directly (e.g., GitHub Release assets)
 5. Fetch from git source (clone at tag, build locally with packaging.Pack)
 6. Store in local cache
@@ -890,7 +892,7 @@ This RFC covers a large surface area. The recommended build order:
 
 8. **Replace directives** — Support `replace` in the toolset file (or overlay) for local development.
 
-9. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_PROXY` support to the resolver.
+9. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_REGISTRY` support to the resolver.
 
 10. **Search and discovery** — Proxy search API, `toolbox search` CLI command.
 

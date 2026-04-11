@@ -32,6 +32,11 @@ import (
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
+func TestMain(m *testing.M) {
+	_ = os.Setenv("TOOLBOX_REGISTRY", "off")
+	os.Exit(m.Run())
+}
+
 func TestRunVersions(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -51,7 +56,7 @@ func TestRunVersions(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"versions", "github.com/admin/stub"}, &stdout, &stderr)
+	err := run([]string{"versions", "--source", "registry", "github.com/admin/stub"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
 	}
@@ -62,15 +67,119 @@ func TestRunVersions(t *testing.T) {
 	}
 }
 
+func TestRunWithNoArgsPrintsHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Usage: toolbox <command>") {
+		t.Fatalf("stdout = %q, want root usage", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "install [<package>] [flags]") {
+		t.Fatalf("stdout = %q, want command list", stdout.String())
+	}
+}
+
+func TestInstallHelpDescribesPackageModes(t *testing.T) {
+	help := installCmd{}.Help()
+	for _, want := range []string{
+		"Without <package>, install resolves the selected toolset and updates its lockfile.",
+		"Use <module> to install the latest available version.",
+		"Use <module>@<version> to install that exact version.",
+		"Go pseudo-version directly",
+		"v0.0.0-20260410153000-abcdef123456",
+		"install creates a default empty",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help = %q, want substring %q", help, want)
+		}
+	}
+}
+
+func TestToolRegistryConfigFromEnv(t *testing.T) {
+	t.Run("empty uses hosted default", func(t *testing.T) {
+		t.Setenv("TOOLBOX_REGISTRY", "")
+		got, enabled, err := toolRegistryConfigFromEnv()
+		if err != nil {
+			t.Fatalf("toolRegistryConfigFromEnv() error: %v", err)
+		}
+		if !enabled {
+			t.Fatal("enabled = false, want true")
+		}
+		if got != defaultToolRegistryBaseURL {
+			t.Fatalf("baseURL = %q, want %q", got, defaultToolRegistryBaseURL)
+		}
+	})
+
+	t.Run("off disables registry", func(t *testing.T) {
+		t.Setenv("TOOLBOX_REGISTRY", "off")
+		got, enabled, err := toolRegistryConfigFromEnv()
+		if err != nil {
+			t.Fatalf("toolRegistryConfigFromEnv() error: %v", err)
+		}
+		if enabled {
+			t.Fatal("enabled = true, want false")
+		}
+		if got != "" {
+			t.Fatalf("baseURL = %q, want empty", got)
+		}
+	})
+
+	t.Run("host only is normalized to https", func(t *testing.T) {
+		t.Setenv("TOOLBOX_REGISTRY", "packages.internal.example")
+		got, enabled, err := toolRegistryConfigFromEnv()
+		if err != nil {
+			t.Fatalf("toolRegistryConfigFromEnv() error: %v", err)
+		}
+		if !enabled {
+			t.Fatal("enabled = false, want true")
+		}
+		if got != "https://packages.internal.example" {
+			t.Fatalf("baseURL = %q, want %q", got, "https://packages.internal.example")
+		}
+	})
+
+	t.Run("invalid URL fails", func(t *testing.T) {
+		t.Setenv("TOOLBOX_REGISTRY", "https://")
+		_, _, err := toolRegistryConfigFromEnv()
+		if err == nil {
+			t.Fatal("toolRegistryConfigFromEnv() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "invalid TOOLBOX_REGISTRY") {
+			t.Fatalf("error = %v, want TOOLBOX_REGISTRY context", err)
+		}
+	})
+}
+
 func TestRunVersionsUsesGitHubTokenAuthorizationWithoutLeakingIt(t *testing.T) {
 	const token = "ghp-secret-token-for-cli-test"
 
-	var mu sync.Mutex
-	var authHeaders []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
-		mu.Unlock()
+	var registryMu sync.Mutex
+	var registryAuthHeaders []string
+	registryTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registryMu.Lock()
+		registryAuthHeaders = append(registryAuthHeaders, r.Header.Get("Authorization"))
+		registryMu.Unlock()
+
+		switch r.URL.Path {
+		case "/v1/packages/github.com/admin/stub/@v/list":
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer registryTS.Close()
+
+	var githubMu sync.Mutex
+	var githubAuthHeaders []string
+	githubTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		githubMu.Lock()
+		githubAuthHeaders = append(githubAuthHeaders, r.Header.Get("Authorization"))
+		githubMu.Unlock()
 
 		switch r.URL.Path {
 		case "/repos/admin/stub/releases":
@@ -79,14 +188,15 @@ func TestRunVersionsUsesGitHubTokenAuthorizationWithoutLeakingIt(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer ts.Close()
+	defer githubTS.Close()
 
-	t.Setenv("GITHUB_BASE_URL", ts.URL)
+	t.Setenv("TOOLBOX_REGISTRY", registryTS.URL)
+	t.Setenv("GITHUB_BASE_URL", githubTS.URL)
 	t.Setenv("GITHUB_TOKEN", token)
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"versions", "github.com/admin/stub"}, &stdout, &stderr)
+	err := run([]string{"versions", "--source", "registry", "github.com/admin/stub"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
 	}
@@ -94,11 +204,18 @@ func TestRunVersionsUsesGitHubTokenAuthorizationWithoutLeakingIt(t *testing.T) {
 		t.Fatalf("versions output = %#v, want %#v", got, []string{"v1.0.0"})
 	}
 
-	mu.Lock()
-	gotHeaders := append([]string(nil), authHeaders...)
-	mu.Unlock()
-	if !reflect.DeepEqual(gotHeaders, []string{"token " + token}) {
-		t.Fatalf("Authorization headers = %#v, want %#v", gotHeaders, []string{"token " + token})
+	registryMu.Lock()
+	gotRegistryHeaders := append([]string(nil), registryAuthHeaders...)
+	registryMu.Unlock()
+	if !reflect.DeepEqual(gotRegistryHeaders, []string{""}) {
+		t.Fatalf("registry Authorization headers = %#v, want %#v", gotRegistryHeaders, []string{""})
+	}
+
+	githubMu.Lock()
+	gotGitHubHeaders := append([]string(nil), githubAuthHeaders...)
+	githubMu.Unlock()
+	if !reflect.DeepEqual(gotGitHubHeaders, []string{"token " + token}) {
+		t.Fatalf("GitHub Authorization headers = %#v, want %#v", gotGitHubHeaders, []string{"token " + token})
 	}
 	assertNoTokenLeak(t, token, stdout.String(), stderr.String())
 }
@@ -109,8 +226,151 @@ func TestRunVersionsRejectsInvalidModuleArgument(t *testing.T) {
 	if err == nil {
 		t.Fatal("run() error = nil, want invalid module path error")
 	}
-	if !strings.Contains(err.Error(), `module path "admin" must have at least host/path`) {
-		t.Fatalf("error = %v, want invalid module path context", err)
+	if !strings.Contains(err.Error(), `target "admin" is not a module path`) {
+		t.Fatalf("error = %v, want target resolution context", err)
+	}
+}
+
+func TestRunVersionsLocalSourceSkipsResolverSetupForModuleTarget(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+	cacheDir := t.TempDir()
+	cache, err := registry.NewCache(cacheDir)
+	if err != nil {
+		t.Fatalf("NewCache(%q): %v", cacheDir, err)
+	}
+	if err := cache.Put(
+		registry.ModulePath("github.com/admin/stub"),
+		registry.Version("v1.0.0"),
+		archiveBytes,
+		manifestBytes,
+	); err != nil {
+		t.Fatalf("cache.Put(): %v", err)
+	}
+
+	t.Setenv("TOOLBOX_CACHE_DIR", cacheDir)
+	t.Setenv("TOOLBOX_REGISTRY", "https://")
+
+	var stdout, stderr bytes.Buffer
+	err = run([]string{"versions", "--source", "local", "github.com/admin/stub"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if got := strings.Fields(stdout.String()); !reflect.DeepEqual(got, []string{"v1.0.0"}) {
+		t.Fatalf("versions output = %#v, want %#v", got, []string{"v1.0.0"})
+	}
+}
+
+func TestRunInfoJSONForLocalDir(t *testing.T) {
+	packageDir := filepath.Join(t.TempDir(), "calc")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", packageDir, err)
+	}
+	copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), packageDir)
+	rewriteSourceFixtureModule(t, packageDir, "example.com/acme/calc")
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"info", "--json", packageDir}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+
+	var got packageInfoView
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if got.Source != "local-dir" {
+		t.Fatalf("source = %q, want local-dir", got.Source)
+	}
+	if got.Package.Module != "example.com/acme/calc" {
+		t.Fatalf("module = %q, want example.com/acme/calc", got.Package.Module)
+	}
+	if got.Package.Name != "calc" {
+		t.Fatalf("name = %q, want calc", got.Package.Name)
+	}
+}
+
+func TestRunInfoJSONForExplicitPackageVersionReportsActualProvenance(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+	const commitSHA = "cccccccccccccccccccccccccccccccccccccccc"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/admin/stub/releases/tags/v1.0.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":       10,
+				"tag_name": "v1.0.0",
+				"assets": []map[string]any{
+					{"id": 1, "name": "calc.toolbox.pkg"},
+					{"id": 2, "name": "toolbox.pkg.json"},
+				},
+			})
+		case "/repos/admin/stub/git/ref/tags/v1.0.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": map[string]any{"type": "commit", "sha": commitSHA},
+			})
+		case "/repos/admin/stub/releases/assets/1":
+			_, _ = w.Write(archiveBytes)
+		case "/repos/admin/stub/releases/assets/2":
+			_, _ = w.Write(manifestBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	t.Setenv("TOOLBOX_REGISTRY", "off")
+	t.Setenv("GITHUB_BASE_URL", ts.URL)
+	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"info", "--json", "github.com/admin/stub@v1.0.0"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+
+	var got packageInfoView
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if got.Source != "github-release" {
+		t.Fatalf("source = %q, want github-release", got.Source)
+	}
+	if got.Version != "v1.0.0" {
+		t.Fatalf("version = %q, want v1.0.0", got.Version)
+	}
+}
+
+func TestRunOutdatedReportsNewerPublishedVersion(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/admin/stub/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 2, "tag_name": "v1.2.0"},
+				{"id": 1, "tag_name": "v1.0.0"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	toolsetPath := writeToolsetFile(t, map[string]any{
+		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
+		"tools":    []map[string]string{{"tool": "github.com/admin/stub@v1.0.0/calc.add"}},
+	})
+
+	t.Setenv("GITHUB_BASE_URL", ts.URL)
+	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"outdated", "--toolset", toolsetPath}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "MODULE") || !strings.Contains(stdout.String(), "CURRENT") || !strings.Contains(stdout.String(), "LATEST") {
+		t.Fatalf("stdout = %q, want table header", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "github.com/admin/stub") || !strings.Contains(stdout.String(), "v1.2.0") {
+		t.Fatalf("stdout = %q, want outdated row", stdout.String())
 	}
 }
 
@@ -140,7 +400,7 @@ func TestRunSDKBridgeServeStdio(t *testing.T) {
 	}
 }
 
-func TestRunResolveWritesLockfile(t *testing.T) {
+func TestRunInstallWritesLockfile(t *testing.T) {
 	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +437,7 @@ func TestRunResolveWritesLockfile(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"resolve", "--file", toolsetPath}, &stdout, &stderr)
+	err := run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
 	}
@@ -198,7 +458,200 @@ func TestRunResolveWritesLockfile(t *testing.T) {
 	}
 }
 
-func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
+func TestRunInstallWritesToolRegistryLockfileProvenance(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+	const commitSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	registryTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/packages/github.com/admin/stub/@v/v1.0.0.info":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"module":         "github.com/admin/stub",
+				"version":        "v1.0.0",
+				"archive_sha256": sha256HexForTest(archiveBytes),
+				"git_sha":        commitSHA,
+				"manifest_json":  string(manifestBytes),
+			})
+		case "/v1/packages/github.com/admin/stub/@v/v1.0.0.pkg":
+			http.Redirect(w, r, "/assets/calc.toolbox.pkg", http.StatusFound)
+		case "/v1/packages/github.com/admin/stub/@v/v1.0.0.manifest":
+			http.Redirect(w, r, "/assets/toolbox.pkg.json", http.StatusFound)
+		case "/assets/calc.toolbox.pkg":
+			_, _ = w.Write(archiveBytes)
+		case "/assets/toolbox.pkg.json":
+			_, _ = w.Write(manifestBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer registryTS.Close()
+
+	toolsetPath := writeToolsetFile(t, map[string]any{
+		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
+		"tools":    []map[string]string{{"tool": "github.com/admin/stub@v1.0.0/calc.add"}},
+	})
+
+	t.Setenv("TOOLBOX_REGISTRY", registryTS.URL)
+	t.Setenv("GITHUB_BASE_URL", "http://127.0.0.1:1")
+	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "resolved 3 tools") {
+		t.Fatalf("stdout = %q, want resolved tool count", stdout.String())
+	}
+
+	lock, err := toolsetfile.LoadLock(strings.TrimSuffix(toolsetPath, ".json") + ".lock")
+	if err != nil {
+		t.Fatalf("LoadLock(): %v", err)
+	}
+	entry, ok := lock.Packages["github.com/admin/stub@v1.0.0"]
+	if !ok {
+		t.Fatalf("lock packages = %#v, want github.com/admin/stub@v1.0.0", lock.Packages)
+	}
+	if entry.ResolvedFrom != toolsetfile.ToolsetLockResolvedFromToolRegistry {
+		t.Fatalf("resolved_from = %q, want %q", entry.ResolvedFrom, toolsetfile.ToolsetLockResolvedFromToolRegistry)
+	}
+}
+
+func TestRunInstallAddsLatestDeclaredPackageAndCreatesToolsetFile(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+	const commitSHA = "dddddddddddddddddddddddddddddddddddddddd"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/admin/stub/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 2, "tag_name": "v1.2.0"},
+				{"id": 1, "tag_name": "v1.0.0"},
+			})
+		case "/repos/admin/stub/releases/tags/v1.2.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":       20,
+				"tag_name": "v1.2.0",
+				"assets": []map[string]any{
+					{"id": 1, "name": "calc.toolbox.pkg"},
+					{"id": 2, "name": "toolbox.pkg.json"},
+				},
+			})
+		case "/repos/admin/stub/git/ref/tags/v1.2.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": map[string]any{"type": "commit", "sha": commitSHA},
+			})
+		case "/repos/admin/stub/releases/assets/1":
+			_, _ = w.Write(archiveBytes)
+		case "/repos/admin/stub/releases/assets/2":
+			_, _ = w.Write(manifestBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	toolsetPath := filepath.Join(t.TempDir(), defaultToolsetFilename)
+
+	t.Setenv("GITHUB_BASE_URL", ts.URL)
+	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"install", "--toolset", toolsetPath, "github.com/admin/stub"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created toolset file: "+toolsetPath) {
+		t.Fatalf("stdout = %q, want created toolset line", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "installed github.com/admin/stub@v1.2.0") {
+		t.Fatalf("stdout = %q, want installed package line", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "resolved 3 tools") {
+		t.Fatalf("stdout = %q, want resolved tool count", stdout.String())
+	}
+
+	file, err := toolsetfile.Load(toolsetPath)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", toolsetPath, err)
+	}
+	if got := file.Packages["github.com/admin/stub"]; got != "v1.2.0" {
+		t.Fatalf("packages[stub] = %q, want v1.2.0", got)
+	}
+	if len(file.Tools) != 0 {
+		t.Fatalf("len(tools) = %d, want 0", len(file.Tools))
+	}
+
+	lock, err := toolsetfile.LoadLock(strings.TrimSuffix(toolsetPath, ".json") + ".lock")
+	if err != nil {
+		t.Fatalf("LoadLock(): %v", err)
+	}
+	if _, ok := lock.Packages["github.com/admin/stub@v1.2.0"]; !ok {
+		t.Fatalf("lock packages = %#v, want github.com/admin/stub@v1.2.0", lock.Packages)
+	}
+}
+
+func TestRunInstallExplicitVersionRewritesDeclaredPackageAndTools(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+	const commitSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/admin/stub/releases/tags/v1.2.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":       20,
+				"tag_name": "v1.2.0",
+				"assets": []map[string]any{
+					{"id": 1, "name": "calc.toolbox.pkg"},
+					{"id": 2, "name": "toolbox.pkg.json"},
+				},
+			})
+		case "/repos/admin/stub/git/ref/tags/v1.2.0":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": map[string]any{"type": "commit", "sha": commitSHA},
+			})
+		case "/repos/admin/stub/releases/assets/1":
+			_, _ = w.Write(archiveBytes)
+		case "/repos/admin/stub/releases/assets/2":
+			_, _ = w.Write(manifestBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	toolsetPath := writeToolsetFile(t, map[string]any{
+		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
+		"tools":    []map[string]string{{"tool": "github.com/admin/stub@v1.0.0/calc.add"}},
+	})
+
+	t.Setenv("GITHUB_BASE_URL", ts.URL)
+	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"install", "--toolset", toolsetPath, "github.com/admin/stub@v1.2.0"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "installed github.com/admin/stub: v1.0.0 -> v1.2.0") {
+		t.Fatalf("stdout = %q, want installed update line", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "resolved 3 tools") {
+		t.Fatalf("stdout = %q, want resolved tool count", stdout.String())
+	}
+
+	raw, err := os.ReadFile(toolsetPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", toolsetPath, err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"github.com/admin/stub": "v1.2.0"`) {
+		t.Fatalf("toolset file = %s, want updated package version", text)
+	}
+	if !strings.Contains(text, `"tool":"github.com/admin/stub@v1.2.0/calc.add"`) {
+		t.Fatalf("toolset file = %s, want updated tool FQN", text)
+	}
+}
+
+func TestRunInstallUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
 	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "cccccccccccccccccccccccccccccccccccccccc"
 
@@ -249,7 +702,7 @@ func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"resolve", "--file", toolsetPath}, &stdout, &stderr); err != nil {
+	if err := run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr); err != nil {
 		t.Fatalf("first run() error: %v\nstderr=%s", err, stderr.String())
 	}
 	lockPath := strings.TrimSuffix(toolsetPath, ".json") + ".lock"
@@ -263,16 +716,16 @@ func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
 	secondResolve = true
 	mu.Unlock()
 	if len(firstRunRequests) == 0 {
-		t.Fatal("first resolve made no HTTP requests, want initial fetch before cache-hit verification")
+		t.Fatal("first install made no HTTP requests, want initial fetch before cache-hit verification")
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if err := run([]string{"resolve", "--file", toolsetPath}, &stdout, &stderr); err != nil {
+	if err := run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr); err != nil {
 		t.Fatalf("second run() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "resolved 3 tools") {
-		t.Fatalf("second resolve stdout = %q, want resolved tool count", stdout.String())
+		t.Fatalf("second install stdout = %q, want resolved tool count", stdout.String())
 	}
 
 	after, err := os.ReadFile(lockPath)
@@ -287,11 +740,11 @@ func TestRunResolveUsesCommittedLockCacheHitWithoutRefetch(t *testing.T) {
 	secondRunRequests := append([]string(nil), requestPaths...)
 	mu.Unlock()
 	if !reflect.DeepEqual(secondRunRequests, firstRunRequests) {
-		t.Fatalf("HTTP requests changed on second resolve: got %#v, want %#v", secondRunRequests, firstRunRequests)
+		t.Fatalf("HTTP requests changed on second install: got %#v, want %#v", secondRunRequests, firstRunRequests)
 	}
 }
 
-func TestRunResolveSiblingLocalOverlayPreservesLockfile(t *testing.T) {
+func TestRunInstallSiblingLocalOverlayPreservesLockfile(t *testing.T) {
 	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "example.com/acme/calc")
 	githubIssuesDir := filepath.Join(t.TempDir(), "github-issues")
 	if err := os.MkdirAll(githubIssuesDir, 0o755); err != nil {
@@ -368,7 +821,7 @@ func TestRunResolveSiblingLocalOverlayPreservesLockfile(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", cacheDir)
 
 	var stdout, stderr bytes.Buffer
-	err = run([]string{"resolve", "--file", toolsetPath}, &stdout, &stderr)
+	err = run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
@@ -385,7 +838,7 @@ func TestRunResolveSiblingLocalOverlayPreservesLockfile(t *testing.T) {
 	}
 }
 
-func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
+func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	packageDir := filepath.Join(workspace, "package-repo")
 	consumerDir := filepath.Join(workspace, "consumer-repo")
@@ -416,7 +869,7 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- runWithIO(
-			[]string{"mcp", "serve", "--file", toolsetPath},
+			[]string{"mcp", "--toolset", toolsetPath},
 			serverRead,
 			serverWrite,
 			io.Discard,
@@ -483,10 +936,10 @@ func TestRunMCPServeLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	select {
 	case err := <-serverErr:
 		if err != nil {
-			t.Fatalf("mcp serve exited with error: %v", err)
+			t.Fatalf("mcp exited with error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for mcp serve to exit")
+		t.Fatal("timed out waiting for mcp to exit")
 	}
 }
 
@@ -605,23 +1058,23 @@ func TestBuildPackageCredentialPolicies_IsolatesLoadedPackages_EndToEnd(t *testi
 	}
 }
 
-func TestRunResolveRejectsInvalidUpgradeModuleArgument(t *testing.T) {
+func TestRunUpdateRejectsUnknownTargetArgument(t *testing.T) {
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
 		"tools":    []map[string]string{{"tool": "github.com/admin/stub@v1.0.0/calc.add"}},
 	})
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"resolve", "--file", toolsetPath, "--upgrade", "stub"}, &stdout, &stderr)
+	err := run([]string{"update", "--toolset", toolsetPath, "github.com/admin/missing"}, &stdout, &stderr)
 	if err == nil {
-		t.Fatal("run() error = nil, want invalid upgrade module error")
+		t.Fatal("run() error = nil, want unknown target error")
 	}
-	if !strings.Contains(err.Error(), "parse upgrade module path") {
-		t.Fatalf("error = %v, want parse upgrade module path context", err)
+	if !strings.Contains(err.Error(), `target "github.com/admin/missing" is not declared`) {
+		t.Fatalf("error = %v, want unknown target context", err)
 	}
 }
 
-func TestRunResolveMalformedLocalOverlayKeepsValidationContext(t *testing.T) {
+func TestRunInstallMalformedLocalOverlayKeepsValidationContext(t *testing.T) {
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
 		"tools":    []map[string]string{},
@@ -638,7 +1091,7 @@ func TestRunResolveMalformedLocalOverlayKeepsValidationContext(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	err = run([]string{"resolve", "--file", toolsetPath}, &stdout, &stderr)
+	err = run([]string{"install", "--toolset", toolsetPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("run() error = nil, want malformed local overlay error")
 	}
@@ -647,7 +1100,7 @@ func TestRunResolveMalformedLocalOverlayKeepsValidationContext(t *testing.T) {
 	assertErrorContains(t, err, file.LocalFilename())
 }
 
-func TestRunResolveUpgradeRewritesToolsetAndLockfile(t *testing.T) {
+func TestRunUpdateRewritesToolsetAndLockfile(t *testing.T) {
 	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
 	const commitSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -689,12 +1142,12 @@ func TestRunResolveUpgradeRewritesToolsetAndLockfile(t *testing.T) {
 	t.Setenv("TOOLBOX_CACHE_DIR", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"resolve", "--file", toolsetPath, "--upgrade", "github.com/admin/stub"}, &stdout, &stderr)
+	err := run([]string{"update", "--toolset", toolsetPath, "github.com/admin/stub"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "upgraded github.com/admin/stub: v1.0.0 -> v1.2.0") {
-		t.Fatalf("stdout = %q, want upgrade message", stdout.String())
+	if !strings.Contains(stdout.String(), "updated github.com/admin/stub: v1.0.0 -> v1.2.0") {
+		t.Fatalf("stdout = %q, want update message", stdout.String())
 	}
 
 	raw, err := os.ReadFile(toolsetPath)

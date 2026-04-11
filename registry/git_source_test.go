@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -154,6 +155,17 @@ func TestGitSource(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "pack cloned repo") {
 			t.Fatalf("Fetch(): expected pack error for corrupt package, got %v", err)
+		}
+	})
+
+	t.Run("missing_repository_is_classified_as_not_found", func(t *testing.T) {
+		err := wrapGitCommandError(
+			"git ls-remote tags github.com/admin/stub from https://github.com/admin/stub",
+			errors.New("exit status 128"),
+			"remote: Repository not found.\nfatal: repository 'https://github.com/admin/stub/' not found",
+		)
+		if !errors.Is(err, ErrReleaseNotFound) {
+			t.Fatalf("error = %v, want ErrReleaseNotFound", err)
 		}
 	})
 }

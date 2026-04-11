@@ -79,7 +79,7 @@ func (s *GitSourceFallback) ListVersions(ctx context.Context, module ModulePath)
 	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--tags", cloneURL)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("git ls-remote tags %s from %s: %w: %s", module, cloneURL, err, strings.TrimSpace(string(output)))
+		return nil, wrapGitCommandError(fmt.Sprintf("git ls-remote tags %s from %s", module, cloneURL), err, strings.TrimSpace(string(output)))
 	}
 
 	versions := make([]Version, 0)

@@ -15,6 +15,7 @@ type cli struct {
 	Versions  versionsCmd  `cmd:"" help:"List cached and published versions for a package target."`
 	Info      infoCmd      `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
 	Outdated  outdatedCmd  `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
+	Search    searchCmd    `cmd:"" help:"Search the tool registry for packages or tools."`
 	MCP       mcpCmd       `cmd:"" name:"mcp" help:"Serve the selected toolset over MCP stdio."`
 	Auth      authCmd      `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
 	SDKBridge sdkBridgeCmd `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
@@ -125,6 +126,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runInfo(parsed.Info, stdout)
 	case strings.HasPrefix(command, "outdated"):
 		return runOutdated(parsed.Outdated, stdout)
+	case strings.HasPrefix(command, "search"):
+		return runSearch(parsed.Search, stdout)
 	case strings.HasPrefix(command, "mcp"):
 		return runMCP(parsed.MCP, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):

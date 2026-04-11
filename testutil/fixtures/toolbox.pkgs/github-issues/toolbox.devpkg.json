@@ -3,6 +3,7 @@
   "name": "github-issues",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["tools/shims.ts"],
+  "allowed_hosts": ["api.github.com"],
   "tools": [
     {
       "entry_ts": "tools/github-issues.get.ts"

@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 
-	"github.com/solidarity-ai/toolbox/codemode"
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -33,12 +35,12 @@ var codeModeParamsSchema = map[string]any{
 	"type":                 "object",
 	"additionalProperties": false,
 	"properties": map[string]any{
-		"code": map[string]any{
+		codemodesession.TypeScriptCellSourceParam: map[string]any{
 			"type":        "string",
-			"description": "TypeScript code to run against the composed toolset.",
+			"description": "TypeScript code (can be multiline) for next cell.",
 		},
 	},
-	"required": []any{"code"},
+	"required": []any{codemodesession.TypeScriptCellSourceParam},
 }
 
 type Options struct {
@@ -61,6 +63,7 @@ type composedToolset struct {
 	mode     ComposeMode
 	prepared toolset.PreparedToolset
 	tools    []ToolDescriptor
+	session  *codemodesession.Session
 }
 
 type rpcRequest struct {
@@ -214,7 +217,7 @@ func (b *Bridge) handleMethod(ctx context.Context, method string, raw json.RawMe
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
 		}
-		return b.invoke(params)
+		return b.invoke(ctx, params)
 	case "bridge.shutdown":
 		b.clearToolsets()
 		return map[string]any{}, nil
@@ -259,7 +262,17 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 		return ComposeResult{}, err
 	}
 
-	descriptors := b.describeTools(params.Mode, prepared)
+	var session *codemodesession.Session
+	if params.Mode == ComposeModeCodemode {
+		session, err = codemodesession.OpenMemory(ctx, composeCurrentDir(params.ToolsetFile), codemodesession.SessionConfig{
+			PreparedTools: prepared,
+		})
+		if err != nil {
+			return ComposeResult{}, err
+		}
+	}
+
+	descriptors := b.describeTools(params.Mode, prepared, session)
 	id := fmt.Sprintf("ts_%d", atomic.AddUint64(&b.nextToolset, 1))
 
 	b.mu.Lock()
@@ -267,6 +280,7 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 		mode:     params.Mode,
 		prepared: prepared,
 		tools:    descriptors,
+		session:  session,
 	}
 	b.mu.Unlock()
 
@@ -276,11 +290,19 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	}, nil
 }
 
-func (b *Bridge) describeTools(mode ComposeMode, prepared toolset.PreparedToolset) []ToolDescriptor {
+func (b *Bridge) describeTools(mode ComposeMode, prepared toolset.PreparedToolset, session *codemodesession.Session) []ToolDescriptor {
 	if mode == ComposeModeCodemode {
+		instructions := ""
+		if session != nil {
+			instructions = session.Instructions()
+		} else {
+			metaSession := &codemodesession.Session{}
+			metaSession.SetPreparedTools(prepared)
+			instructions = metaSession.Instructions()
+		}
 		return []ToolDescriptor{{
 			Name:         CodeModeToolName,
-			Description:  "Run TypeScript code against the composed toolset.",
+			Description:  instructions,
 			ParamsSchema: cloneMap(codeModeParamsSchema),
 		}}
 	}
@@ -297,7 +319,7 @@ func (b *Bridge) describeTools(mode ComposeMode, prepared toolset.PreparedToolse
 	return out
 }
 
-func (b *Bridge) invoke(params ToolInvokeParams) (ToolInvokeResult, error) {
+func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvokeResult, error) {
 	if strings.TrimSpace(params.ToolsetID) == "" {
 		return ToolInvokeResult{}, invalidParams("toolset_id is required")
 	}
@@ -314,15 +336,14 @@ func (b *Bridge) invoke(params ToolInvokeParams) (ToolInvokeResult, error) {
 		if params.ToolName != CodeModeToolName {
 			return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 		}
-		code, ok := params.Params["code"].(string)
+		if handle.session == nil {
+			return ToolInvokeResult{}, fmt.Errorf("codemode session is not available")
+		}
+		code, ok := params.Params[codemodesession.TypeScriptCellSourceParam].(string)
 		if !ok || strings.TrimSpace(code) == "" {
-			return ToolInvokeResult{}, invalidParams("codemode tool requires params.code")
+			return ToolInvokeResult{}, invalidParams("codemode tool requires params." + codemodesession.TypeScriptCellSourceParam)
 		}
-		result, err := codemode.Run(handle.prepared, code)
-		if err != nil {
-			return ToolInvokeResult{}, err
-		}
-		return ToolInvokeResult{Content: result}, nil
+		return ToolInvokeResult{Content: handle.session.Submit(ctx, code)}, nil
 	}
 
 	result, err := invoke.Run(handle.prepared, params.ToolName, params.Params)
@@ -341,14 +362,35 @@ func (b *Bridge) lookupToolset(id string) (*composedToolset, bool) {
 
 func (b *Bridge) closeToolset(id string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	handle := b.toolsets[id]
 	delete(b.toolsets, id)
+	b.mu.Unlock()
+	if handle != nil && handle.session != nil {
+		_ = handle.session.Close()
+	}
 }
 
 func (b *Bridge) clearToolsets() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	toolsets := b.toolsets
 	b.toolsets = make(map[string]*composedToolset)
+	b.mu.Unlock()
+	for _, handle := range toolsets {
+		if handle != nil && handle.session != nil {
+			_ = handle.session.Close()
+		}
+	}
+}
+
+func composeCurrentDir(toolsetFile string) string {
+	if strings.TrimSpace(toolsetFile) != "" {
+		return filepath.Dir(toolsetFile)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
 }
 
 func (c *ComposeConfig) toToolsetConfig(source toolset.PackageCredentialPolicySource) toolset.Config {

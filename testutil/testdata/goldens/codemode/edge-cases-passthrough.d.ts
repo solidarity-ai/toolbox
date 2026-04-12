@@ -1,11 +1,11 @@
-export declare const tools: {
-  edgeCases: {
-    asyncComplex(ids: string[], concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number }; // irreversible
-    complex(query: string, filters: SearchFilter[], tags?: string[], pagination?: PageInfo, output?: OutputConfig, dryRun?: boolean): string; // readonly
+declare namespace edgeCases {
+  namespace edgeCases {
+    function asyncComplex(ids: string[], concurrency?: number): { /** Error messages for failed items */ errors?: string[]; /** Number of items that failed */ failed?: number; /** Number of items successfully processed */ succeeded?: number }; // irreversible
+    function complex(query: string, filters: SearchFilter[], tags?: string[], pagination?: PageInfo, output?: OutputConfig, dryRun?: boolean): string; // readonly
     // Permanently delete all records matching the filter.
-    irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute deletion */ confirm: boolean): string; // irreversible
-    minimal(): string; // readonly
-    multilineParam(
+    function irreversible(/** SQL-like filter expression */ filter: string, /** Must be true to execute deletion */ confirm: boolean): string; // irreversible
+    function minimal(): string; // readonly
+    function multilineParam(
       // The raw input string to transform
       input: string,
       // A sequence of transformation steps to apply.
@@ -14,29 +14,29 @@ export declare const tools: {
       pipeline: string[],
       options?: { dryRun?: boolean; verbose?: boolean }
     ): string; // readonly
-    multilineReturn(input: string): MultilineReturnResult; // readonly
-    namedExport(data: string, algorithm: "md5" | "sha256" | "sha512"): string; // readonly
-    noDescription(x: number, y: number): number; // readonly
-    noParams(): string; // readonly
-    paramsObject(params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string; // irreversible, idempotent
-    reversible(title: string, content: string, tags?: string[]): string; // reversible, idempotent
-  };
-};
+    function multilineReturn(input: string): MultilineReturnResult; // readonly
+    function namedExport(data: string, algorithm: "md5" | "sha256" | "sha512"): string; // readonly
+    function noDescription(x: number, y: number): number; // readonly
+    function noParams(): string; // readonly
+    function paramsObject(params: { /** Action to take on each item */ action?: "archive" | "delete" | "restore"; /** Optional callback URL for completion notification */ callbackUrl?: string; /** Whether to continue on individual item failures */ continueOnError?: boolean; /** List of item IDs to process */ ids?: string[] }): string; // irreversible, idempotent
+    function reversible(title: string, content: string, tags?: string[]): string; // reversible, idempotent
+  }
 
-// A paginated item in results
-type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maximum items per page */ pageSize?: number };
-// Filter criteria for searching
-type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };
-// Nested config with deeply nested objects
-type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
-interface MultilineReturnResult {
-  // Detailed recommendations for improvement.
-  // Each entry is a separate actionable item
-  // that should be addressed independently.
-  recommendations?: string[];
-  // Overall score from 0 to 100.
-  // Higher values indicate better quality.
-  score?: number;
-  // Short summary of findings
-  summary?: string;
+  // A paginated item in results
+  type PageInfo = { /** Current page number (1-indexed) */ page?: number; /** Maximum items per page */ pageSize?: number };
+  // Filter criteria for searching
+  type SearchFilter = { /** Field name to filter on */ field?: string; /** Comparison operator */ op?: "contains" | "eq" | "gt" | "gte" | "lt" | "lte" | "neq"; /** The value to compare against */ value?: boolean | number | string };
+  // Nested config with deeply nested objects
+  type OutputConfig = { /** Column configuration */ columns?: { exclude?: string[]; include?: string[] }; /** Output format */ format?: "csv" | "json" | "table" };
+  interface MultilineReturnResult {
+    // Detailed recommendations for improvement.
+    // Each entry is a separate actionable item
+    // that should be addressed independently.
+    recommendations?: string[];
+    // Overall score from 0 to 100.
+    // Higher values indicate better quality.
+    score?: number;
+    // Short summary of findings
+    summary?: string;
+  }
 }

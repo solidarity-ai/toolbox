@@ -894,8 +894,8 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize(): %v", err)
 	}
-	if initRes.ServerInfo.Name != "toolbox-mcp-server" {
-		t.Fatalf("server name = %q, want toolbox-mcp-server", initRes.ServerInfo.Name)
+	if initRes.ServerInfo.Name != "toolbox" {
+		t.Fatalf("server name = %q, want toolbox", initRes.ServerInfo.Name)
 	}
 
 	tools, err := c.ListTools(ctx, mcp.ListToolsRequest{})
@@ -940,6 +940,131 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for mcp to exit")
+	}
+}
+
+func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	packageDir := filepath.Join(workspace, "package-repo")
+	consumerDir := filepath.Join(workspace, "consumer-repo")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", packageDir, err)
+	}
+	if err := os.MkdirAll(consumerDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", consumerDir, err)
+	}
+
+	copyFixtureDir(t, loadSourceFixtureDir(t, "calc"), packageDir)
+	rewriteSourceFixtureModule(t, packageDir, "example.com/acme/calc")
+
+	toolsetPath := filepath.Join(consumerDir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]string{"example.com/acme/calc": "v1.2.3"},
+		"tools":    []map[string]string{{"tool": "example.com/acme/calc@v1.2.3/calc.add"}},
+	})
+	writeJSONFile(t, filepath.Join(consumerDir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]string{"example.com/acme/calc": "../package-repo"},
+	})
+
+	serverRead, clientWrite := io.Pipe()
+	clientRead, serverWrite := io.Pipe()
+	defer clientRead.Close()
+	defer clientWrite.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- runWithIO(
+			[]string{"codemode", "mcp", "--toolset", toolsetPath},
+			serverRead,
+			serverWrite,
+			io.Discard,
+		)
+	}()
+
+	stdio := clienttransport.NewIO(clientRead, clientWrite, io.NopCloser(strings.NewReader("")))
+	if err := stdio.Start(context.Background()); err != nil {
+		t.Fatalf("stdio.Start(): %v", err)
+	}
+	defer stdio.Close()
+
+	c := client.NewClient(stdio)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "toolbox-cli-test", Version: "1.0.0"}
+	initReq.Params.Capabilities = mcp.ClientCapabilities{}
+	initRes, err := c.Initialize(ctx, initReq)
+	if err != nil {
+		t.Fatalf("Initialize(): %v", err)
+	}
+	if initRes.ServerInfo.Name != "toolbox" {
+		t.Fatalf("server name = %q, want toolbox", initRes.ServerInfo.Name)
+	}
+
+	tools, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools(): %v", err)
+	}
+	if len(tools.Tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(tools.Tools))
+	}
+	if !hasToolNamed(tools.Tools, "super_tool") {
+		t.Fatalf("tools = %#v, want super_tool", tools.Tools)
+	}
+
+	callReq := mcp.CallToolRequest{}
+	callReq.Params.Name = "super_tool"
+	callReq.Params.Arguments = map[string]any{"typescript_cell_source": "Object.keys($pkgMetadata).sort().join(',')"}
+	result, err := c.CallTool(ctx, callReq)
+	if err != nil {
+		t.Fatalf("CallTool(): %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool() returned MCP error: %#v", result)
+	}
+	if len(result.Content) == 0 {
+		t.Fatalf("CallTool() content = %#v, want at least one content item", result.Content)
+	}
+
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("first content item = %#v, want text content", result.Content[0])
+	}
+	if !strings.Contains(text.Text, "calc") {
+		t.Fatalf("text content = %q, want calc metadata", text.Text)
+	}
+
+	_ = stdio.Close()
+	_ = clientWrite.Close()
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("mcp exited with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mcp to exit")
+	}
+}
+
+func TestMCPServerNameForToolsetPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "toolbox.toolset.json", want: "toolbox"},
+		{path: filepath.Join("tmp", "toolbox.toolset.json"), want: "toolbox"},
+		{path: "support-agent.toolset.json", want: "support-agent"},
+		{path: "support-agent.json", want: "support-agent"},
+		{path: "support-agent.toolset", want: "support-agent"},
+		{path: "", want: "toolbox"},
+	}
+
+	for _, tt := range tests {
+		if got := mcpServerNameForToolsetPath(tt.path); got != tt.want {
+			t.Fatalf("mcpServerNameForToolsetPath(%q) = %q, want %q", tt.path, got, tt.want)
+		}
 	}
 }
 

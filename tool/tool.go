@@ -8,8 +8,11 @@ import (
 
 // Package is the smallest useful static package shape for the first package-loading seam.
 type Package struct {
-	Module                    ModulePath          `json:"module"`
-	Name                      string              `json:"name"`
+	Module ModulePath `json:"module"`
+	Name   string     `json:"name"`
+	// UseWhenHint is optional short guidance for packages that are not obvious
+	// from general model knowledge. Leave it empty for well-known services.
+	UseWhenHint               string              `json:"useWhenHint,omitempty"`
 	Runtime                   ToolRuntime         `json:"runtime"`
 	SHA256                    string              `json:"sha256,omitempty"`
 	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs,omitempty"`
@@ -61,6 +64,8 @@ const RuntimeTypeScriptSandbox ToolRuntime = "typescript-sandbox"
 const RuntimeTypeScriptWasixSandbox ToolRuntime = "typescript+wasix-sandbox"
 
 const RuntimeTypeScriptWasip2Sandbox ToolRuntime = "typescript+wasip2-sandbox"
+
+const RuntimeBuiltin ToolRuntime = "builtin"
 
 type Effect string
 

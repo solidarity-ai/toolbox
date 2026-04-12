@@ -47,6 +47,7 @@ type LoadResult struct {
 type DevManifest struct {
 	Module                    tooldef.ModulePath      `json:"module"`
 	Name                      string                  `json:"name"`
+	UseWhenHint               string                  `json:"useWhenHint,omitempty"`
 	Runtime                   tooldef.ToolRuntime     `json:"runtime"`
 	AdditionalTypeScriptGlobs []string                `json:"additionalTypeScriptGlobs"`
 	Executables               map[string]string       `json:"executables"`
@@ -116,6 +117,9 @@ func ParseDev(data []byte) (DevManifest, error) {
 	if err := validateModulePath(manifest.Module); err != nil {
 		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
 	}
+	if err := validateUseWhenHint(manifest.UseWhenHint); err != nil {
+		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
+	}
 	for _, tool := range manifest.Tools {
 		if err := validateEntryName(tool.EntryTS); err != nil {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
@@ -133,6 +137,9 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 	if err := validateModulePath(pkg.Module); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
+	if err := validateUseWhenHint(pkg.UseWhenHint); err != nil {
+		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
 	return pkg, nil
 }
 
@@ -142,6 +149,7 @@ func Compile(dev DevManifest) tooldef.Package {
 	pkg := tooldef.Package{
 		Module:                    dev.Module,
 		Name:                      dev.Name,
+		UseWhenHint:               strings.TrimSpace(dev.UseWhenHint),
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
 		Executables:               dev.Executables,
@@ -247,6 +255,9 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 	if err := validateModulePath(pkg.Module); err != nil {
 		return nil, fmt.Errorf("validate compiled package: %w", err)
 	}
+	if err := validateUseWhenHint(pkg.UseWhenHint); err != nil {
+		return nil, fmt.Errorf("validate compiled package: %w", err)
+	}
 
 	raw, err := json.Marshal(pkg)
 	if err != nil {
@@ -274,6 +285,14 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 func validateModulePath(module tooldef.ModulePath) error {
 	if _, err := tooldef.ParseModulePath(module.String()); err != nil {
 		return fmt.Errorf("invalid module %q: %w", module, err)
+	}
+	return nil
+}
+
+func validateUseWhenHint(useWhenHint string) error {
+	useWhenHint = strings.TrimSpace(useWhenHint)
+	if len(useWhenHint) > 100 {
+		return fmt.Errorf("useWhenHint must be 100 characters or fewer")
 	}
 	return nil
 }

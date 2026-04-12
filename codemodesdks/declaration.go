@@ -1,4 +1,4 @@
-package codemode
+package codemodesdks
 
 import (
 	"encoding/json"
@@ -12,22 +12,85 @@ import (
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
+// sortedTools returns the tools from the view sorted by name.
+func sortedTools(view toolset.AgentView) []toolset.AgentTool {
+	tools := make([]toolset.AgentTool, len(view.Tools))
+	copy(tools, view.Tools)
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name < tools[j].Name
+	})
+	return tools
+}
+
 // DeclarationSource generates a .d.ts file with JSDoc comments for the
-// agent-visible tools. This is the type declaration the agent imports.
+// agent-visible tools as concat-safe ambient package namespaces.
 func DeclarationSource(prepared toolset.PreparedToolset) string {
 	var b strings.Builder
 
-	view := prepared.AgentView()
-	tools := sortedTools(view)
+	groups := groupedPackageNames(prepared)
+	for i, packageName := range groups {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		pkgPrepared := prepared.FilterTools(func(tool toolset.PreparedTool) bool {
+			return preparedToolPackageName(tool) == packageName
+		})
+		b.WriteString(packageDeclarationSource(packageName, sortedTools(pkgPrepared.AgentView())))
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+type returnTypeInfo struct {
+	mode     string // "named", "inline-comments", "plain"
+	typeName string // for "named" mode
+}
+
+type declNamespaceNode struct {
+	funcs    []toolset.AgentTool
+	children map[string]*declNamespaceNode
+}
+
+func groupedPackageNames(prepared toolset.PreparedToolset) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, tool := range prepared.Tools() {
+		name := preparedToolPackageName(tool)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func preparedToolPackageName(tool toolset.PreparedTool) string {
+	name := strings.TrimSpace(tool.Name)
+	if tool.PackageMeta != nil {
+		if pkgName := strings.TrimSpace(tool.PackageMeta.Name); pkgName != "" {
+			return pkgName
+		}
+		if module := strings.TrimSpace(tool.PackageMeta.Module.String()); module != "" {
+			return module
+		}
+	}
+	if name == "" {
+		return "pkg"
+	}
+	return sanitizeIdentifierSegment(name)
+}
+
+func packageDeclarationSource(packageName string, tools []toolset.AgentTool) string {
+	if len(tools) == 0 {
+		return ""
+	}
 
 	// Collect $ref type declarations (used for both params and returns).
 	refDeclLines := collectUniqueDeclarations(tools)
 
-	namespaces, nsNames := groupToolsByNamespace(tools)
-
 	// Build a map from canonical type structure to $ref definition name.
-	// This lets us reuse the original source type name (e.g. "Ticket")
-	// for shared return types instead of generating "CreateResult".
 	defNameByStructure := map[string]string{}
 	for _, tool := range tools {
 		if pt := tool.ParamsType(); pt != nil {
@@ -35,18 +98,13 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		}
 	}
 
-	// Detect shared parameter types across tools. When the same parameter
-	// type appears in multiple tools (by structural equality), it gets
-	// extracted as a named type at the top of the file.
 	type sharedParamInfo struct {
 		typeName string
-		tsType   string // ToTS() rendering
+		tsType   string
 	}
-	sharedParamTypes := map[string]*sharedParamInfo{} // canonical key -> info
-	// Map from (tool.Name, paramName) -> shared type name.
+	sharedParamTypes := map[string]*sharedParamInfo{}
 	paramTypeOverrides := map[string]string{}
 
-	// First pass: count usages of each param type structure.
 	type paramOccurrence struct {
 		toolName  string
 		paramName string
@@ -74,16 +132,12 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 			})
 		}
 	}
-
-	// Second pass: for param types used by 2+ tools, create named types.
 	for key, occs := range paramCanonical {
 		if len(occs) < 2 {
 			continue
 		}
-		// Check if a $ref definition name already exists for this structure.
 		typeName := defNameByStructure[key]
 		if typeName == "" {
-			// Derive a name from the param name of the first occurrence.
 			typeName = upperFirst(occs[0].paramName)
 		}
 		sharedParamTypes[key] = &sharedParamInfo{
@@ -95,11 +149,8 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		}
 	}
 
-	// Build declaration lists: shared param types first, then $ref types, then return interfaces.
-	// This gives args-before-return ordering.
 	var inputDeclLines []string
 	declLineSet := map[string]bool{}
-	// Shared param types go first (these are always input types).
 	for _, info := range sharedParamTypes {
 		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
 		if !declLineSet[declLine] {
@@ -107,7 +158,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 			declLineSet[declLine] = true
 		}
 	}
-	// $ref declarations (may be input or output — emitted after shared param types).
 	var refLines []string
 	for _, line := range refDeclLines {
 		if !declLineSet[line] {
@@ -116,22 +166,12 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		}
 	}
 
-	// Analyze return types: decide rendering mode for each tool and detect
-	// shared return types across tools.
-	type returnTypeInfo struct {
-		mode     string // "named", "inline-comments", "plain"
-		typeName string // for "named" mode
-	}
-	returnTypes := map[string]returnTypeInfo{} // keyed by tool.Name
-
-	// Map from canonical JSON representation of return schema -> first tool method name that uses it.
-	// Used to detect shared return types.
+	returnTypes := map[string]returnTypeInfo{}
 	type sharedInfo struct {
 		typeName   string
 		properties []toolbox.PropertyInfo
 	}
 	sharedReturnTypes := map[string]*sharedInfo{}
-
 	for _, tool := range tools {
 		if tool.Sig == nil {
 			continue
@@ -149,7 +189,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 			continue
 		}
 
-		// Check if any property has a description.
 		hasDesc := false
 		hasMultiLineDesc := false
 		for _, p := range props {
@@ -160,29 +199,21 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 				}
 			}
 		}
-
 		if !hasDesc {
 			continue
 		}
 
-		// Compute canonical key for shared type detection.
 		canonicalKey := canonicalReturnTypeKey(props)
-
 		parts := strings.Split(tool.Name, ".")
 		method := parts[len(parts)-1]
-
-		// Prefer the $ref definition name if one exists with this structure.
 		deriveName := func(fallback string) string {
 			if defName, ok := defNameByStructure[canonicalKey]; ok {
 				return defName
 			}
 			return fallback
 		}
-
 		if hasMultiLineDesc {
-			// Named type mode.
 			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
-				// Shared with a previously seen tool - reuse the name.
 				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
 			} else {
 				typeName := deriveName(upperFirst(method) + "Result")
@@ -190,12 +221,9 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: typeName}
 			}
 		} else {
-			// Inline with single-line comments.
 			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
 				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
 			} else {
-				// Check if another tool shares this exact structure.
-				// We'll store it for dedup but render inline unless shared.
 				sharedReturnTypes[canonicalKey] = &sharedInfo{
 					typeName:   deriveName(upperFirst(method) + "Result"),
 					properties: props,
@@ -205,7 +233,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		}
 	}
 
-	// Count usage of each canonical key to detect shared types.
 	canonicalUsage := map[string]int{}
 	for _, tool := range tools {
 		if tool.Sig == nil {
@@ -226,39 +253,21 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		key := canonicalReturnTypeKey(cProps)
 		canonicalUsage[key]++
 	}
-
-	// Promote inline-comments to named if used by multiple tools.
 	for toolName, info := range returnTypes {
 		if info.mode != "inline-comments" {
 			continue
 		}
 		tool := findTool(tools, toolName)
-		if tool == nil {
+		if tool == nil || tool.Sig == nil || tool.Sig.Return() == nil {
 			continue
 		}
-		rt := tool.Sig.Return()
-		if rt == nil {
-			continue
-		}
-		unwrapped := rt.UnwrapPromise()
-		pProps := unwrapped.ObjectProperties()
-		key := canonicalReturnTypeKey(pProps)
+		key := canonicalReturnTypeKey(tool.Sig.Return().UnwrapPromise().ObjectProperties())
 		if canonicalUsage[key] > 1 {
 			shared := sharedReturnTypes[key]
 			returnTypes[toolName] = returnTypeInfo{mode: "named", typeName: shared.typeName}
 		}
 	}
 
-	// Collect the set of named return type names that will be emitted as
-	// interface blocks, so we can suppress matching $ref type aliases.
-	namedReturnTypeNames := map[string]bool{}
-	for _, info := range returnTypes {
-		if info.mode == "named" {
-			namedReturnTypeNames[info.typeName] = true
-		}
-	}
-
-	// Collect named return type interfaces for emission after the tools block.
 	var interfaceBlocks []string
 	emittedInterfaces := map[string]bool{}
 	for _, tool := range tools {
@@ -268,7 +277,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		}
 		emittedInterfaces[info.typeName] = true
 
-		// Skip if a $ref type alias with the same name already exists.
 		typeAliasLine := "type " + info.typeName + " = "
 		alreadyDeclared := false
 		for line := range declLineSet {
@@ -283,7 +291,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 
 		unwrapped := tool.Sig.Return().UnwrapPromise()
 		props := unwrapped.ObjectProperties()
-
 		var ib strings.Builder
 		if desc := unwrapped.Description(); desc != "" {
 			fmt.Fprintf(&ib, "// %s\n", desc)
@@ -305,163 +312,314 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 		interfaceBlocks = append(interfaceBlocks, ib.String())
 	}
 
-	b.WriteString("export declare const tools: {\n")
-	for _, ns := range nsNames {
-		fmt.Fprintf(&b, "  %s: {\n", ns)
-		for _, tool := range namespaces[ns] {
-			parts := strings.Split(tool.Name, ".")
-			method := parts[len(parts)-1]
+	tree := buildNamespaceTree(tools)
 
-			hidden := tool.HiddenParams()
-			literals := tool.BoundLiterals()
-
-			// Build the effect label suffix for the JSDoc description.
-			modeLabel := effectLabel(tool.Effect, tool.Idempotent)
-
-			// Collect multi-line param descriptions for @param tags.
-			var multiLineParams []struct {
-				name string
-				desc string
-			}
-			if tool.Sig != nil {
-				for _, p := range tool.Sig.Params() {
-					if hidden[p.Name()] {
-						continue
-					}
-					desc := p.Description()
-					if desc != "" && strings.Contains(desc, "\n") {
-						multiLineParams = append(multiLineParams, struct {
-							name string
-							desc string
-						}{name: p.Name(), desc: desc})
-					}
-				}
-			}
-
-			// Emit tool description (if any) as // comment above.
-			// Access mode goes as trailing comment on the signature line.
-			if tool.Sig != nil {
-				if desc := tool.Sig.Description(); desc != "" {
-					fmt.Fprintf(&b, "    // %s\n", desc)
-				}
-			}
-
-			// Build param list. If any param has a multi-line description,
-			// ALL params go one-per-line with // descriptions above each.
-			useMultiLine := len(multiLineParams) > 0
-			var paramParts []string
-			if tool.Sig != nil {
-				for _, p := range tool.Sig.Params() {
-					if hidden[p.Name()] {
-						continue
-					}
-					var tsType string
-					if litVal, ok := literals[p.Name()]; ok {
-						tsType = literalToTS(litVal)
-					} else if sharedName, ok := paramTypeOverrides[tool.Name+"."+p.Name()]; ok {
-						tsType = sharedName
-					} else if props := p.Type().ObjectProperties(); len(props) > 0 && hasDescriptions(props) {
-						tsType = renderReturnTypeInlineComments(p.Type())
-					} else {
-						tsType = p.Type().ToTS()
-					}
-					name := p.Name()
-					if p.Optional() {
-						name += "?"
-					}
-
-					desc := p.Description()
-					if useMultiLine {
-						// One param per line with // description above.
-						paramParts = append(paramParts, name+": "+tsType)
-					} else if desc != "" && !strings.Contains(desc, "\n") {
-						paramParts = append(paramParts, fmt.Sprintf("/** %s */ %s: %s", desc, name, tsType))
-					} else {
-						paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
-					}
-				}
-			}
-
-			returnType := "string"
-			if tool.Sig != nil {
-				if rt := tool.Sig.Return(); rt != nil {
-					unwrapped := rt.UnwrapPromise()
-					if info, ok := returnTypes[tool.Name]; ok {
-						switch info.mode {
-						case "named":
-							returnType = info.typeName
-						case "inline-comments":
-							returnType = renderReturnTypeInlineComments(unwrapped)
-						default:
-							returnType = unwrapped.ToTS()
-						}
-					} else {
-						returnType = unwrapped.ToTS()
-					}
-				}
-			}
-
-			// Trailing effect comment.
-			modeTrail := ""
-			if modeLabel != "" {
-				// Strip parens from modeLabel: "(readonly)" -> "readonly"
-				modeTrail = " // " + strings.Trim(modeLabel, "()")
-			}
-
-			if useMultiLine && len(paramParts) > 0 {
-				// One param per line with // descriptions.
-				fmt.Fprintf(&b, "    %s(\n", method)
-				visibleParams := make([]toolbox.FuncParam, 0)
-				if tool.Sig != nil {
-					for _, p := range tool.Sig.Params() {
-						if !hidden[p.Name()] {
-							visibleParams = append(visibleParams, p)
-						}
-					}
-				}
-				for i, part := range paramParts {
-					if i < len(visibleParams) {
-						if desc := visibleParams[i].Description(); desc != "" {
-							for _, dl := range strings.Split(desc, "\n") {
-								fmt.Fprintf(&b, "      // %s\n", dl)
-							}
-						}
-					}
-					trailing := ","
-					if i == len(paramParts)-1 {
-						trailing = ""
-					}
-					fmt.Fprintf(&b, "      %s%s\n", part, trailing)
-				}
-				fmt.Fprintf(&b, "    ): %s;%s\n", returnType, modeTrail)
-			} else {
-				fmt.Fprintf(&b, "    %s(%s): %s;%s\n", method, strings.Join(paramParts, ", "), returnType, modeTrail)
-			}
-		}
-		b.WriteString("  };\n")
-	}
-	b.WriteString("};\n")
-
-	// Emit type definitions after the tools block: shared param types first,
-	// then $ref types, then return type interfaces.
+	var body strings.Builder
+	renderNamespaceNode(&body, "", tree, returnTypes, paramTypeOverrides)
 	hasTypes := len(inputDeclLines) > 0 || len(refLines) > 0 || len(interfaceBlocks) > 0
 	if hasTypes {
-		b.WriteString("\n")
+		if body.Len() > 0 {
+			body.WriteString("\n")
+		}
 		for _, line := range inputDeclLines {
-			b.WriteString(line)
-			b.WriteString("\n")
+			body.WriteString(line)
+			body.WriteString("\n")
 		}
 		for _, line := range refLines {
-			b.WriteString(line)
-			b.WriteString("\n")
+			body.WriteString(line)
+			body.WriteString("\n")
 		}
 		for _, block := range interfaceBlocks {
-			b.WriteString(block)
-			b.WriteString("\n")
+			body.WriteString(block)
+			body.WriteString("\n")
 		}
 	}
 
+	return wrapNamespacePath(namespaceSegments(packageName), strings.TrimRight(body.String(), "\n"))
+}
+
+func buildNamespaceTree(tools []toolset.AgentTool) *declNamespaceNode {
+	root := &declNamespaceNode{}
+	for _, tool := range tools {
+		segments := toolSegments(tool.Name)
+		if len(segments) == 0 {
+			continue
+		}
+		node := root
+		for _, segment := range segments[:len(segments)-1] {
+			if node.children == nil {
+				node.children = map[string]*declNamespaceNode{}
+			}
+			child := node.children[segment]
+			if child == nil {
+				child = &declNamespaceNode{}
+				node.children[segment] = child
+			}
+			node = child
+		}
+		node.funcs = append(node.funcs, tool)
+	}
+	return root
+}
+
+func renderNamespaceNode(b *strings.Builder, indent string, node *declNamespaceNode, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+	if node == nil {
+		return
+	}
+	for _, tool := range node.funcs {
+		method := sanitizeIdentifierSegment(lastSegment(tool.Name))
+		writeToolDeclaration(b, indent, method, tool, returnTypes, paramTypeOverrides)
+	}
+	if len(node.funcs) > 0 && len(node.children) > 0 {
+		b.WriteString("\n")
+	}
+	childNames := make([]string, 0, len(node.children))
+	for name := range node.children {
+		childNames = append(childNames, name)
+	}
+	sort.Strings(childNames)
+	for i, name := range childNames {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "%snamespace %s {\n", indent, sanitizeIdentifierSegment(name))
+		renderNamespaceNode(b, indent+"  ", node.children[name], returnTypes, paramTypeOverrides)
+		fmt.Fprintf(b, "%s}\n", indent)
+	}
+}
+
+func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolset.AgentTool, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+	hidden := tool.HiddenParams()
+	literals := tool.BoundLiterals()
+	modeLabel := effectLabel(tool.Effect, tool.Idempotent)
+
+	var multiLineParams []struct {
+		name string
+		desc string
+	}
+	if tool.Sig != nil {
+		for _, p := range tool.Sig.Params() {
+			if hidden[p.Name()] {
+				continue
+			}
+			desc := p.Description()
+			if desc != "" && strings.Contains(desc, "\n") {
+				multiLineParams = append(multiLineParams, struct {
+					name string
+					desc string
+				}{name: p.Name(), desc: desc})
+			}
+		}
+	}
+
+	if tool.Sig != nil {
+		if desc := tool.Sig.Description(); desc != "" {
+			fmt.Fprintf(b, "%s// %s\n", indent, desc)
+		}
+	}
+
+	useMultiLine := len(multiLineParams) > 0
+	var paramParts []string
+	if tool.Sig != nil {
+		for _, p := range tool.Sig.Params() {
+			if hidden[p.Name()] {
+				continue
+			}
+			var tsType string
+			if litVal, ok := literals[p.Name()]; ok {
+				tsType = literalToTS(litVal)
+			} else if sharedName, ok := paramTypeOverrides[tool.Name+"."+p.Name()]; ok {
+				tsType = sharedName
+			} else if props := p.Type().ObjectProperties(); len(props) > 0 && hasDescriptions(props) {
+				tsType = renderReturnTypeInlineComments(p.Type())
+			} else {
+				tsType = p.Type().ToTS()
+			}
+			name := p.Name()
+			if p.Optional() {
+				name += "?"
+			}
+			desc := p.Description()
+			if useMultiLine {
+				paramParts = append(paramParts, name+": "+tsType)
+			} else if desc != "" && !strings.Contains(desc, "\n") {
+				paramParts = append(paramParts, fmt.Sprintf("/** %s */ %s: %s", desc, name, tsType))
+			} else {
+				paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
+			}
+		}
+	}
+
+	returnType := "string"
+	if tool.Sig != nil {
+		if rt := tool.Sig.Return(); rt != nil {
+			unwrapped := rt.UnwrapPromise()
+			if info, ok := returnTypes[tool.Name]; ok {
+				switch info.mode {
+				case "named":
+					returnType = info.typeName
+				case "inline-comments":
+					returnType = renderReturnTypeInlineComments(unwrapped)
+				default:
+					returnType = unwrapped.ToTS()
+				}
+			} else {
+				returnType = unwrapped.ToTS()
+			}
+		}
+	}
+
+	modeTrail := ""
+	if modeLabel != "" {
+		modeTrail = " // " + strings.Trim(modeLabel, "()")
+	}
+
+	if useMultiLine && len(paramParts) > 0 {
+		fmt.Fprintf(b, "%sfunction %s(\n", indent, method)
+		visibleParams := make([]toolbox.FuncParam, 0)
+		if tool.Sig != nil {
+			for _, p := range tool.Sig.Params() {
+				if !hidden[p.Name()] {
+					visibleParams = append(visibleParams, p)
+				}
+			}
+		}
+		for i, part := range paramParts {
+			if i < len(visibleParams) {
+				if desc := visibleParams[i].Description(); desc != "" {
+					for _, dl := range strings.Split(desc, "\n") {
+						fmt.Fprintf(b, "%s  // %s\n", indent, dl)
+					}
+				}
+			}
+			trailing := ","
+			if i == len(paramParts)-1 {
+				trailing = ""
+			}
+			fmt.Fprintf(b, "%s  %s%s\n", indent, part, trailing)
+		}
+		fmt.Fprintf(b, "%s): %s;%s\n", indent, returnType, modeTrail)
+		return
+	}
+
+	fmt.Fprintf(b, "%sfunction %s(%s): %s;%s\n", indent, method, strings.Join(paramParts, ", "), returnType, modeTrail)
+}
+
+func wrapNamespacePath(segments []string, body string) string {
+	if len(segments) == 0 {
+		return body
+	}
+	var b strings.Builder
+	for i, segment := range segments {
+		indent := strings.Repeat("  ", i)
+		if i == 0 {
+			fmt.Fprintf(&b, "declare namespace %s {\n", segment)
+		} else {
+			fmt.Fprintf(&b, "%snamespace %s {\n", indent, segment)
+		}
+	}
+	if body != "" {
+		b.WriteString(indentLines(body, len(segments)))
+		b.WriteString("\n")
+	}
+	for i := len(segments) - 1; i >= 0; i-- {
+		indent := strings.Repeat("  ", i)
+		fmt.Fprintf(&b, "%s}", indent)
+		if i > 0 {
+			b.WriteString("\n")
+		}
+	}
 	return b.String()
+}
+
+func namespaceSegments(packageName string) []string {
+	parts := strings.Split(strings.TrimSpace(packageName), ".")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, sanitizeIdentifierSegment(part))
+	}
+	if len(out) == 0 {
+		return []string{"pkg"}
+	}
+	return out
+}
+
+func toolSegments(toolName string) []string {
+	return splitDotted(toolName)
+}
+
+func splitDotted(value string) []string {
+	raw := strings.Split(strings.TrimSpace(value), ".")
+	out := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func indentLines(body string, levels int) string {
+	prefix := strings.Repeat("  ", levels)
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func sanitizeIdentifierSegment(segment string) string {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return "pkg"
+	}
+	var out []rune
+	upperNext := false
+	for _, r := range segment {
+		switch {
+		case r == '-' || r == '.' || r == ' ' || r == '/':
+			upperNext = true
+		case len(out) == 0 && (unicode.IsLetter(r) || r == '_' || r == '$'):
+			out = append(out, r)
+			upperNext = false
+		case len(out) == 0 && unicode.IsDigit(r):
+			out = append(out, '_', r)
+			upperNext = false
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '$':
+			if upperNext && unicode.IsLetter(r) {
+				out = append(out, unicode.ToUpper(r))
+			} else {
+				out = append(out, r)
+			}
+			upperNext = false
+		default:
+			if !upperNext {
+				out = append(out, '_')
+			}
+			upperNext = false
+		}
+	}
+	if len(out) == 0 {
+		return "pkg"
+	}
+	return string(out)
+}
+
+func lastSegment(name string) string {
+	parts := splitDotted(name)
+	if len(parts) == 0 {
+		return name
+	}
+	return parts[len(parts)-1]
 }
 
 // hasDescriptions reports whether any property has a description.
@@ -646,7 +804,7 @@ func collectSplitDeclarations(tools []toolset.AgentTool) (paramLines, returnLine
 	return paramLines, returnLines
 }
 
-// collectUniqueDeclarations is kept for the typecheckSDKSource path.
+// collectUniqueDeclarations gathers type declarations used by the emitted SDK.
 func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 	// First pass: collect all definition types keyed by name from all tools'
 	// param and return types. These contain the property-level descriptions.

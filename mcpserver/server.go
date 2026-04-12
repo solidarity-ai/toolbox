@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -10,10 +11,21 @@ import (
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
+const defaultServerName = "toolbox"
+
 // New creates an MCP server that exposes one MCP tool per visible invoke tool.
 func New(prepared toolset.PreparedToolset) *server.MCPServer {
+	return NewNamed(defaultServerName, prepared)
+}
+
+// NewNamed creates an MCP server that exposes one MCP tool per visible invoke tool.
+func NewNamed(name string, prepared toolset.PreparedToolset) *server.MCPServer {
+	if strings.TrimSpace(name) == "" {
+		name = defaultServerName
+	}
+
 	mcpServer := server.NewMCPServer(
-		"toolbox-mcp-server",
+		name,
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
@@ -49,8 +61,8 @@ func newMCPTool(at toolset.AgentTool) mcp.Tool {
 }
 
 func handleToolCall(prepared toolset.PreparedToolset, toolName string) server.ToolHandlerFunc {
-	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ran, err := invoke.Run(prepared, toolName, argumentMap(request.Params.Arguments))
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ran, err := invoke.RunContext(ctx, prepared, toolName, argumentMap(request.Params.Arguments))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

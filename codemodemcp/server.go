@@ -2,92 +2,104 @@ package codemodemcp
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"os"
+	"strings"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/codemodesession"
 )
 
 const (
-	ToolDiscoveryExecute = "tool_discovery_execute"
-	ToolActionExecute    = "tool_action_execute"
+	ToolSuperTool     = codemodesession.SuperToolName
+	defaultServerName = "toolbox"
 )
 
 // New creates an MCP server with the initial Toolbox MCP surface.
-func New() *server.MCPServer {
+func New(cfgs ...codemodesession.SessionConfig) *server.MCPServer {
+	return NewNamed(defaultServerName, cfgs...)
+}
+
+// NewNamed creates an MCP server with the initial Toolbox MCP surface.
+func NewNamed(name string, cfgs ...codemodesession.SessionConfig) *server.MCPServer {
+	cfg := firstSessionConfig(cfgs)
+	metaSession := &codemodesession.Session{}
+	metaSession.SetPreparedTools(cfg.PreparedTools)
+	instructions := metaSession.Instructions()
+	runner := &sessionRunner{currentDir: currentWorkingDir(), config: cfg}
+	if strings.TrimSpace(name) == "" {
+		name = defaultServerName
+	}
+
 	mcpServer := server.NewMCPServer(
-		"toolbox-codemode-mcp-server",
+		name,
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
 
-	mcpServer.AddTool(newDiscoveryTool(), handleDiscoveryExecute)
-	mcpServer.AddTool(newActionTool(), handleActionExecute)
+	mcpServer.AddTool(newSuperTool(instructions), runner.handleSuperTool)
 
 	return mcpServer
 }
 
-func newDiscoveryTool() mcp.Tool {
+func newSuperTool(instructions string) mcp.Tool {
 	return mcp.NewTool(
-		ToolDiscoveryExecute,
-		mcp.WithDescription("Run discovery-oriented code against the current tool environment and return a toolboxID for later action execution."),
-		mcp.WithString("code", mcp.Required(), mcp.Description("Discovery-oriented code to execute.")),
+		ToolSuperTool,
+		mcp.WithDescription(instructions),
+		mcp.WithString(codemodesession.TypeScriptCellSourceParam, mcp.Required(), mcp.Description("TypeScript code (can be multiline) for next cell.")),
 	)
 }
 
-func newActionTool() mcp.Tool {
-	return mcp.NewTool(
-		ToolActionExecute,
-		mcp.WithDescription("Run action-oriented code against the immutable toolbox snapshot identified by toolboxID."),
-		mcp.WithString("toolboxID", mcp.Required(), mcp.Description("Opaque toolbox snapshot handle returned by tool_discovery_execute.")),
-		mcp.WithString("code", mcp.Required(), mcp.Description("Action-oriented code to execute.")),
-	)
+type sessionRunner struct {
+	mu         sync.Mutex
+	session    *codemodesession.Session
+	currentDir string
+	config     codemodesession.SessionConfig
 }
 
-func handleDiscoveryExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	code, err := request.RequireString("code")
+func (r *sessionRunner) handleSuperTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	code, err := request.RequireString(codemodesession.TypeScriptCellSourceParam)
 	if err != nil {
 		return nil, err
 	}
-
-	// Stub: return a fake discovery result.
-	result := map[string]any{
-		"mode":         "discovery",
-		"toolboxID":    "tbx_stub",
-		"receivedCode": code,
-	}
-	return toToolResult(result)
+	return mcp.NewToolResultText(r.submit(ctx, code)), nil
 }
 
-func handleActionExecute(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	toolboxID, err := request.RequireString("toolboxID")
+func (r *sessionRunner) submit(ctx context.Context, code string) string {
+	session, err := r.open(ctx)
+	if err != nil {
+		return "cell (failed to commit)\n==\nfailure: " + strings.TrimSpace(err.Error()) + "\n"
+	}
+	return session.Submit(ctx, code)
+}
+
+func (r *sessionRunner) open(ctx context.Context) (*codemodesession.Session, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.session != nil {
+		return r.session, nil
+	}
+	session, err := codemodesession.OpenMemory(ctx, r.currentDir, r.config)
 	if err != nil {
 		return nil, err
 	}
-	code, err := request.RequireString("code")
-	if err != nil {
-		return nil, err
-	}
-
-	// Stub: return a fake action result.
-	result := map[string]any{
-		"mode":         "action",
-		"toolboxID":    toolboxID,
-		"receivedCode": code,
-	}
-	return toToolResult(result)
+	r.session = session
+	return r.session, nil
 }
 
-// toToolResult wraps any value into an MCP text result.
-// Strings pass through; everything else is JSON-serialized.
-func toToolResult(v any) (*mcp.CallToolResult, error) {
-	if s, ok := v.(string); ok {
-		return mcp.NewToolResultText(s), nil
+func firstSessionConfig(cfgs []codemodesession.SessionConfig) codemodesession.SessionConfig {
+	if len(cfgs) == 0 {
+		return codemodesession.SessionConfig{}
 	}
-	data, err := json.Marshal(v)
+	return cfgs[0]
+}
+
+func currentWorkingDir() string {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("marshal tool result: %w", err)
+		return "."
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return cwd
 }

@@ -42,6 +42,7 @@ func TestParseDev(t *testing.T) {
 			json: `{
   "module": "example.com/calc",
   "name": "calc",
+  "useWhenHint": "Use when you need calculator-style arithmetic tools.",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["lib/**/*.ts"],
   "tools": [
@@ -51,6 +52,7 @@ func TestParseDev(t *testing.T) {
 			want: DevManifest{
 				Module:                    testModule("calc"),
 				Name:                      "calc",
+				UseWhenHint:               "Use when you need calculator-style arithmetic tools.",
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
 				Tools: []DevManifestTool{
@@ -259,6 +261,17 @@ func TestParseDev(t *testing.T) {
 			},
 		},
 		{
+			name: "useWhenHint too long rejected",
+			json: `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "useWhenHint": "` + `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` + `",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`,
+			wantErr: "useWhenHint",
+		},
+		{
 			name: "invalid credential type rejected",
 			json: `{
   "module": "example.com/bad",
@@ -348,17 +361,19 @@ func TestCompile(t *testing.T) {
 		{
 			name: "basic compilation",
 			dev: DevManifest{
-				Module:  testModule("calc"),
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []DevManifestTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 			want: tooldef.Package{
-				Module:  testModule("calc"),
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
@@ -502,6 +517,20 @@ func TestValidateCompiled(t *testing.T) {
 			},
 			mode:    ValidationModeDist,
 			wantErr: `"effect"`,
+		},
+		{
+			name: "useWhenHint too long errors",
+			pkg: tooldef.Package{
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: strings.Repeat("a", 101),
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+			},
+			mode:    ValidationModeDev,
+			wantErr: "useWhenHint",
 		},
 		{
 			name: "package with credentials passes dev validation",
@@ -680,15 +709,17 @@ func TestParsePkg(t *testing.T) {
 			json: `{
   "module": "example.com/calc",
   "name": "calc",
+  "useWhenHint": "Use when you need calculator-style arithmetic tools.",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: tooldef.Package{
-				Module:  testModule("calc"),
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
@@ -763,6 +794,19 @@ func TestParsePkg(t *testing.T) {
 				},
 				AllowedHosts: []string{"*.googleapis.com"},
 			},
+		},
+		{
+			name: "useWhenHint too long rejected",
+			json: `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "useWhenHint": "` + `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` + `",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`,
+			wantErr: "useWhenHint",
 		},
 		{
 			name:    "invalid json",

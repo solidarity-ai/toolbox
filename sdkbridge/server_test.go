@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
@@ -88,7 +89,7 @@ func TestBridgeServeStdioPreservesLifecycleRequestOrder(t *testing.T) {
 				"toolset_id": composed.ToolsetID,
 				"tool_name":  CodeModeToolName,
 				"params": map[string]any{
-					"code": "export default tools.calc.add({ a: 2, b: 3 });",
+					codemodesession.TypeScriptCellSourceParam: "calc.calc.add(2, 3)",
 				},
 			},
 		})),
@@ -131,8 +132,8 @@ func TestBridgeServeStdioPreservesLifecycleRequestOrder(t *testing.T) {
 	if invokeResp.Error != nil {
 		t.Fatalf("invoke error = %#v, want nil", invokeResp.Error)
 	}
-	if invokeResp.Result.Content != "5" {
-		t.Fatalf("invoke content = %q, want %q", invokeResp.Result.Content, "5")
+	if !strings.Contains(invokeResp.Result.Content, "=> 5") {
+		t.Fatalf("invoke content = %q, want completion preview 5", invokeResp.Result.Content)
 	}
 
 	var closeResp struct {
@@ -256,21 +257,26 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	if got := composed.Tools[0].Name; got != CodeModeToolName {
 		t.Fatalf("codemode tool name = %q, want %q", got, CodeModeToolName)
 	}
+	props, _ := composed.Tools[0].ParamsSchema["properties"].(map[string]any)
+	if _, ok := props[codemodesession.TypeScriptCellSourceParam]; !ok {
+		t.Fatalf("codemode params schema = %#v, want %q", composed.Tools[0].ParamsSchema, codemodesession.TypeScriptCellSourceParam)
+	}
+	if !strings.Contains(composed.Tools[0].Description, "super_tool submits a code cell to a REPL") {
+		t.Fatalf("codemode description = %q, want super_tool instructions", composed.Tools[0].Description)
+	}
 
 	invoked, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
 		ToolsetID: composed.ToolsetID,
 		ToolName:  CodeModeToolName,
 		Params: map[string]any{
-			"code": `
-export default tools.calc.add({ a: 4, b: 5 });
-`,
+			codemodesession.TypeScriptCellSourceParam: `calc.calc.add(4, 5)`,
 		},
 	}))
 	if err != nil {
 		t.Fatalf("tool.invoke: %v", err)
 	}
-	if got := invoked.(ToolInvokeResult).Content; got != "9" {
-		t.Fatalf("codemode invoke result = %q, want %q", got, "9")
+	if got := invoked.(ToolInvokeResult).Content; !strings.Contains(got, "=> 9") {
+		t.Fatalf("codemode invoke result = %q, want completion preview 9", got)
 	}
 }
 

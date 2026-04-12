@@ -1,6 +1,7 @@
 package invoke_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -41,5 +42,28 @@ func TestRunVisibleToolWithoutExecutableErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no executable") {
 		t.Fatalf("expected missing executable error, got %v", err)
+	}
+}
+
+func TestRunContextExecutesBuiltInTools(t *testing.T) {
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{{
+		Name: "builtin.echo",
+		BuiltIn: func(ctx context.Context, args map[string]any) (string, error) {
+			if ctx == nil {
+				t.Fatal("BuiltIn ctx = nil")
+			}
+			if got := args["value"]; got != "ok" {
+				t.Fatalf("args[value] = %#v, want %q", got, "ok")
+			}
+			return "done", nil
+		},
+	}})
+
+	got, err := invoke.RunContext(context.Background(), prepared, "builtin.echo", map[string]any{"value": "ok"})
+	if err != nil {
+		t.Fatalf("RunContext() error: %v", err)
+	}
+	if got != "done" {
+		t.Fatalf("RunContext() = %q, want %q", got, "done")
 	}
 }

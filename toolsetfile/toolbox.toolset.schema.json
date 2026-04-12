@@ -11,6 +11,28 @@
         "minLength": 1
       }
     },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Agent-facing runtime capabilities controlled by this toolset file.",
+      "properties": {
+        "allow_package_discovery": {
+          "type": "boolean",
+          "description": "Allow the agent to search and inspect available packages. Defaults to true when omitted."
+        },
+        "unsafe": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Agent capabilities that are disabled by default because they mutate the active toolset.",
+          "properties": {
+            "allow_toolset_management": {
+              "type": "boolean",
+              "description": "Allow the agent to install, uninstall, authenticate, or otherwise change the active toolset. Defaults to false when omitted."
+            }
+          }
+        }
+      }
+    },
     "tools": {
       "type": "array",
       "items": {

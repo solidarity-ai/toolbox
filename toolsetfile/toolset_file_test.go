@@ -178,6 +178,12 @@ func TestToolsetFileLoad(t *testing.T) {
 		if len(got.Tools) != 0 {
 			t.Fatalf("len(Tools) = %d, want 0", len(got.Tools))
 		}
+		if !got.AgentAllowsPackageDiscovery() {
+			t.Fatal("AgentAllowsPackageDiscovery() = false, want true by default")
+		}
+		if got.AgentAllowsToolsetManagement() {
+			t.Fatal("AgentAllowsToolsetManagement() = true, want false by default")
+		}
 	})
 
 	t.Run("EmptyToolsAllowed", func(t *testing.T) {
@@ -195,6 +201,57 @@ func TestToolsetFileLoad(t *testing.T) {
 		if len(got.Tools) != 0 {
 			t.Fatalf("len(Tools) = %d, want 0", len(got.Tools))
 		}
+	})
+
+	t.Run("AgentSettingsLoadAndDefaultCorrectly", func(t *testing.T) {
+		filename := writeToolsetJSON(t, map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{},
+			"agent": map[string]any{
+				"allow_package_discovery": false,
+				"unsafe": map[string]any{
+					"allow_toolset_management": true,
+				},
+			},
+		})
+
+		got, err := Load(filename)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if got.Agent == nil {
+			t.Fatal("Agent = nil, want agent settings")
+		}
+		if got.AgentAllowsPackageDiscovery() {
+			t.Fatal("AgentAllowsPackageDiscovery() = true, want false")
+		}
+		if !got.AgentAllowsToolsetManagement() {
+			t.Fatal("AgentAllowsToolsetManagement() = false, want true")
+		}
+	})
+
+	t.Run("SchemaRejectsUnknownAgentField", func(t *testing.T) {
+		filename := writeToolsetJSON(t, map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tools": []map[string]string{},
+			"agent": map[string]any{
+				"unexpected": true,
+			},
+		})
+
+		got, err := Load(filename)
+		if err == nil {
+			t.Fatal("Load() error = nil, want schema validation error")
+		}
+		if got != nil {
+			t.Fatalf("Load() toolset = %#v, want nil", got)
+		}
+		assertErrorContains(t, err, "validate toolset file")
+		assertErrorContains(t, err, "unexpected")
 	})
 
 	t.Run("InvalidModulePathRejected", func(t *testing.T) {
@@ -300,6 +357,54 @@ func TestToolsetFileLoad(t *testing.T) {
 		}
 		assertErrorContains(t, err, "tools[0].tool")
 		assertErrorContains(t, err, "does not match declared package version")
+	})
+}
+
+func TestToolsetFileWrite(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WritesAgentSettingsInStableOrder", func(t *testing.T) {
+		file, err := Parse([]byte(`{
+  "packages": {
+    "example.com/acme/calc": "v1.2.3"
+  },
+  "tools": [],
+  "agent": {
+    "allow_package_discovery": false,
+    "unsafe": {
+      "allow_toolset_management": true
+    }
+  }
+}`))
+		if err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+
+		filename := filepath.Join(t.TempDir(), "toolbox.toolset.json")
+		if err := file.Write(filename); err != nil {
+			t.Fatalf("Write(%q): %v", filename, err)
+		}
+
+		got, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", filename, err)
+		}
+
+		want := "{\n" +
+			"  \"packages\": {\n" +
+			"    \"example.com/acme/calc\": \"v1.2.3\"\n" +
+			"  },\n" +
+			"  \"tools\": [],\n" +
+			"  \"agent\": {\n" +
+			"    \"allow_package_discovery\": false,\n" +
+			"    \"unsafe\": {\n" +
+			"      \"allow_toolset_management\": true\n" +
+			"    }\n" +
+			"  }\n" +
+			"}\n"
+		if string(got) != want {
+			t.Fatalf("written toolset = %q, want %q", string(got), want)
+		}
 	})
 }
 

@@ -30,10 +30,24 @@ type ToolEntry struct {
 	parsed tooldef.ToolFQN
 }
 
+// AgentConfig carries agent-facing discovery and runtime management settings
+// for one declarative toolset.
+type AgentConfig struct {
+	AllowPackageDiscovery *bool              `json:"allow_package_discovery,omitempty"`
+	Unsafe                *AgentUnsafeConfig `json:"unsafe,omitempty"`
+}
+
+// AgentUnsafeConfig carries agent capabilities that are disabled by default
+// because they mutate the active toolset.
+type AgentUnsafeConfig struct {
+	AllowToolsetManagement *bool `json:"allow_toolset_management,omitempty"`
+}
+
 // ToolsetFile is the minimal declarative *.toolset.json format.
 type ToolsetFile struct {
 	Packages map[string]string `json:"packages"`
 	Tools    []ToolEntry       `json:"tools"`
+	Agent    *AgentConfig      `json:"agent,omitempty"`
 
 	parsedPackages map[tooldef.ModulePath]tooldef.Version
 	filename       string
@@ -178,6 +192,24 @@ func (f *ToolsetFile) LocalFilename() string {
 		return ""
 	}
 	return f.localFilename
+}
+
+// AgentAllowsPackageDiscovery reports whether agent-facing package discovery
+// helpers should be exposed for this toolset. The default is true.
+func (f *ToolsetFile) AgentAllowsPackageDiscovery() bool {
+	if f == nil || f.Agent == nil || f.Agent.AllowPackageDiscovery == nil {
+		return true
+	}
+	return *f.Agent.AllowPackageDiscovery
+}
+
+// AgentAllowsToolsetManagement reports whether unsafe agent-facing toolset
+// mutation helpers should be exposed for this toolset. The default is false.
+func (f *ToolsetFile) AgentAllowsToolsetManagement() bool {
+	if f == nil || f.Agent == nil || f.Agent.Unsafe == nil || f.Agent.Unsafe.AllowToolsetManagement == nil {
+		return false
+	}
+	return *f.Agent.Unsafe.AllowToolsetManagement
 }
 
 // SetPackageVersion updates the declared package version and rewrites any tool
@@ -330,11 +362,97 @@ func (f *ToolsetFile) encodeStable() ([]byte, error) {
 			}
 			buf.WriteString("\n")
 		}
-		buf.WriteString("  ]\n")
+		buf.WriteString("  ]")
 	} else {
-		buf.WriteString("]\n")
+		buf.WriteString("]")
+	}
+
+	if f.Agent != nil {
+		agentJSON, err := encodeAgentStable(f.Agent)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteString(",\n")
+		buf.WriteString("  \"agent\": ")
+		buf.Write(agentJSON)
+		buf.WriteString("\n")
+	} else {
+		buf.WriteString("\n")
 	}
 	buf.WriteString("}\n")
+	return buf.Bytes(), nil
+}
+
+func encodeAgentStable(agent *AgentConfig) ([]byte, error) {
+	if agent == nil {
+		return []byte("null"), nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{")
+
+	fieldCount := 0
+	if agent.AllowPackageDiscovery != nil {
+		fieldCount++
+	}
+	if agent.Unsafe != nil {
+		fieldCount++
+	}
+	if fieldCount == 0 {
+		buf.WriteString("}")
+		return buf.Bytes(), nil
+	}
+
+	buf.WriteString("\n")
+	written := 0
+	if agent.AllowPackageDiscovery != nil {
+		valueJSON, err := json.Marshal(*agent.AllowPackageDiscovery)
+		if err != nil {
+			return nil, fmt.Errorf("marshal agent.allow_package_discovery: %w", err)
+		}
+		buf.WriteString("    \"allow_package_discovery\": ")
+		buf.Write(valueJSON)
+		written++
+		if written < fieldCount {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	if agent.Unsafe != nil {
+		unsafeJSON, err := encodeAgentUnsafeStable(agent.Unsafe)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteString("    \"unsafe\": ")
+		buf.Write(unsafeJSON)
+		buf.WriteString("\n")
+	}
+	buf.WriteString("  }")
+	return buf.Bytes(), nil
+}
+
+func encodeAgentUnsafeStable(unsafeCfg *AgentUnsafeConfig) ([]byte, error) {
+	if unsafeCfg == nil {
+		return []byte("null"), nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{")
+	if unsafeCfg.AllowToolsetManagement == nil {
+		buf.WriteString("}")
+		return buf.Bytes(), nil
+	}
+
+	valueJSON, err := json.Marshal(*unsafeCfg.AllowToolsetManagement)
+	if err != nil {
+		return nil, fmt.Errorf("marshal agent.unsafe.allow_toolset_management: %w", err)
+	}
+
+	buf.WriteString("\n")
+	buf.WriteString("      \"allow_toolset_management\": ")
+	buf.Write(valueJSON)
+	buf.WriteString("\n")
+	buf.WriteString("    }")
 	return buf.Bytes(), nil
 }
 

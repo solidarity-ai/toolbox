@@ -22,11 +22,23 @@ The declared toolset contract.
 Fields:
 - `packages`: map of module path to exact version
 - `tools`: ordered list of fully-qualified tool references
+- `agent.allow_package_discovery` (optional): whether the agent may search and
+  inspect available packages. Defaults to `true`.
+- `agent.unsafe.allow_toolset_management` (optional): whether the agent may
+  install, uninstall, authenticate, or otherwise change the active toolset.
+  Defaults to `false`.
 
 Constraints:
 - every tool must reference a declared package
 - every tool version must match the declared package version
 - tool order is preserved
+
+The `agent` block is intentionally split by safety:
+- `allow_package_discovery` is read-only and exists to let an agent look up
+  package information without changing the current toolset.
+- `unsafe.allow_toolset_management` is opt-in because enabling it gives the
+  agent the ability to mutate the toolset definition and, by extension, the
+  tools available to a running session.
 
 ### `*.toolset.local.json`
 Optional local-only overlay.

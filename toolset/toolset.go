@@ -144,3 +144,25 @@ func (r PreparedToolset) Tool(name string) (PreparedTool, bool) {
 	}
 	return PreparedTool{}, false
 }
+
+// FilterTools returns a prepared toolset containing only tools that match keep.
+// The filtered toolset preserves prepared tool metadata such as bindings.
+func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedToolset {
+	if keep == nil {
+		return r
+	}
+	out := make([]PreparedTool, 0, len(r.tools))
+	byName := make(map[string]int, len(r.tools))
+	for _, tool := range r.tools {
+		if !keep(tool) {
+			continue
+		}
+		byName[tool.Name] = len(out)
+		out = append(out, tool)
+	}
+	return PreparedToolset{
+		tools:          out,
+		byName:         byName,
+		fetchTransport: r.fetchTransport,
+	}
+}

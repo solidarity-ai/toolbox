@@ -16,7 +16,8 @@ type cli struct {
 	Info      infoCmd      `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
 	Outdated  outdatedCmd  `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
 	Search    searchCmd    `cmd:"" help:"Search the tool registry for packages or tools."`
-	MCP       mcpCmd       `cmd:"" name:"mcp" help:"Serve the selected toolset over MCP stdio."`
+	MCP       mcpCmd       `cmd:"" help:"Serve the selected toolset over MCP stdio."`
+	Codemode  codemodeCmd  `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
 	Auth      authCmd      `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
 	SDKBridge sdkBridgeCmd `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
 }
@@ -65,8 +66,18 @@ type outdatedCmd struct {
 	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to inspect."`
 }
 
+type replCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to load for session instructions."`
+	File    string `name:"file" short:"f" default:".toolbox-session" type:"path" help:"SQLite session database path."`
+}
+
 type mcpCmd struct {
 	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to serve."`
+}
+
+type codemodeCmd struct {
+	Repl replCmd `cmd:"" help:"Start a persistent TypeScript REPL backed by SQLite session storage."`
+	MCP  mcpCmd  `cmd:"" name:"mcp" help:"Serve the selected toolset over the codemode MCP stdio surface."`
 }
 
 type authCmd struct {
@@ -130,6 +141,10 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runSearch(parsed.Search, stdout)
 	case strings.HasPrefix(command, "mcp"):
 		return runMCP(parsed.MCP, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "codemode repl"):
+		return runRepl(parsed.Codemode.Repl, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "codemode mcp"):
+		return runCodemodeMCP(parsed.Codemode.MCP, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):
 		return runAuth(parsed.Auth.Args, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "_sdkbridge serve-stdio"):

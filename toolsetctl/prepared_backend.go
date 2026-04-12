@@ -1,0 +1,126 @@
+package toolsetctl
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/solidarity-ai/toolbox/toolpkgdiscovery"
+	"github.com/solidarity-ai/toolbox/toolset"
+)
+
+// ErrManagementToolsUnsupported is returned when a backend exposes prepared
+// toolsets but does not support agent-facing runtime toolset management.
+var ErrManagementToolsUnsupported = errors.New("toolset management tools are not supported by this backend")
+
+// PreparedBackend stores a host-controlled prepared toolset snapshot and
+// declines agent-facing runtime management operations. Callers can replace the
+// base prepared snapshot over time through SetPrepared(); Prepared() merges in
+// any enabled builtin package-discovery tools before returning the effective
+// agent-visible toolset.
+type PreparedBackend struct {
+	mu                     sync.RWMutex
+	prepared               toolset.PreparedToolset
+	enablePackageDiscovery bool
+	consumer               PreparedToolConsumer
+}
+
+func NewPreparedBackend(prepared toolset.PreparedToolset, consumer PreparedToolConsumer) *PreparedBackend {
+	backend := &PreparedBackend{
+		prepared: prepared,
+		consumer: consumer,
+	}
+	backend.notifyConsumer()
+	return backend
+}
+
+func (b *PreparedBackend) Prepared(context.Context) (toolset.PreparedToolset, error) {
+	if b == nil {
+		return toolset.PreparedToolset{}, nil
+	}
+	b.mu.RLock()
+	prepared := b.prepared
+	enablePackageDiscovery := b.enablePackageDiscovery
+	b.mu.RUnlock()
+
+	if !enablePackageDiscovery {
+		return prepared, nil
+	}
+
+	discovery, err := toolpkgdiscovery.BuiltinPreparedToolset(b)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+	return toolset.JoinPreparedToolsets(prepared, discovery)
+}
+
+func (b *PreparedBackend) EnableToolsForPackageDiscovery() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.enablePackageDiscovery
+}
+
+// SetPrepared replaces the stored prepared toolset snapshot.
+func (b *PreparedBackend) SetPrepared(prepared toolset.PreparedToolset) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.prepared = prepared
+	b.mu.Unlock()
+	b.notifyConsumer()
+}
+
+// SetEnableToolsForPackageDiscovery replaces the stored package-discovery flag.
+func (b *PreparedBackend) SetEnableToolsForPackageDiscovery(enable bool) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.enablePackageDiscovery = enable
+	b.mu.Unlock()
+	b.notifyConsumer()
+}
+
+func (*PreparedBackend) EnableToolsForToolsetManagement() bool {
+	return false
+}
+
+func (*PreparedBackend) Search(context.Context, toolpkgdiscovery.SearchRequest) (toolpkgdiscovery.SearchResult, error) {
+	return toolpkgdiscovery.SearchResult{}, unsupportedManagementOp("search")
+}
+
+func (*PreparedBackend) Inspect(context.Context, toolpkgdiscovery.InspectRequest) (toolpkgdiscovery.InspectResult, error) {
+	return toolpkgdiscovery.InspectResult{}, unsupportedManagementOp("inspect")
+}
+
+func (*PreparedBackend) Install(context.Context, InstallRequest) (toolset.PreparedToolset, error) {
+	return toolset.PreparedToolset{}, unsupportedManagementOp("install")
+}
+
+func (*PreparedBackend) Uninstall(context.Context, UninstallRequest) (toolset.PreparedToolset, error) {
+	return toolset.PreparedToolset{}, unsupportedManagementOp("uninstall")
+}
+
+func (*PreparedBackend) Auth(context.Context, AuthRequest) (toolset.PreparedToolset, error) {
+	return toolset.PreparedToolset{}, unsupportedManagementOp("auth")
+}
+
+func unsupportedManagementOp(name string) error {
+	return fmt.Errorf("%s: %w", name, ErrManagementToolsUnsupported)
+}
+
+func (b *PreparedBackend) notifyConsumer() {
+	if b == nil || b.consumer == nil {
+		return
+	}
+	prepared, err := b.Prepared(context.Background())
+	if err != nil {
+		return
+	}
+	b.consumer.SetPreparedTools(prepared)
+}

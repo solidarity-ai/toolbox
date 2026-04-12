@@ -15,7 +15,7 @@ const (
 	ComposeModeCodemode ComposeMode = "codemode"
 )
 
-const CodeModeToolName = "codemode.run"
+const CodeModeToolName = "super_tool"
 
 // ToolDescriptor is the host-facing tool shape returned by toolset.compose.
 type ToolDescriptor struct {

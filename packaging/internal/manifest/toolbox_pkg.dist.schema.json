@@ -14,6 +14,11 @@
       "minLength": 1,
       "description": "Package name used as the tool namespace prefix."
     },
+    "useWhenHint": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Optional short guidance for when to use this package. Leave empty for obvious well-known services already likely to be in model training data. Omit the \"use {tool name } when\" but ensure the hint follows that structure. E.g. [use skipup when ]scheduling meetings with multiple participants" 
+    },
     "runtime": {
       "type": "string",
       "enum": ["typescript-sandbox", "typescript+wasix-sandbox", "typescript+wasip2-sandbox"],

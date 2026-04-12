@@ -1,6 +1,7 @@
 package mcpserver_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
@@ -27,6 +30,20 @@ func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
 
 	assertContains(t, names, "calc.add")
 	assertContains(t, names, "calc.asyncAdd")
+}
+
+func TestMCPServerDefaultName(t *testing.T) {
+	initRes := initializeServer(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
+	if initRes.ServerInfo.Name != "toolbox" {
+		t.Fatalf("server name = %q, want toolbox", initRes.ServerInfo.Name)
+	}
+}
+
+func TestMCPServerCustomName(t *testing.T) {
+	initRes := initializeServer(t, mcpserver.NewNamed("example", tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
+	if initRes.ServerInfo.Name != "example" {
+		t.Fatalf("server name = %q, want example", initRes.ServerInfo.Name)
+	}
 }
 
 func TestMCPServerExposesResolvedParamSchema(t *testing.T) {
@@ -486,4 +503,32 @@ func assertContains(t *testing.T, values []string, want string) {
 		}
 	}
 	t.Fatalf("expected %q in %v", want, values)
+}
+
+func initializeServer(t testing.TB, srv *server.MCPServer) *mcp.InitializeResult {
+	t.Helper()
+
+	c, err := client.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatalf("create in-process client: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("start client: %v", err)
+	}
+
+	initRequest := mcp.InitializeRequest{}
+	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcp.Implementation{
+		Name:    "toolbox-mcp-test-client",
+		Version: "0.1.0",
+	}
+	initRequest.Params.Capabilities = mcp.ClientCapabilities{}
+
+	initRes, err := c.Initialize(context.Background(), initRequest)
+	if err != nil {
+		t.Fatalf("initialize client: %v", err)
+	}
+	return initRes
 }

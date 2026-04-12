@@ -358,6 +358,13 @@ A toolset is declared as a JSON file that lists package dependencies and binding
     "github.com/solidarity-ai/slack-tools": "v1.2.0"
   },
 
+  "agent": {
+    "allow_package_discovery": true,
+    "unsafe": {
+      "allow_toolset_management": false
+    }
+  },
+
   "context": {
     "customer_id": { "description": "The customer this toolset is scoped to" },
     "environment": { "description": "production or staging" },
@@ -410,6 +417,8 @@ A toolset is declared as a JSON file that lists package dependencies and binding
 Key design choices:
 
 - **`packages`** declares all dependencies with exact versions. This is the source of truth for what packages the toolset uses. Supports aliasing (see below).
+- **`agent.allow_package_discovery`** controls whether the agent may use read-only package discovery helpers such as search and inspect. This defaults to enabled because it does not mutate the active toolset.
+- **`agent.unsafe.allow_toolset_management`** controls whether the agent may install, uninstall, authenticate, or otherwise change the active toolset at runtime. This defaults to disabled because it mutates the tool surface seen by the agent and any attached sessions.
 - **`replace`** (in `toolbox.toolset.local.json`, gitignored) redirects a module path to a local directory for development.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
 - **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.

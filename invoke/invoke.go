@@ -45,16 +45,25 @@ func setCheckSession(pkg *tooldef.Package, session *toolbox.CheckSession) {
 // Run selects a visible tool by name, evaluates any bindings to produce the
 // full param set (including hidden params), and dispatches execution.
 func Run(prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
+	return RunContext(context.Background(), prepared, toolName, args)
+}
+
+// RunContext is like Run but allows callers to propagate cancellation and
+// deadlines into builtin tool handlers.
+func RunContext(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
 	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, args)
 	if err != nil {
 		return "", err
 	}
-	return executeTool(tool, fullParams, nil, injector, allowlist, prepared.FetchTransport())
+	return executeTool(ctx, tool, fullParams, nil, injector, allowlist, prepared.FetchTransport())
 }
 
 // executeTool runs one already-selected tool with fully prepared params.
 // It does not perform tool lookup, binding evaluation, or toolset validation.
-func executeTool(tool toolset.PreparedTool, fullParams map[string]any, memFS *vfs.MemFS, injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, rt http.RoundTripper) (string, error) {
+func executeTool(ctx context.Context, tool toolset.PreparedTool, fullParams map[string]any, memFS *vfs.MemFS, injector *transport.CredentialInjector, allowlist *transport.HostAllowlist, rt http.RoundTripper) (string, error) {
+	if tool.BuiltIn != nil {
+		return tool.BuiltIn(ctx, fullParams)
+	}
 	fetchFn := makeFetch(injector, allowlist, tool.MaxFetchResponseBytes(), rt)
 	if tool.TSWasm != nil {
 		if memFS != nil {
@@ -113,7 +122,7 @@ func RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[stri
 	if err != nil {
 		return "", err
 	}
-	return executeTool(tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
+	return executeTool(context.Background(), tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
 }
 
 func runTSWasmTool(tool toolset.PreparedTool, args map[string]any, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (string, error) {

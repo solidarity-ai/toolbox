@@ -56,14 +56,10 @@ jobs:
 
       - name: Go test
         run: go test ./... -count=1 -timeout 300s
-        env:
-          GOPRIVATE: github.com/mackross/*
 
   release-workspace:
     name: Release workspace
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/mackross/*
     steps:
       - uses: actions/checkout@v4
 

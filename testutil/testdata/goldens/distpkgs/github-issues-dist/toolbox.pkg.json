@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
-  "sha256": "e677577d710ae2a833f11a67d263c25bd45037f4c5a1f4b0edf7f0a27fb91295",
+  "sha256": "9051ae038519b1097d6e18ebcbcab469f496328a230b063ccdda784461b9dc87",
   "additionalTypeScriptGlobs": [
     "tools/shims.ts"
   ],
@@ -11,5 +12,8 @@
       "idempotent": true,
       "effect": "readOnly"
     }
+  ],
+  "allowed_hosts": [
+    "api.github.com"
   ]
 }

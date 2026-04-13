@@ -111,7 +111,7 @@ func (f *ToolsetLocalFile) ReplacementDir(module tooldef.ModulePath) (string, bo
 	return dir, ok
 }
 
-// ReplacementDirAbs returns the replacement directory for module resolved
+// ReplacementDirAbs returns the replacement directory for a module, resolved
 // against the overlay file location.
 func (f *ToolsetLocalFile) ReplacementDirAbs(module tooldef.ModulePath) (string, bool) {
 	dir, ok := f.ReplacementDir(module)

@@ -12,14 +12,22 @@ import (
 
 // mockSource is a test PackageSource that returns preconfigured results.
 type mockSource struct {
-	result FetchResult
-	err    error
-	called int
+	result     FetchResult
+	err        error
+	called     int
+	versions   []Version
+	versionErr error
+	listCalled int
 }
 
 func (m *mockSource) Fetch(_ context.Context, _ ModulePath, _ Version) (FetchResult, error) {
 	m.called++
 	return m.result, m.err
+}
+
+func (m *mockSource) ListVersions(_ context.Context, _ ModulePath) ([]Version, error) {
+	m.listCalled++
+	return m.versions, m.versionErr
 }
 
 type countingSource struct {
@@ -180,6 +188,29 @@ func TestResolver(t *testing.T) {
 		}
 	})
 
+	t.Run("FallbackOnErrSourceUnavailable", func(t *testing.T) {
+		cache := newTempCache(t)
+		primary := &mockSource{err: fmt.Errorf("primary: %w", ErrSourceUnavailable)}
+		fallbackMetadata := goodMetadata
+		fallbackMetadata.ResolvedFrom = ResolvedFromGitSource
+		fallback := &mockSource{result: FetchResult{Archive: archiveBytes, Manifest: manifestBytes, Metadata: fallbackMetadata}}
+		resolver := NewResolver(cache, primary, fallback)
+
+		result, err := resolver.Resolve(ctx, module, version)
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if result.Metadata.ResolvedFrom != ResolvedFromGitSource {
+			t.Fatalf("resolved_from = %q, want %q", result.Metadata.ResolvedFrom, ResolvedFromGitSource)
+		}
+		if primary.called != 1 {
+			t.Fatal("primary source was not called")
+		}
+		if fallback.called != 1 {
+			t.Fatal("fallback source was not called")
+		}
+	})
+
 	t.Run("NoFallbackOnNon404Error", func(t *testing.T) {
 		cache := newTempCache(t)
 		primary := &mockSource{err: fmt.Errorf("network timeout")}
@@ -302,4 +333,70 @@ func assertErrorContains(t *testing.T, err error, want string) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %q, want substring %q", err.Error(), want)
 	}
+}
+
+func TestResolverListVersions(t *testing.T) {
+	t.Parallel()
+
+	module := ModulePath("example.com/acme/calc")
+	ctx := context.Background()
+
+	t.Run("SkipsReleaseNotFoundAndSourceUnavailable", func(t *testing.T) {
+		t.Parallel()
+
+		cache := newTempCache(t)
+		s1 := &mockSource{versionErr: fmt.Errorf("registry timeout: %w", ErrSourceUnavailable)}
+		s2 := &mockSource{versionErr: fmt.Errorf("github miss: %w", ErrReleaseNotFound)}
+		s3 := &mockSource{versions: []Version{mustVersion(t, "v1.2.0"), mustVersion(t, "v1.0.0")}}
+		resolver := NewResolver(cache, s1, s2, s3)
+
+		versions, err := resolver.ListVersions(ctx, module)
+		if err != nil {
+			t.Fatalf("ListVersions() error: %v", err)
+		}
+		if got, want := []string{versions[0].String(), versions[1].String()}, []string{"v1.2.0", "v1.0.0"}; strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("versions = %#v, want %#v", got, want)
+		}
+		if s1.listCalled != 1 || s2.listCalled != 1 || s3.listCalled != 1 {
+			t.Fatalf("listCalled = (%d, %d, %d), want (1, 1, 1)", s1.listCalled, s2.listCalled, s3.listCalled)
+		}
+	})
+
+	t.Run("HardFailsOnUnexpectedError", func(t *testing.T) {
+		t.Parallel()
+
+		cache := newTempCache(t)
+		primary := &mockSource{versionErr: fmt.Errorf("unexpected status 403")}
+		fallback := &mockSource{versions: []Version{mustVersion(t, "v1.0.0")}}
+		resolver := NewResolver(cache, primary, fallback)
+
+		_, err := resolver.ListVersions(ctx, module)
+		if err == nil {
+			t.Fatal("ListVersions() error = nil, want non-nil")
+		}
+		if primary.listCalled != 1 {
+			t.Fatal("primary source was not called")
+		}
+		if fallback.listCalled != 0 {
+			t.Fatal("fallback source was called despite hard failure")
+		}
+		assertErrorContains(t, err, "unexpected status 403")
+	})
+
+	t.Run("ReturnsNotFoundWhenOnlySkippableErrorsOccur", func(t *testing.T) {
+		t.Parallel()
+
+		cache := newTempCache(t)
+		s1 := &mockSource{versionErr: fmt.Errorf("registry timeout: %w", ErrSourceUnavailable)}
+		s2 := &mockSource{versionErr: fmt.Errorf("github miss: %w", ErrReleaseNotFound)}
+		resolver := NewResolver(cache, s1, s2)
+
+		_, err := resolver.ListVersions(ctx, module)
+		if err == nil {
+			t.Fatal("ListVersions() error = nil, want non-nil")
+		}
+		if !errors.Is(err, ErrReleaseNotFound) {
+			t.Fatalf("error = %v, want ErrReleaseNotFound", err)
+		}
+	})
 }

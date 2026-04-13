@@ -3,52 +3,98 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/invoke"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
+const defaultServerName = "toolbox"
+
 // New creates an MCP server that exposes one MCP tool per visible invoke tool.
-func New(resolved toolset.ResolvedToolset) *server.MCPServer {
-	mcpServer := server.NewMCPServer(
-		"toolbox-mcp-server",
-		"0.1.0",
-		server.WithToolCapabilities(true),
-	)
+func New(prepared toolset.PreparedToolset) *server.MCPServer {
+	return NewNamed(defaultServerName, prepared)
+}
 
-	for _, tool := range resolved.Tools() {
-		mcpTool := newMCPTool(tool)
-		mcpServer.AddTool(mcpTool, handleToolCall(resolved, tool.Name))
-	}
-
+// NewNamed creates an MCP server that exposes one MCP tool per visible invoke tool.
+func NewNamed(name string, prepared toolset.PreparedToolset) *server.MCPServer {
+	mcpServer := newServer(name)
+	mcpServer.SetTools(serverToolsFromPrepared(prepared)...)
 	return mcpServer
 }
 
-func newMCPTool(tool tooldef.ResolvedTool) mcp.Tool {
-	if len(tool.ParamsSchema()) == 0 {
-		return mcp.NewTool(
-			tool.Name,
-			mcp.WithDescription(tool.Description),
-		)
-	}
-
-	rawSchema, err := json.Marshal(tool.ParamsSchema())
-	if err != nil {
-		return mcp.NewTool(
-			tool.Name,
-			mcp.WithDescription(tool.Description),
-		)
-	}
-
-	return mcp.NewToolWithRawSchema(tool.Name, tool.Description, rawSchema)
+type ManagedServer struct {
+	server *server.MCPServer
 }
 
-func handleToolCall(resolved toolset.ResolvedToolset, toolName string) server.ToolHandlerFunc {
-	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ran, err := invoke.Run(resolved, toolName, argumentMap(request.Params.Arguments))
+func NewManagedNamed(name string) *ManagedServer {
+	return &ManagedServer{server: newServer(name)}
+}
+
+func (s *ManagedServer) Server() *server.MCPServer {
+	if s == nil {
+		return nil
+	}
+	return s.server
+}
+
+func (s *ManagedServer) SetPreparedTools(prepared toolset.PreparedToolset) {
+	if s == nil || s.server == nil {
+		return
+	}
+	s.server.SetTools(serverToolsFromPrepared(prepared)...)
+}
+
+func newServer(name string) *server.MCPServer {
+	if strings.TrimSpace(name) == "" {
+		name = defaultServerName
+	}
+
+	return server.NewMCPServer(
+		name,
+		"0.1.0",
+		server.WithToolCapabilities(true),
+	)
+}
+
+func serverToolsFromPrepared(prepared toolset.PreparedToolset) []server.ServerTool {
+	view := prepared.AgentView()
+	tools := make([]server.ServerTool, 0, len(view.Tools))
+	for _, at := range view.Tools {
+		tools = append(tools, server.ServerTool{
+			Tool:    newMCPTool(at),
+			Handler: handleToolCall(prepared, at.Name),
+		})
+	}
+	return tools
+}
+
+func newMCPTool(at toolset.AgentTool) mcp.Tool {
+	schema := at.ParamsSchema
+
+	if len(schema) == 0 {
+		return mcp.NewTool(
+			at.Name,
+			mcp.WithDescription(at.Description),
+		)
+	}
+
+	rawSchema, err := json.Marshal(schema)
+	if err != nil {
+		return mcp.NewTool(
+			at.Name,
+			mcp.WithDescription(at.Description),
+		)
+	}
+
+	return mcp.NewToolWithRawSchema(at.Name, at.Description, rawSchema)
+}
+
+func handleToolCall(prepared toolset.PreparedToolset, toolName string) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ran, err := invoke.RunContext(ctx, prepared, toolName, argumentMap(request.Params.Arguments))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

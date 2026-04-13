@@ -1,7 +1,7 @@
-export declare const tools: {
-  calc: {
-    add(b: number): number; // readonly
-    asyncAdd(a: number, b: number): number; // readonly
-    sub(a: number, b: number): number; // readonly
-  };
-};
+declare namespace calc {
+  namespace calc {
+    function add(b: number): number; // readonly
+    function asyncAdd(a: number, b: number): number; // readonly
+    function sub(a: number, b: number): number; // readonly
+  }
+}

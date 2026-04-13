@@ -1,5 +1,13 @@
 package toolset
 
+import (
+	"context"
+	"net/http"
+
+	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/transport"
+)
+
 // Binding describes how a parameter is resolved at call time.
 type Binding struct {
 	Value  string // CEL expression: "context.customer_id", "params.channel", "'literal'"
@@ -13,10 +21,25 @@ type BoundTool struct {
 	Bindings map[string]Binding // param name -> binding
 }
 
-// Config is the input to Resolve(). It carries bindings, context, and credentials.
+// PackageCredentialPolicy carries package-scoped execution attachments and credential
+// account catalogs. Package module identity is resolved outside of toolset.
+type PackageCredentialPolicy struct {
+	CredentialAccounts map[string][]string // credName → []accountName
+	Injector           *transport.CredentialInjector
+	Allowlist          *transport.HostAllowlist
+}
+
+// PackageCredentialPolicySource loads the scoped runtime credential policy for one package.
+type PackageCredentialPolicySource interface {
+	PackageCredentialPolicy(ctx context.Context, pkg tooldef.Package) (PackageCredentialPolicy, error)
+}
+
+// Config is the input to PrepareTools(). It carries bindings, environment context,
+// and request-scoped execution attachments.
 type Config struct {
-	Tools            []BoundTool        // Explicitly bound tools
-	ResourceBindings map[string]Binding // Resource-level bindings by canonical name
-	Context          map[string]any     // Flat key-value context from harness
-	Credentials      map[string]string  // Named secrets (transport layer, not visible to tools)
+	Tools                  []BoundTool        // Explicitly bound tools
+	ResourceBindings       map[string]Binding // Resource-level bindings by canonical name
+	EnvContext             map[string]any     // Flat key-value environment context from harness
+	CredentialPolicySource PackageCredentialPolicySource
+	FetchTransport         http.RoundTripper // optional; used by tests to intercept fetch calls
 }

@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"io"
+	"net/http"
 	"strings"
 )
 
@@ -19,6 +20,21 @@ type RequestInit struct {
 	Method  string
 	Headers *Headers
 	Body    io.Reader
+
+	// PrepareRequest is an optional hook applied to the initial request and
+	// each redirected request after default headers have been set. A non-nil
+	// error aborts the request.
+	PrepareRequest func(req *http.Request, via []*http.Request) error
+
+	// CheckRedirect is an optional redirect policy applied in addition to the
+	// default 20-redirect limit, sensitive-header stripping, and PrepareRequest.
+	// If set, it is called before following each redirect. A non-nil error
+	// aborts the redirect chain.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
+
+	// Transport, if non-nil, overrides the default http.Client transport.
+	// Used by tests to intercept requests after PrepareRequest has run.
+	Transport http.RoundTripper
 }
 
 // NewRequest creates a new Request for the given URL with optional init.

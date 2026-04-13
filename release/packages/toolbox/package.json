@@ -1,0 +1,36 @@
+{
+  "name": "@include-tools/toolbox",
+  "version": "0.0.0-development",
+  "description": "Node wrapper and bundled binary resolver for toolbox",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "toolbox": "./dist/bin/toolbox.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --project ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "@include-tools/toolbox-darwin-arm64": "0.0.0-development",
+    "@include-tools/toolbox-darwin-x64": "0.0.0-development",
+    "@include-tools/toolbox-linux-arm64": "0.0.0-development",
+    "@include-tools/toolbox-linux-x64": "0.0.0-development",
+    "@include-tools/toolbox-win32-x64": "0.0.0-development"
+  }
+}

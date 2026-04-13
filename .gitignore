@@ -63,3 +63,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+mise.local.toml

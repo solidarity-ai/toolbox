@@ -8,7 +8,7 @@
 
 ## Problem
 
-Today, toolsets are assembled manually. `Builder.AddFromDir()` loads a package from a local directory. `Builder.AddFromArchive()` loads from a pre-built `.toolbox.pkg` file. Both require the caller to already have the package on disk and to wire everything together imperatively.
+Today, toolsets are assembled from declarations. Local packages are loaded from source directories, dist packages are loaded from `.toolbox.pkg` archives plus manifests, and registry packages are resolved by module path + version. Callers still need the package-loading and tool-resolution steps wired together explicitly.
 
 This is fine for local development and controlled deployments, but it doesn't work for the world we're building toward:
 
@@ -19,7 +19,7 @@ This is fine for local development and controlled deployments, but it doesn't wo
 We need:
 1. A way to uniquely identify any tool across the ecosystem (FQN)
 2. A way to discover and fetch packages without pre-staging them (registry + auto-download)
-3. A declarative toolset format that lists package refs and bindings, replacing imperative builder calls
+3. A declarative toolset format that lists package refs and bindings, replacing imperative assembly code
 4. A version resolution and integrity model that makes this reproducible and safe
 
 ---
@@ -188,19 +188,21 @@ When no built artifacts are available, the client falls back to git-source resol
 
 This fallback ensures the system works with any git host, even without CI. But the recommended path is always: publish built artifacts.
 
-#### Registry proxy (optional, for discovery and stats)
+#### Registry proxy (default, for discovery and stats)
 
-The toolbox client ships with a **default proxy** (`https://proxy.include.tools`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own proxy or disable it entirely:
+The toolbox client ships with a **default registry** (`https://packages.include.tools`) that provides discovery, stats, and caching out of the box. Organizations can override this with their own registry or disable it entirely:
 
 ```
-TOOLBOX_PROXY=https://proxy.include.tools   # default, ships with toolbox
-TOOLBOX_PROXY=https://proxy.internal.co   # organization override
-TOOLBOX_PROXY=off                          # disable, fetch directly from sources
+TOOLBOX_REGISTRY=https://packages.include.tools  # default, ships with toolbox
+TOOLBOX_REGISTRY=https://registry.internal.co    # organization override
+TOOLBOX_REGISTRY=off                             # disable, fetch directly from sources
 ```
 
-The proxy does **not** host package archives itself — it passes through download links to the underlying package source and provides value-added services:
+The registry does **not** host package archives itself. It passes through
+download links to the underlying package source and provides value-added
+services:
 
-The proxy provides:
+The registry provides:
 
 **1. Discovery and search.** A search API over known packages:
 
@@ -271,7 +273,7 @@ When a toolset references a package, resolution follows this order:
 ```
 1. Check replace directives (local dev overrides)
 2. Check local cache (content-addressable store)
-3. Fetch from proxy (default: proxy.include.tools, unless overridden or disabled)
+3. Fetch from registry (default: packages.include.tools, unless overridden or disabled)
 4. Fetch from package source directly (e.g., GitHub Release assets)
 5. Fetch from git source (clone at tag, build locally with packaging.Pack)
 6. Store in local cache
@@ -321,14 +323,20 @@ Auto-download is a layer above `packaging.LoadArchive`, not a replacement. The f
 resolve(module_path, version)
   → locate or download archive + manifest to cache
   → packaging.LoadArchive(cachePath, manifestPath)
-  → returns LoadedPackage (same type the Builder already consumes)
+  → returns LoadedPackage (same type the assembler consumes)
 ```
 
-The `Builder` gains a new method alongside the existing two:
+The package assembly layer gains a registry-backed path alongside the local
+directory and explicit archive paths:
 
 ```go
-// AddFromRegistry resolves and downloads a package by module path and version.
-func (b *Builder) AddFromRegistry(modulePath, version string) error
+decl := assembler.Declaration{
+  Packages: []assembler.PackageDeclaration{{
+    Module:  "github.com/acme-corp/zendesk-tools",
+    Version: "v2.0.1",
+  }},
+}
+loaded, err := assembler.Load(ctx, resolver, decl)
 ```
 
 Internally, this calls the resolver, which calls `LoadArchive` on the cached result.
@@ -337,7 +345,7 @@ Internally, this calls the resolver, which calls `LoadArchive` on the cached res
 
 ### 4. Toolset Composition — Declarative Format
 
-> **Note:** The declarative toolset file format described here is provisional. It covers the file-based model needed for initial implementation. When the toolbox server is complete, toolset composition may move entirely to the server side, and static `.toolset.json` files may no longer be needed. The programmatic Builder API (described below) is the stable interface — the file format is one way to drive it.
+> **Note:** The declarative toolset file format described here is provisional. It covers the file-based model needed for initial implementation. When the toolbox server is complete, toolset composition may move entirely to the server side, and static `.toolset.json` files may no longer be needed. The assembly seam described below is the stable interface — the file format is one way to drive it.
 
 #### Toolset file: `toolbox.toolset.json`
 
@@ -348,6 +356,13 @@ A toolset is declared as a JSON file that lists package dependencies and binding
   "packages": {
     "github.com/acme-corp/zendesk-tools": "v2.0.1",
     "github.com/solidarity-ai/slack-tools": "v1.2.0"
+  },
+
+  "agent": {
+    "allow_package_discovery": true,
+    "unsafe": {
+      "allow_toolset_management": false
+    }
   },
 
   "context": {
@@ -402,6 +417,8 @@ A toolset is declared as a JSON file that lists package dependencies and binding
 Key design choices:
 
 - **`packages`** declares all dependencies with exact versions. This is the source of truth for what packages the toolset uses. Supports aliasing (see below).
+- **`agent.allow_package_discovery`** controls whether the agent may use read-only package discovery helpers such as search and inspect. This defaults to enabled because it does not mutate the active toolset.
+- **`agent.unsafe.allow_toolset_management`** controls whether the agent may install, uninstall, authenticate, or otherwise change the active toolset at runtime. This defaults to disabled because it mutates the tool surface seen by the agent and any attached sessions.
 - **`replace`** (in `toolbox.toolset.local.json`, gitignored) redirects a module path to a local directory for development.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
 - **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.
@@ -493,7 +510,7 @@ The lockfile is committed to version control. It guarantees:
 
 Running `toolbox resolve` reads the toolset file, resolves all packages, and writes/updates the lockfile. Running `toolbox resolve --upgrade github.com/acme-corp/zendesk-tools` bumps one package to its latest version and updates the lockfile.
 
-#### Two interfaces: declarative file and programmatic Builder
+#### Two interfaces: declarative file and programmatic assembly
 
 Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.json` is not required.
 
@@ -501,21 +518,24 @@ Toolsets can be assembled two ways. Both are first-class — `toolbox.toolset.js
 
 ```go
 ts, err := toolsetfile.Load("toolbox.toolset.json")  // reads toolset + lockfile (any filename works)
-resolved, err := ts.Resolve(ctx, resolver)            // auto-downloads, caches, resolves through toolset.Builder
+resolved, err := ts.Resolve(ctx, resolver)            // auto-downloads, caches, assembles packages, resolves tools
 ```
 
-**Programmatic Builder** — for toolsets assembled in code (harnesses, tests, dynamic composition):
+**Programmatic assembly** — for toolsets assembled in code (harnesses, tests, dynamic composition):
 
 ```go
-b := toolset.New()
-b.AddFromRegistry("github.com/acme-corp/zendesk-tools", "v2.0.1")
-b.AddFromRegistry("github.com/solidarity-ai/slack-tools", "v1.2.0")
-b.AddFromDir("../local-tools")  // local dev package
-// bindings, context, credentials configured programmatically
-resolved := b.Resolve()
+decl := assembler.Declaration{
+  Packages: []assembler.PackageDeclaration{
+    {Module: "github.com/acme-corp/zendesk-tools", Version: "v2.0.1"},
+    {Module: "github.com/solidarity-ai/slack-tools", Version: "v1.2.0"},
+    {Module: "local/dev-tools", Version: "v0.0.0", ReplaceDir: "../local-tools"},
+  },
+}
+loaded, err := assembler.Load(ctx, resolver, decl)
+resolved, err := toolset.ResolveTools(loaded.Tools(), toolset.Config{})
 ```
 
-The declarative file is a convenience that calls the same Builder APIs underneath. Harness authors who build toolsets programmatically get the same auto-download, caching, and integrity verification — the file format is just one way to drive it.
+The declarative file is a convenience that drives the same assembly seam underneath. Harness authors who build toolsets programmatically get the same auto-download, caching, and integrity verification — the file format is just one way to drive it.
 
 ---
 
@@ -873,7 +893,7 @@ This RFC covers a large surface area. The recommended build order:
 
 4. **Git-source fallback resolver** — Given a module path + version, clone/fetch the git repo at the tag, run `Pack` to produce an archive, store in the cache. Used when release artifacts aren't available.
 
-5. **`Builder.AddFromRegistry`** — New method that calls the resolver (release then git-source), then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
+5. **Registry-backed assembly** — Add the assembly path that calls the resolver (release then git-source), then `LoadArchive` on the cached result. Toolsets can now reference packages by module path + version.
 
 6. **GitHub Action for packing** — `solidarity-ai/toolbox-pack-action` that runs `toolbox pack` and attaches artifacts to a GitHub Release on tag push.
 
@@ -881,7 +901,7 @@ This RFC covers a large surface area. The recommended build order:
 
 8. **Replace directives** — Support `replace` in the toolset file (or overlay) for local development.
 
-9. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_PROXY` support to the resolver.
+9. **Proxy protocol** — Implement the proxy server and client. Add `TOOLBOX_REGISTRY` support to the resolver.
 
 10. **Search and discovery** — Proxy search API, `toolbox search` CLI command.
 

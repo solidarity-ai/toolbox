@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/vfs-wasip2",
   "name": "vfs-wasip2",
   "runtime": "typescript+wasip2-sandbox",
   "executables": {

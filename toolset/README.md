@@ -2,42 +2,49 @@
 
 ## Purpose
 
-`toolset` assembles the request-scoped view of what tools are available, how they are bound, and what the agent is allowed to see and pass.
+`toolset` owns request-scoped resolution over already-loaded tools: bindings,
+agent-visible schemas, validation, and resolved call parameters.
 
 It owns:
-- toolset composition
-- bound tools
 - bindings
 - context
-- credential attachment
-- request-scoped resolution
+- request-scoped resolution over preloaded tools
 - agent-visible tool view
 - call validation and parameter resolution
+- account-selection parameter injection
 
 This is the product brain of the system.
 
 ## Who depends on this package
 
-### `api`
-Uses `toolset` to turn harness input into a resolved request-scoped execution context.
-
 ### `invoke`
-Uses `toolset` as the source of truth for whether a tool call is valid and what the fully resolved params should be.
+Uses `toolset` as the source of truth for whether a tool call is valid and what
+the fully resolved params should be.
+
+### `mcpserver`
+Uses `toolset` to expose the agent-visible tool surface and validate incoming
+tool calls.
 
 ### `codemode`
 Uses `toolset` to derive the SDK shape that an agent sees in a code session.
+
+### `toolsetfile`
+Calls `toolset.ResolveTools` after package assembly completes.
 
 ## What they use it for
 
 - resolving bindings against context
 - compiling and evaluating CEL-based values/checks
 - hiding params from the agent-visible schema
-- generating a narrowed tool listing for one request
+- generating an agent-visible tool listing for one request
 - validating a tool call before execution
+- injecting account-selection params for multi-account credentials
 
 ## What this package does not own
 
 - package fetching/loading
+- declaration assembly
+- registry/cache provenance
 - runtime selection
 - sandbox execution
 - HTTP transport details

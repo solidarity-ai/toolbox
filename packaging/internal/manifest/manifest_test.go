@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ func TestParseDev(t *testing.T) {
 		{
 			name: "minimal valid",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "tools": [
@@ -27,6 +29,7 @@ func TestParseDev(t *testing.T) {
   ]
 }`,
 			want: DevManifest{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []DevManifestTool{
@@ -37,7 +40,9 @@ func TestParseDev(t *testing.T) {
 		{
 			name: "full manifest",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
+  "useWhenHint": "Use when you need calculator-style arithmetic tools.",
   "runtime": "typescript-sandbox",
   "additionalTypeScriptGlobs": ["lib/**/*.ts"],
   "tools": [
@@ -45,7 +50,9 @@ func TestParseDev(t *testing.T) {
   ]
 }`,
 			want: DevManifest{
+				Module:                    testModule("calc"),
 				Name:                      "calc",
+				UseWhenHint:               "Use when you need calculator-style arithmetic tools.",
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
 				Tools: []DevManifestTool{
@@ -56,6 +63,7 @@ func TestParseDev(t *testing.T) {
 		{
 			name: "wasix runtime with executables",
 			json: `{
+  "module": "example.com/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
@@ -64,6 +72,7 @@ func TestParseDev(t *testing.T) {
   ]
 }`,
 			want: DevManifest{
+				Module:      testModule("google-workspace"),
 				Name:        "google-workspace",
 				Runtime:     tooldef.RuntimeTypeScriptWasixSandbox,
 				Executables: map[string]string{"gwc": "dist/gwc.wasm"},
@@ -75,6 +84,7 @@ func TestParseDev(t *testing.T) {
 		{
 			name: "typescript runtime rejects executables",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "executables": { "gwc": "dist/gwc.wasm" },
@@ -85,8 +95,18 @@ func TestParseDev(t *testing.T) {
 			wantErr: "not:",
 		},
 		{
+			name: "missing module",
+			json: `{
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`,
+			wantErr: `"module"`,
+		},
+		{
 			name: "missing name",
 			json: `{
+  "module": "example.com/calc",
   "runtime": "typescript-sandbox",
   "tools": [{ "entry_ts": "tools/calc.add.ts" }]
 }`,
@@ -95,10 +115,207 @@ func TestParseDev(t *testing.T) {
 		{
 			name: "missing runtime",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
   "tools": [{ "entry_ts": "tools/calc.add.ts" }]
 }`,
 			wantErr: `"runtime"`,
+		},
+		{
+			name: "manifest with credentials and allowed_hosts",
+			json: `{
+  "module": "example.com/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
+  ],
+  "credentials": [
+    {
+      "name": "default",
+      "type": "oauth2",
+      "instructions": "Create OAuth client credentials in Google Cloud Console.",
+      "provider": "google",
+      "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
+      "inject": {
+        "hosts": ["*.googleapis.com"],
+        "method": "bearer_header",
+        "path_prefix": "/admin/directory/v1/"
+      }
+    },
+    {
+      "name": "api",
+      "type": "api_key",
+      "inject": {
+        "hosts": ["api.example.com"],
+        "method": "api_key_header"
+      }
+    }
+  ],
+  "allowed_hosts": ["*.googleapis.com", "api.example.com"]
+}`,
+			want: DevManifest{
+				Module:  testModule("google-workspace"),
+				Name:    "google-workspace",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
+				},
+				Credentials: []DevManifestCredential{
+					{
+						Name:         "default",
+						Type:         "oauth2",
+						Instructions: "Create OAuth client credentials in Google Cloud Console.",
+						Provider:     json.RawMessage(`"google"`),
+						Scopes:       []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+						Inject: DevManifestInject{
+							Hosts:      []string{"*.googleapis.com"},
+							Method:     "bearer_header",
+							PathPrefix: "/admin/directory/v1/",
+						},
+					},
+					{
+						Name: "api",
+						Type: "api_key",
+						Inject: DevManifestInject{
+							Hosts:  []string{"api.example.com"},
+							Method: "api_key_header",
+						},
+					},
+				},
+				AllowedHosts: []string{"*.googleapis.com", "api.example.com"},
+			},
+		},
+		{
+			name: "api_key_header with custom header_name",
+			json: `{
+  "module": "example.com/custom-header",
+  "name": "custom-header",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }],
+  "credentials": [{
+    "name": "default",
+    "type": "api_key",
+    "inject": {
+      "hosts": ["api.example.com"],
+      "method": "api_key_header",
+      "header_name": "Api-Key"
+    }
+  }]
+}`,
+			want: DevManifest{
+				Module:  testModule("custom-header"),
+				Name:    "custom-header",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{EntryTS: "tools/calc.add.ts"},
+				},
+				Credentials: []DevManifestCredential{
+					{
+						Name: "default",
+						Type: "api_key",
+						Inject: DevManifestInject{
+							Hosts:      []string{"api.example.com"},
+							Method:     "api_key_header",
+							HeaderName: "Api-Key",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "oauth2 provider object with pkce flag",
+			json: `{
+  "module": "example.com/custom-oauth",
+  "name": "custom-oauth",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/custom.list.ts" }],
+  "credentials": [{
+    "name": "default",
+    "type": "oauth2",
+    "provider": {"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false},
+    "inject": {
+      "hosts": ["api.example.com"],
+      "method": "bearer_header"
+    }
+  }]
+}`,
+			want: DevManifest{
+				Module:  testModule("custom-oauth"),
+				Name:    "custom-oauth",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{EntryTS: "tools/custom.list.ts"},
+				},
+				Credentials: []DevManifestCredential{
+					{
+						Name:     "default",
+						Type:     "oauth2",
+						Provider: json.RawMessage(`{"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false}`),
+						Inject: DevManifestInject{
+							Hosts:  []string{"api.example.com"},
+							Method: "bearer_header",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "useWhenHint too long rejected",
+			json: `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "useWhenHint": "` + `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` + `",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`,
+			wantErr: "useWhenHint",
+		},
+		{
+			name: "invalid credential type rejected",
+			json: `{
+  "module": "example.com/bad",
+  "name": "bad",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }],
+  "credentials": [{
+    "name": "default",
+    "type": "banana",
+    "inject": { "hosts": ["api.example.com"], "method": "bearer_header" }
+  }]
+}`,
+			wantErr: "type",
+		},
+		{
+			name: "invalid injection method rejected",
+			json: `{
+  "module": "example.com/bad",
+  "name": "bad",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }],
+  "credentials": [{
+    "name": "default",
+    "type": "oauth2",
+    "inject": { "hosts": ["api.example.com"], "method": "cookie" }
+  }]
+}`,
+			wantErr: "method",
+		},
+		{
+			name: "unknown credential field rejected",
+			json: `{
+  "module": "example.com/bad",
+  "name": "bad",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }],
+  "credentials": [{
+    "name": "x",
+    "type": "oauth2",
+    "typo_field": true,
+    "inject": { "hosts": ["a.com"], "method": "bearer_header" }
+  }]
+}`,
+			wantErr: "typo_field",
 		},
 		{
 			name:    "invalid json",
@@ -144,15 +361,19 @@ func TestCompile(t *testing.T) {
 		{
 			name: "basic compilation",
 			dev: DevManifest{
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []DevManifestTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: effectPtr(tooldef.EffectReadOnly)},
 				},
 			},
 			want: tooldef.Package{
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
@@ -161,6 +382,7 @@ func TestCompile(t *testing.T) {
 		{
 			name: "infers effect from verb add",
 			dev: DevManifest{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []DevManifestTool{
@@ -168,6 +390,7 @@ func TestCompile(t *testing.T) {
 				},
 			},
 			want: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -178,6 +401,7 @@ func TestCompile(t *testing.T) {
 		{
 			name: "preserves additionalTypeScriptGlobs",
 			dev: DevManifest{
+				Module:                    testModule("calc"),
 				Name:                      "calc",
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
@@ -186,6 +410,7 @@ func TestCompile(t *testing.T) {
 				},
 			},
 			want: tooldef.Package{
+				Module:                    testModule("calc"),
 				Name:                      "calc",
 				Runtime:                   tooldef.RuntimeTypeScriptSandbox,
 				AdditionalTypeScriptGlobs: []string{"lib/**/*.ts"},
@@ -222,6 +447,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "valid dev complete",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -233,6 +459,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "valid dist complete",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -244,6 +471,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "missing idempotent valid in dev",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -255,6 +483,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "missing idempotent valid in dist",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -266,6 +495,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "missing effect warns in dev",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -278,6 +508,7 @@ func TestValidateCompiled(t *testing.T) {
 		{
 			name: "missing effect errors in dist",
 			pkg: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
@@ -286,6 +517,85 @@ func TestValidateCompiled(t *testing.T) {
 			},
 			mode:    ValidationModeDist,
 			wantErr: `"effect"`,
+		},
+		{
+			name: "useWhenHint too long errors",
+			pkg: tooldef.Package{
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: strings.Repeat("a", 101),
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+			},
+			mode:    ValidationModeDev,
+			wantErr: "useWhenHint",
+		},
+		{
+			name: "package with credentials passes dev validation",
+			pkg: tooldef.Package{
+				Module:  testModule("google-workspace"),
+				Name:    "google-workspace",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+				Credentials: []tooldef.PackageCredential{
+					{
+						Name: "default",
+						Type: "oauth2",
+						Provider: &tooldef.OAuth2ProviderConfig{
+							AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+							TokenURL: "https://oauth2.googleapis.com/token",
+						},
+						Scopes: []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+						Inject: tooldef.PackageInject{
+							Hosts:      []string{"*.googleapis.com"},
+							Method:     "bearer_header",
+							PathPrefix: "/admin/directory/v1/",
+						},
+					},
+				},
+				AllowedHosts: []string{"*.googleapis.com"},
+			},
+			mode: ValidationModeDev,
+		},
+		{
+			name: "package with credentials passes dist validation",
+			pkg: tooldef.Package{
+				Module:  testModule("google-workspace"),
+				Name:    "google-workspace",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+				Credentials: []tooldef.PackageCredential{
+					{
+						Name: "default",
+						Type: "bearer",
+						Inject: tooldef.PackageInject{
+							Hosts:  []string{"api.example.com"},
+							Method: "bearer_header",
+						},
+					},
+				},
+				AllowedHosts: []string{"api.example.com"},
+			},
+			mode: ValidationModeDist,
+		},
+		{
+			name: "invalid module errors",
+			pkg: tooldef.Package{
+				Module:  tooldef.ModulePath("not-a-module"),
+				Name:    "calc",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+			},
+			mode:    ValidationModeDev,
+			wantErr: `invalid module`,
 		},
 	}
 
@@ -319,7 +629,7 @@ func TestInferEffect(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		entryTS  string
+		entryTS    string
 		wantEffect tooldef.Effect
 	}{
 		{"tools/users.list.ts", tooldef.EffectReadOnly},
@@ -397,15 +707,19 @@ func TestParsePkg(t *testing.T) {
 		{
 			name: "valid compiled package",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
+  "useWhenHint": "Use when you need calculator-style arithmetic tools.",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
   ]
 }`,
 			want: tooldef.Package{
-				Name:    "calc",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Module:      testModule("calc"),
+				Name:        "calc",
+				UseWhenHint: "Use when you need calculator-style arithmetic tools.",
+				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
@@ -414,6 +728,7 @@ func TestParsePkg(t *testing.T) {
 		{
 			name: "with sha256 field",
 			json: `{
+  "module": "example.com/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
   "sha256": "abc123",
@@ -422,6 +737,7 @@ func TestParsePkg(t *testing.T) {
   ]
 }`,
 			want: tooldef.Package{
+				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				SHA256:  "abc123",
@@ -429,6 +745,68 @@ func TestParsePkg(t *testing.T) {
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
 			},
+		},
+		{
+			name: "round-trip with credentials",
+			json: `{
+  "module": "example.com/google-workspace",
+  "name": "google-workspace",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/users.list.ts", "idempotent": true, "effect": "readOnly" }
+  ],
+  "credentials": [
+    {
+      "name": "default",
+      "type": "oauth2",
+      "instructions": "Create OAuth client credentials in Google Cloud Console.",
+      "provider": { "name": "google" },
+      "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
+      "inject": {
+        "hosts": ["*.googleapis.com"],
+        "method": "bearer_header",
+        "path_prefix": "/admin/directory/v1/"
+      }
+    }
+  ],
+  "allowed_hosts": ["*.googleapis.com"]
+}`,
+			want: tooldef.Package{
+				Module:  testModule("google-workspace"),
+				Name:    "google-workspace",
+				Runtime: tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/users.list.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+				Credentials: []tooldef.PackageCredential{
+					{
+						Name:         "default",
+						Type:         "oauth2",
+						Instructions: "Create OAuth client credentials in Google Cloud Console.",
+						Provider:     &tooldef.OAuth2ProviderConfig{Name: "google"},
+						Scopes:       []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+						Inject: tooldef.PackageInject{
+							Hosts:      []string{"*.googleapis.com"},
+							Method:     "bearer_header",
+							PathPrefix: "/admin/directory/v1/",
+						},
+					},
+				},
+				AllowedHosts: []string{"*.googleapis.com"},
+			},
+		},
+		{
+			name: "useWhenHint too long rejected",
+			json: `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "useWhenHint": "` + `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` + `",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
+  ]
+}`,
+			wantErr: "useWhenHint",
 		},
 		{
 			name:    "invalid json",
@@ -524,7 +902,7 @@ func TestCompileWithResourceBindingsOverride(t *testing.T) {
 			{
 				EntryTS:    "tools/account.tickets.list.ts",
 				Idempotent: boolPtr(true),
-				Effect: effectPtr(tooldef.EffectReadOnly),
+				Effect:     effectPtr(tooldef.EffectReadOnly),
 				Resource: &DevManifestToolResource{
 					Bindings: map[string]string{"account_id": "zendesk_account"},
 				},
@@ -617,10 +995,114 @@ func TestCompileWithResourceModeOverride(t *testing.T) {
 	}
 }
 
+func TestCompileWithCredentials(t *testing.T) {
+	t.Parallel()
+
+	dev := DevManifest{
+		Name:    "google-workspace",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Tools: []DevManifestTool{
+			{EntryTS: "tools/users.list.ts"},
+		},
+		Credentials: []DevManifestCredential{
+			{
+				Name:     "default",
+				Type:     "oauth2",
+				Provider: json.RawMessage(`"google"`),
+				Scopes:   []string{"https://www.googleapis.com/auth/admin.directory.user.readonly"},
+				Inject: DevManifestInject{
+					Hosts:                    []string{"*.googleapis.com"},
+					Method:                   "bearer_header",
+					PathPrefix:               "/admin/directory/v1/",
+					AllowUnsafeHTTPInjection: true,
+				},
+			},
+		},
+		AllowedHosts: []string{"*.googleapis.com"},
+	}
+
+	pkg := Compile(dev)
+
+	if len(pkg.Credentials) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(pkg.Credentials))
+	}
+	cred := pkg.Credentials[0]
+	if cred.Name != "default" {
+		t.Fatalf("credential name = %q, want %q", cred.Name, "default")
+	}
+	if cred.Type != "oauth2" {
+		t.Fatalf("credential type = %q, want %q", cred.Type, "oauth2")
+	}
+	if cred.Provider == nil || cred.Provider.Name != "google" {
+		t.Fatalf("credential provider = %+v, want name=google", cred.Provider)
+	}
+	if len(cred.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(cred.Scopes))
+	}
+	if cred.Inject.Method != "bearer_header" {
+		t.Fatalf("inject method = %q, want %q", cred.Inject.Method, "bearer_header")
+	}
+	if cred.Inject.PathPrefix != "/admin/directory/v1/" {
+		t.Fatalf("inject path_prefix = %q, want %q", cred.Inject.PathPrefix, "/admin/directory/v1/")
+	}
+	if !cred.Inject.AllowUnsafeHTTPInjection {
+		t.Fatal("inject allow_unsafe_http_injection = false, want true")
+	}
+	if len(pkg.AllowedHosts) != 1 || pkg.AllowedHosts[0] != "*.googleapis.com" {
+		t.Fatalf("allowed_hosts = %v, want [*.googleapis.com]", pkg.AllowedHosts)
+	}
+}
+
+func TestCompileWithCustomProviderObject(t *testing.T) {
+	t.Parallel()
+
+	dev := DevManifest{
+		Name:    "custom",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Tools: []DevManifestTool{
+			{EntryTS: "tools/custom.list.ts"},
+		},
+		Credentials: []DevManifestCredential{
+			{
+				Name:     "default",
+				Type:     "oauth2",
+				Provider: json.RawMessage(`{"auth_url":"https://auth.example.com/authorize","token_url":"https://auth.example.com/token","pkce":false}`),
+				Inject: DevManifestInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			},
+		},
+	}
+
+	pkg := Compile(dev)
+
+	if len(pkg.Credentials) != 1 {
+		t.Fatalf("expected 1 credential, got %d", len(pkg.Credentials))
+	}
+	cred := pkg.Credentials[0]
+	if cred.Provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+	if cred.Provider.AuthURL != "https://auth.example.com/authorize" {
+		t.Fatalf("provider auth_url = %q, want https://auth.example.com/authorize", cred.Provider.AuthURL)
+	}
+	if cred.Provider.TokenURL != "https://auth.example.com/token" {
+		t.Fatalf("provider token_url = %q, want https://auth.example.com/token", cred.Provider.TokenURL)
+	}
+	if cred.Provider.PKCE == nil || *cred.Provider.PKCE {
+		t.Fatalf("provider pkce = %+v, want false", cred.Provider.PKCE)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }
 
 func effectPtr(v tooldef.Effect) *tooldef.Effect {
 	return &v
+}
+
+func testModule(name string) tooldef.ModulePath {
+	return tooldef.ModulePath("example.com/" + name)
 }

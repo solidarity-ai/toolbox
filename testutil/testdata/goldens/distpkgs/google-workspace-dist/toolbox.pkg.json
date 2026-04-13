@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "f3339f40016359fe19b8b3bd62fcc27561597f4c804b8970498d16cf8620f6c5",
+  "sha256": "a401b153c843252c8e9ba70cf90991ad0719a3ab1eb6ba3a16b7074d4dbdfb4b",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },

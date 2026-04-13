@@ -12,6 +12,7 @@ import (
 	"sort"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/registry"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -29,10 +30,24 @@ type ToolEntry struct {
 	parsed tooldef.ToolFQN
 }
 
+// AgentConfig carries agent-facing discovery and runtime management settings
+// for one declarative toolset.
+type AgentConfig struct {
+	AllowPackageDiscovery *bool              `json:"allow_package_discovery,omitempty"`
+	Unsafe                *AgentUnsafeConfig `json:"unsafe,omitempty"`
+}
+
+// AgentUnsafeConfig carries agent capabilities that are disabled by default
+// because they mutate the active toolset.
+type AgentUnsafeConfig struct {
+	AllowToolsetManagement *bool `json:"allow_toolset_management,omitempty"`
+}
+
 // ToolsetFile is the minimal declarative *.toolset.json format.
 type ToolsetFile struct {
 	Packages map[string]string `json:"packages"`
 	Tools    []ToolEntry       `json:"tools"`
+	Agent    *AgentConfig      `json:"agent,omitempty"`
 
 	parsedPackages map[tooldef.ModulePath]tooldef.Version
 	filename       string
@@ -69,26 +84,46 @@ func Load(filename string) (*ToolsetFile, error) {
 		return nil, fmt.Errorf("read toolset file %q: %w", filename, err)
 	}
 
-	var instance map[string]any
-	if err := json.Unmarshal(data, &instance); err != nil {
-		return nil, fmt.Errorf("parse toolset file %q: %w", filename, err)
-	}
-	if err := resolvedToolboxToolsetSchema.Validate(instance); err != nil {
-		return nil, fmt.Errorf("validate toolset file %q: %w", filename, err)
-	}
-
-	var file ToolsetFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("parse toolset file %q: %w", filename, err)
-	}
-
-	if err := file.validate(); err != nil {
+	file, err := parse(data, filename)
+	if err != nil {
 		return nil, err
 	}
 
 	file.filename = filename
 	file.lockFilename = lockFilename
 	file.localFilename = localFilename
+	return file, nil
+}
+
+// Parse decodes and validates a toolset document without binding it to a
+// specific on-disk filename. This is useful for machine-facing APIs that need
+// to accept inline toolset JSON.
+func Parse(data []byte) (*ToolsetFile, error) {
+	return parse(data, "")
+}
+
+func parse(data []byte, filename string) (*ToolsetFile, error) {
+	label := "toolset document"
+	if filename != "" {
+		label = fmt.Sprintf("toolset file %q", filename)
+	}
+
+	var instance map[string]any
+	if err := json.Unmarshal(data, &instance); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", label, err)
+	}
+	if err := resolvedToolboxToolsetSchema.Validate(instance); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", label, err)
+	}
+
+	var file ToolsetFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", label, err)
+	}
+
+	if err := file.validate(); err != nil {
+		return nil, err
+	}
 	return &file, nil
 }
 
@@ -159,6 +194,24 @@ func (f *ToolsetFile) LocalFilename() string {
 	return f.localFilename
 }
 
+// AgentAllowsPackageDiscovery reports whether agent-facing package discovery
+// helpers should be exposed for this toolset. The default is true.
+func (f *ToolsetFile) AgentAllowsPackageDiscovery() bool {
+	if f == nil || f.Agent == nil || f.Agent.AllowPackageDiscovery == nil {
+		return true
+	}
+	return *f.Agent.AllowPackageDiscovery
+}
+
+// AgentAllowsToolsetManagement reports whether unsafe agent-facing toolset
+// mutation helpers should be exposed for this toolset. The default is false.
+func (f *ToolsetFile) AgentAllowsToolsetManagement() bool {
+	if f == nil || f.Agent == nil || f.Agent.Unsafe == nil || f.Agent.Unsafe.AllowToolsetManagement == nil {
+		return false
+	}
+	return *f.Agent.Unsafe.AllowToolsetManagement
+}
+
 // SetPackageVersion updates the declared package version and rewrites any tool
 // FQNs for that module to the same version, preserving tool order.
 func (f *ToolsetFile) SetPackageVersion(module tooldef.ModulePath, version tooldef.Version) error {
@@ -180,6 +233,58 @@ func (f *ToolsetFile) SetPackageVersion(module tooldef.ModulePath, version toold
 		}
 		f.Tools[i].parsed.Version = version
 		f.Tools[i].Tool = f.Tools[i].parsed.String()
+	}
+	return f.validate()
+}
+
+// PutPackageVersion declares or updates a package version. If the package is
+// already declared, any existing tool FQNs for that module are rewritten to the
+// same version, preserving tool order.
+func (f *ToolsetFile) PutPackageVersion(module tooldef.ModulePath, version tooldef.Version) error {
+	if f == nil {
+		return fmt.Errorf("put package version: nil toolset file")
+	}
+	if f.Packages == nil {
+		f.Packages = map[string]string{}
+	}
+
+	key := module.String()
+	f.Packages[key] = version.String()
+	for i := range f.Tools {
+		if f.Tools[i].parsed.Module != module {
+			continue
+		}
+		f.Tools[i].parsed.Version = version
+		f.Tools[i].Tool = f.Tools[i].parsed.String()
+	}
+	return f.validate()
+}
+
+// RemovePackage removes one declared package and drops any tool entries that
+// reference it, preserving the remaining tool order.
+func (f *ToolsetFile) RemovePackage(module tooldef.ModulePath) error {
+	if f == nil {
+		return fmt.Errorf("remove package: nil toolset file")
+	}
+	if f.Packages == nil {
+		return fmt.Errorf("remove package %s: no packages declared", module)
+	}
+
+	key := module.String()
+	if _, ok := f.Packages[key]; !ok {
+		return fmt.Errorf("remove package %s: module is not declared in packages", module)
+	}
+
+	delete(f.Packages, key)
+	if len(f.Tools) > 0 {
+		tools := f.Tools[:0]
+		for _, entry := range f.Tools {
+			if entry.parsed.Module == module {
+				continue
+			}
+			tools = append(tools, entry)
+		}
+		f.Tools = tools
 	}
 	return f.validate()
 }
@@ -286,11 +391,97 @@ func (f *ToolsetFile) encodeStable() ([]byte, error) {
 			}
 			buf.WriteString("\n")
 		}
-		buf.WriteString("  ]\n")
+		buf.WriteString("  ]")
 	} else {
-		buf.WriteString("]\n")
+		buf.WriteString("]")
+	}
+
+	if f.Agent != nil {
+		agentJSON, err := encodeAgentStable(f.Agent)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteString(",\n")
+		buf.WriteString("  \"agent\": ")
+		buf.Write(agentJSON)
+		buf.WriteString("\n")
+	} else {
+		buf.WriteString("\n")
 	}
 	buf.WriteString("}\n")
+	return buf.Bytes(), nil
+}
+
+func encodeAgentStable(agent *AgentConfig) ([]byte, error) {
+	if agent == nil {
+		return []byte("null"), nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{")
+
+	fieldCount := 0
+	if agent.AllowPackageDiscovery != nil {
+		fieldCount++
+	}
+	if agent.Unsafe != nil {
+		fieldCount++
+	}
+	if fieldCount == 0 {
+		buf.WriteString("}")
+		return buf.Bytes(), nil
+	}
+
+	buf.WriteString("\n")
+	written := 0
+	if agent.AllowPackageDiscovery != nil {
+		valueJSON, err := json.Marshal(*agent.AllowPackageDiscovery)
+		if err != nil {
+			return nil, fmt.Errorf("marshal agent.allow_package_discovery: %w", err)
+		}
+		buf.WriteString("    \"allow_package_discovery\": ")
+		buf.Write(valueJSON)
+		written++
+		if written < fieldCount {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	if agent.Unsafe != nil {
+		unsafeJSON, err := encodeAgentUnsafeStable(agent.Unsafe)
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteString("    \"unsafe\": ")
+		buf.Write(unsafeJSON)
+		buf.WriteString("\n")
+	}
+	buf.WriteString("  }")
+	return buf.Bytes(), nil
+}
+
+func encodeAgentUnsafeStable(unsafeCfg *AgentUnsafeConfig) ([]byte, error) {
+	if unsafeCfg == nil {
+		return []byte("null"), nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{")
+	if unsafeCfg.AllowToolsetManagement == nil {
+		buf.WriteString("}")
+		return buf.Bytes(), nil
+	}
+
+	valueJSON, err := json.Marshal(*unsafeCfg.AllowToolsetManagement)
+	if err != nil {
+		return nil, fmt.Errorf("marshal agent.unsafe.allow_toolset_management: %w", err)
+	}
+
+	buf.WriteString("\n")
+	buf.WriteString("      \"allow_toolset_management\": ")
+	buf.Write(valueJSON)
+	buf.WriteString("\n")
+	buf.WriteString("    }")
 	return buf.Bytes(), nil
 }
 
@@ -301,7 +492,7 @@ func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
 		return nil, fmt.Errorf("load toolset local file: nil toolset file")
 	}
 	if f.localFilename == "" {
-		return nil, fmt.Errorf("load toolset local file: toolset file must be loaded before local overlay can be derived")
+		return nil, nil
 	}
 
 	file, err := LoadLocal(f.localFilename)
@@ -314,24 +505,76 @@ func (f *ToolsetFile) LoadLocal() (*ToolsetLocalFile, error) {
 	return file, nil
 }
 
-// Resolve materializes the declared packages through the same builder and
-// registry path used by imperative toolset construction while loading,
-// verifying, and rewriting the sibling lockfile only after all packages have
-// resolved successfully.
-func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) (toolset.ResolvedToolset, error) {
+// Prepare materializes the declared packages through assembler while
+// loading, verifying, and rewriting the sibling lockfile only after all
+// packages have been loaded successfully.
+func (f *ToolsetFile) Prepare(ctx context.Context, resolver *registry.Resolver, cfgs ...toolset.Config) (toolset.PreparedToolset, error) {
+	var cfg toolset.Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	return f.prepareWithConfig(ctx, resolver, cfg)
+}
+
+// Declaration converts the validated toolset file plus optional local and lock
+// overlays into the file-agnostic assembly declaration consumed by assembler.
+func (f *ToolsetFile) Declaration(local *ToolsetLocalFile, lock *ToolsetLockFile) (assembler.Declaration, error) {
 	if f == nil {
-		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file: nil toolset file")
+		return assembler.Declaration{}, fmt.Errorf("prepare toolset file: nil toolset file")
 	}
 	if f.parsedPackages == nil {
-		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file: toolset file must be loaded and validated before resolve")
+		return assembler.Declaration{}, fmt.Errorf("prepare toolset file: toolset file must be loaded and validated before prepare")
+	}
+	decl := assembler.Declaration{
+		Packages: make([]assembler.PackageDeclaration, 0, len(f.parsedPackages)),
+	}
+
+	modules := make([]tooldef.ModulePath, 0, len(f.parsedPackages))
+	for module := range f.parsedPackages {
+		modules = append(modules, module)
+	}
+	sort.Slice(modules, func(i, j int) bool {
+		return modules[i].String() < modules[j].String()
+	})
+	for _, module := range modules {
+		version := f.parsedPackages[module]
+		pkgDecl := assembler.PackageDeclaration{
+			Module:  module,
+			Version: version,
+		}
+		if localDir, ok := local.ReplacementDirAbs(module); ok {
+			pkgDecl.ReplaceDir = localDir
+		}
+		if lock != nil {
+			packageKey := fmt.Sprintf("%s@%s", module, version)
+			if existing, ok := lock.Packages[packageKey]; ok {
+				pkgDecl.Expected = &registry.ResolveMetadata{
+					ArchiveSHA256: existing.ArchiveSHA256,
+					GitSHA:        existing.GitSHA,
+					ResolvedFrom:  registry.ResolvedFrom(existing.ResolvedFrom),
+					ResolvedAt:    existing.ResolvedAt,
+				}
+			}
+		}
+		decl.Packages = append(decl.Packages, pkgDecl)
+	}
+	return decl, nil
+}
+
+func (f *ToolsetFile) prepareWithConfig(ctx context.Context, resolver *registry.Resolver, cfg toolset.Config) (toolset.PreparedToolset, error) {
+	if f == nil {
+		return toolset.PreparedToolset{}, fmt.Errorf("prepare toolset file: nil toolset file")
+	}
+	if f.parsedPackages == nil {
+		return toolset.PreparedToolset{}, fmt.Errorf("prepare toolset file: toolset file must be loaded and validated before prepare")
 	}
 
 	var existingLock *ToolsetLockFile
-	if f.lockFilename != "" {
+	if f != nil && f.lockFilename != "" {
 		loadedLock, err := LoadLock(f.lockFilename)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+				return toolset.PreparedToolset{}, fmt.Errorf("prepare toolset file %q: %w", f.filename, err)
 			}
 		} else {
 			existingLock = loadedLock
@@ -343,60 +586,61 @@ func (f *ToolsetFile) Resolve(ctx context.Context, resolver *registry.Resolver) 
 
 	local, err := f.LoadLocal()
 	if err != nil {
-		return toolset.ResolvedToolset{}, fmt.Errorf("resolve toolset file %q: %w", f.filename, err)
+		return toolset.PreparedToolset{}, fmt.Errorf("prepare toolset file %q: %w", f.filename, err)
 	}
 
-	builder := toolset.NewWithResolver(resolver)
+	decl, err := f.Declaration(local, existingLock)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+
+	loadedPkgs, err := assembler.Load(ctx, resolver, decl)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+	if err := validateUniqueLoadedPackageNames(loadedPkgs); err != nil {
+		return toolset.PreparedToolset{}, fmt.Errorf("prepare toolset file %q: %w", f.filename, err)
+	}
+	prepared, err := toolset.PrepareTools(ctx, loadedPkgs.Tools(), cfg)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+
 	updatedLock := &ToolsetLockFile{Packages: make(map[string]ToolsetLockEntry, len(existingLock.Packages))}
 	for packageKey, entry := range existingLock.Packages {
 		updatedLock.Packages[packageKey] = entry
 	}
-	modules := make([]tooldef.ModulePath, 0, len(f.parsedPackages))
-	for module := range f.parsedPackages {
-		modules = append(modules, module)
-	}
-	sort.Slice(modules, func(i, j int) bool {
-		return modules[i].String() < modules[j].String()
-	})
-
-	for _, module := range modules {
-		version := f.parsedPackages[module]
-		packageKey := fmt.Sprintf("%s@%s", module, version)
-
-		if localDir, ok := local.ReplacementDirAbs(module); ok {
-			if err := builder.AddFromDir(localDir); err != nil {
-				return toolset.ResolvedToolset{}, fmt.Errorf("resolve %s from local replace %q: %w", packageKey, localDir, err)
-			}
+	for _, pkg := range loadedPkgs.Packages {
+		if pkg.Local || pkg.Metadata == nil {
 			continue
 		}
-
-		var expected *registry.ResolveMetadata
-		if existing, ok := existingLock.Packages[packageKey]; ok {
-			expected = &registry.ResolveMetadata{
-				ArchiveSHA256: existing.ArchiveSHA256,
-				GitSHA:        existing.GitSHA,
-				ResolvedFrom:  registry.ResolvedFrom(existing.ResolvedFrom),
-				ResolvedAt:    existing.ResolvedAt,
-			}
-		}
-
-		metadata, err := builder.AddFromRegistryWithExpected(ctx, module.String(), version.String(), expected)
-		if err != nil {
-			return toolset.ResolvedToolset{}, err
-		}
+		packageKey := fmt.Sprintf("%s@%s", pkg.Package.Package.Module, pkg.Version)
 		updatedLock.Packages[packageKey] = ToolsetLockEntry{
-			ArchiveSHA256: metadata.ArchiveSHA256,
-			GitSHA:        metadata.GitSHA,
-			ResolvedFrom:  ToolsetLockResolvedFrom(metadata.ResolvedFrom),
-			ResolvedAt:    metadata.ResolvedAt,
+			ArchiveSHA256: pkg.Metadata.ArchiveSHA256,
+			GitSHA:        pkg.Metadata.GitSHA,
+			ResolvedFrom:  ToolsetLockResolvedFrom(pkg.Metadata.ResolvedFrom),
+			ResolvedAt:    pkg.Metadata.ResolvedAt,
 		}
 	}
 
-	if f.lockFilename != "" {
+	if f != nil && f.lockFilename != "" {
 		if err := updatedLock.Write(f.lockFilename); err != nil {
-			return toolset.ResolvedToolset{}, err
+			return toolset.PreparedToolset{}, err
 		}
 	}
 
-	return builder.Resolve(toolset.Config{})
+	return prepared, nil
+}
+
+func validateUniqueLoadedPackageNames(loadedPkgs assembler.LoadedPackages) error {
+	seen := make(map[string]tooldef.ModulePath, len(loadedPkgs.Packages))
+	for _, loaded := range loadedPkgs.Packages {
+		name := loaded.Package.Package.Name
+		module := loaded.Package.Package.Module
+		if first, ok := seen[name]; ok {
+			return fmt.Errorf("package name %q is declared by both %q and %q; duplicate package names in one toolset require aliases", name, first, module)
+		}
+		seen[name] = module
+	}
+	return nil
 }

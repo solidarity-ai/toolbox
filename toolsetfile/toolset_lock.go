@@ -35,6 +35,7 @@ type ToolsetLockResolvedFrom string
 const (
 	ToolsetLockResolvedFromGitHubRelease ToolsetLockResolvedFrom = "github-release"
 	ToolsetLockResolvedFromGitSource     ToolsetLockResolvedFrom = "git-source"
+	ToolsetLockResolvedFromToolRegistry  ToolsetLockResolvedFrom = "tool-registry"
 )
 
 // ToolsetLockEntry records the resolved provenance and integrity metadata for
@@ -126,7 +127,7 @@ func (e ToolsetLockEntry) validate(_ string) error {
 		return fmt.Errorf("git_sha %q must be a 40-character hex git commit", e.GitSHA)
 	}
 	switch e.ResolvedFrom {
-	case ToolsetLockResolvedFromGitHubRelease, ToolsetLockResolvedFromGitSource:
+	case ToolsetLockResolvedFromGitHubRelease, ToolsetLockResolvedFromGitSource, ToolsetLockResolvedFromToolRegistry:
 		// okay
 	default:
 		return fmt.Errorf("resolved_from %q is invalid", e.ResolvedFrom)

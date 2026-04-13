@@ -18,6 +18,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -26,6 +27,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 //go:embed ca_cert.pem
@@ -54,6 +57,13 @@ type Proxy struct {
 	// Observer is called with each intercepted request/response pair.
 	// If nil, traffic is forwarded silently.
 	Observer Observer
+
+	// Injector, if non-nil, injects credentials into outbound requests
+	// before they are forwarded to the upstream server.
+	Injector *transport.CredentialInjector
+
+	// Allowlist, if non-nil, restricts which hosts the proxy will connect to.
+	Allowlist *transport.HostAllowlist
 
 	// UpstreamTLSConfig is the TLS configuration used when connecting to
 	// upstream servers. If nil, the default system trust store is used.
@@ -129,6 +139,11 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		host = targetHost
 	}
 
+	if p.Allowlist != nil && !p.Allowlist.Allows(host) {
+		http.Error(w, "host not in allowlist", http.StatusForbidden)
+		return
+	}
+
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
@@ -176,6 +191,51 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Credential injection — tool code never sees this.
+		if p.Injector != nil {
+			reqURL := "https://" + host + req.URL.RequestURI()
+			var hdrs [][2]string
+			for k, vals := range req.Header {
+				for _, v := range vals {
+					hdrs = append(hdrs, [2]string{k, v})
+				}
+			}
+			newURL, newHdrs, injected, injErr := p.Injector.InjectRequest(req.Method, reqURL, hdrs)
+			if injErr != nil {
+				// Write error response to client and skip this request.
+				errBody := marshalJSON(map[string]string{"error": "credential injection failed"})
+				errResp := &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Status:     "502 Bad Gateway",
+					Proto:      "HTTP/1.1",
+					ProtoMajor: 1, ProtoMinor: 1,
+					Header: http.Header{"Content-Type": {"application/json"}},
+					Body:   io.NopCloser(bytes.NewReader(errBody)),
+				}
+				// Surface the injection error to the observer so it is auditable.
+				if p.Observer != nil {
+					obsResp := *errResp
+					obsResp.Body = io.NopCloser(bytes.NewReader(errBody))
+					p.Observer.Observe(host, req, &obsResp)
+				}
+				errResp.Write(tlsClientConn)
+				continue
+			}
+			if injected {
+				// Rebuild request headers from the injected set.
+				req.Header = make(http.Header)
+				for _, h := range newHdrs {
+					req.Header.Add(h[0], h[1])
+				}
+				// Update URL if changed (e.g. api_key_query).
+				if newURL != reqURL {
+					if parsed, parseErr := req.URL.Parse(newURL); parseErr == nil {
+						req.URL = parsed
+					}
+				}
+			}
+		}
+
 		if err := req.Write(upstreamConn); err != nil {
 			return
 		}
@@ -186,7 +246,8 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if p.Observer != nil {
-			bodyBytes, err := io.ReadAll(resp.Body)
+			const maxObserveBody = 10 << 20 // 10 MB
+			bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxObserveBody))
 			resp.Body.Close()
 			if err != nil {
 				return
@@ -250,4 +311,9 @@ func (p *Proxy) getOrCreateCert(host string) (*tls.Certificate, error) {
 	}
 	p.certCache[host] = tlsCert
 	return tlsCert, nil
+}
+
+func marshalJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }

@@ -1,0 +1,16 @@
+{
+  "name": "@include-tools/toolbox-win32-x64",
+  "version": "0.0.0-development",
+  "main": "index.js",
+  "files": [
+    "bin",
+    "index.js",
+    "README.md"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ]
+}

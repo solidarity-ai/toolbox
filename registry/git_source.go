@@ -122,9 +122,29 @@ func runGitForVersion(ctx context.Context, dir string, module ModulePath, versio
 	output, err := cmd.CombinedOutput()
 	trimmed := strings.TrimSpace(string(output))
 	if err != nil {
-		return "", fmt.Errorf("git %s %s@%s from %s: %w: %s", step, module, version, cloneURL, err, trimmed)
+		return "", wrapGitCommandError(fmt.Sprintf("git %s %s@%s from %s", step, module, version, cloneURL), err, trimmed)
 	}
 	return trimmed, nil
+}
+
+func wrapGitCommandError(prefix string, err error, output string) error {
+	if looksLikeGitNotFound(output) {
+		if output == "" {
+			return fmt.Errorf("%s: %v: %w", prefix, err, ErrReleaseNotFound)
+		}
+		return fmt.Errorf("%s: %v: %s: %w", prefix, err, output, ErrReleaseNotFound)
+	}
+	if output == "" {
+		return fmt.Errorf("%s: %w", prefix, err)
+	}
+	return fmt.Errorf("%s: %w: %s", prefix, err, output)
+}
+
+func looksLikeGitNotFound(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "repository not found") ||
+		strings.Contains(lower, "remote branch") && strings.Contains(lower, "not found in upstream origin") ||
+		strings.Contains(lower, "couldn't find remote ref")
 }
 
 func (s *GitSourceFallback) cloneURL(module ModulePath) string {

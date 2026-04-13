@@ -1,0 +1,48 @@
+{
+  "module": "fixtures.local/auth-test",
+  "name": "auth-test",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "test_api",
+      "type": "api_key",
+      "inject": {
+        "hosts": ["127.0.0.1"],
+        "method": "api_key_header",
+        "path_prefix": "/api/",
+        "allow_unsafe_http_injection": true
+      }
+    },
+    {
+      "name": "test_oauth",
+      "type": "oauth2",
+      "provider": {
+        "name": "google",
+        "auth_params": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      },
+      "scopes": ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
+      "inject": {
+        "hosts": ["localhost"],
+        "method": "bearer_header",
+        "path_prefix": "/secured/",
+        "allow_unsafe_http_injection": true
+      }
+    }
+  ],
+  "allowed_hosts": ["127.0.0.1", "localhost"],
+  "tools": [
+    {
+      "entry_ts": "tools/auth-test.get.ts",
+      "idempotent": true,
+      "effect": "readOnly"
+    },
+    {
+      "entry_ts": "tools/auth-test.multi-fetch.ts",
+      "idempotent": true,
+      "effect": "readOnly"
+    }
+  ]
+}

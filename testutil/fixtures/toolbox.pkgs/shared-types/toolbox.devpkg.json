@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/shared-types",
   "name": "shared-types",
   "runtime": "typescript-sandbox",
   "tools": [

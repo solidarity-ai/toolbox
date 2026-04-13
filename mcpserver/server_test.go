@@ -1,33 +1,83 @@
 package mcpserver_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/transport"
 )
 
 func TestMCPServerListsVisibleInvokeTools(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 	names := h.ToolNames()
 
 	assertContains(t, names, "calc.add")
 	assertContains(t, names, "calc.asyncAdd")
 }
 
+func TestMCPServerDefaultName(t *testing.T) {
+	initRes := initializeServer(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
+	if initRes.ServerInfo.Name != "toolbox" {
+		t.Fatalf("server name = %q, want toolbox", initRes.ServerInfo.Name)
+	}
+}
+
+func TestMCPServerCustomName(t *testing.T) {
+	initRes := initializeServer(t, mcpserver.NewNamed("example", tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
+	if initRes.ServerInfo.Name != "example" {
+		t.Fatalf("server name = %q, want example", initRes.ServerInfo.Name)
+	}
+}
+
+func TestManagedMCPServerUpdatesToolsAtRuntime(t *testing.T) {
+	managed := mcpserver.NewManagedNamed("example")
+	h := mcptest.NewHarness(t, managed.Server())
+
+	if got := len(h.ListTools().Tools); got != 0 {
+		t.Fatalf("initial tool count = %d, want 0", got)
+	}
+
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{}))
+
+	names := h.ToolNames()
+	assertContains(t, names, "calc.add")
+	assertContains(t, names, "calc.asyncAdd")
+
+	result := h.CallTool("calc.add", map[string]any{
+		"a": 2,
+		"b": 3,
+	})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "5" {
+		t.Fatalf("result text = %q, want 5", text.Text)
+	}
+}
+
 func TestMCPServerExposesResolvedParamSchema(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 	tools := h.ListTools()
 
 	var calcAdd *mcp.Tool
@@ -66,7 +116,7 @@ func TestMCPServerExposesResolvedParamSchema(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForTool(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 
 	result := h.CallTool("calc.add", map[string]any{
 		"a": 5,
@@ -88,7 +138,7 @@ func TestMCPServerCallsInvokeForTool(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 
 	result := h.CallTool("calc.asyncAdd", map[string]any{
 		"a": 7,
@@ -110,7 +160,7 @@ func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 
 	result := h.CallTool("calc.add", map[string]any{
 		"a": "6",
@@ -132,7 +182,7 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 }
 
 func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.CalcDistToolset(t)))
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 	names := h.ToolNames()
 
 	assertContains(t, names, "calc.add")
@@ -165,12 +215,7 @@ func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {
 func TestMCPServerRunsExternalWasmerPackageFromDir(t *testing.T) {
 	requireTSWasmerArtifacts(t)
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(gwsFixtureDir()); err != nil {
-		t.Fatalf("add external package dir: %v", err)
-	}
-
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
+	h := mcptest.NewHarness(t, mcpserver.New(prepareLocalToolset(t, gwsFixtureDir())))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -225,12 +270,7 @@ func TestMCPServerRunsWasmerPackageFromCopiedDirWithBinaryNamedArtifact(t *testi
 		t.Fatalf("copy renamed wasm: %v", err)
 	}
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(dstDir); err != nil {
-		t.Fatalf("add copied package dir: %v", err)
-	}
-
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
+	h := mcptest.NewHarness(t, mcpserver.New(prepareLocalToolset(t, dstDir)))
 	result := h.CallTool("users.list", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -263,11 +303,7 @@ func requireTSWasmerArtifacts(t *testing.T) {
 }
 
 func gwsFixtureDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		panic("mcpserver_test: runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "google-workspace")
+	return tooltest.LocalSrcToolDir("google-workspace")
 }
 
 func readFile(t *testing.T, path string) string {
@@ -384,12 +420,7 @@ func copyFile(src string, dst string) error {
 func TestMCPServerRunsWasip2PackageHTTPClient(t *testing.T) {
 	requireTSWasip2Artifacts(t)
 
-	builder := toolset.New()
-	if err := builder.AddFromDir(httpClientFixtureDir()); err != nil {
-		t.Fatalf("add http-client package dir: %v", err)
-	}
-
-	h := mcptest.NewHarness(t, mcpserver.New(mustResolve(t, builder)))
+	h := mcptest.NewHarness(t, mcpserver.New(prepareLocalToolset(t, httpClientFixtureDir())))
 	result := h.CallTool("httpClient.fetch", map[string]any{})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -428,11 +459,7 @@ func requireTSWasip2Artifacts(t *testing.T) {
 }
 
 func httpClientFixtureDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		panic("mcpserver_test: runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(file), "..", "testutil", "fixtures", "toolbox.pkgs", "http-client")
+	return tooltest.LocalSrcToolDir("http-client")
 }
 
 func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
@@ -444,7 +471,18 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	h := mcptest.NewHarness(t, mcpserver.New(tooltest.FetchTestToolset(t)))
+	srvURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+
+	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{
+		CredentialPolicySource: credentialrepo.StaticPolicySource{
+			tooldef.ModulePath("fixtures.local/fetch-test"): {
+				Allowlist: transport.NewHostAllowlist([]string{srvURL.Hostname()}),
+			},
+		},
+	})))
 
 	// Invoke the fetch-test.get tool with the test server URL.
 	result := h.CallTool("fetchTest.get", map[string]any{
@@ -482,13 +520,9 @@ func TestMCPServerFetchToolMakesHTTPRequest(t *testing.T) {
 	}
 }
 
-func mustResolve(t testing.TB, builder *toolset.Builder) toolset.ResolvedToolset {
+func prepareLocalToolset(t testing.TB, dir string) toolset.PreparedToolset {
 	t.Helper()
-	resolved, err := builder.Resolve(toolset.Config{})
-	if err != nil {
-		t.Fatalf("resolve toolset: %v", err)
-	}
-	return resolved
+	return tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
 }
 
 func assertContains(t *testing.T, values []string, want string) {
@@ -499,4 +533,32 @@ func assertContains(t *testing.T, values []string, want string) {
 		}
 	}
 	t.Fatalf("expected %q in %v", want, values)
+}
+
+func initializeServer(t testing.TB, srv *server.MCPServer) *mcp.InitializeResult {
+	t.Helper()
+
+	c, err := client.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatalf("create in-process client: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("start client: %v", err)
+	}
+
+	initRequest := mcp.InitializeRequest{}
+	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcp.Implementation{
+		Name:    "toolbox-mcp-test-client",
+		Version: "0.1.0",
+	}
+	initRequest.Params.Capabilities = mcp.ClientCapabilities{}
+
+	initRes, err := c.Initialize(context.Background(), initRequest)
+	if err != nil {
+		t.Fatalf("initialize client: %v", err)
+	}
+	return initRes
 }

@@ -1,4 +1,5 @@
 {
+  "module": "fixtures.local/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
   "executables": {

@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/edge-cases",
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "0160390208abe5af02a47f50da576811ae696abb9a8cf51c0dfe72cf9d9e60d6",
+  "sha256": "f0ff3f2a7651807f6ffbaa4d1a6350669fe38d5f05c939ead09d4580f8ce2954",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",

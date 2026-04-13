@@ -2,123 +2,37 @@ package toolset
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"net/http"
 
-	"github.com/google/cel-go/cel"
-	"github.com/solidarity-ai/toolbox/packaging"
-	"github.com/solidarity-ai/toolbox/registry"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/assembler"
 )
 
-// ErrNoResolver is returned by AddFromRegistry when the Builder was created
-// without a registry resolver.
-var ErrNoResolver = errors.New("no registry resolver configured")
-
-// ResolvedToolset carries the visible tools and their compiled bindings.
-type ResolvedToolset struct {
-	tools        []tooldef.ResolvedTool
-	bindings     map[string]map[string]compiledBinding // tool name -> param name -> compiled binding
-	hiddenParams map[string]map[string]bool            // tool name -> set of hidden param names
-	context      map[string]any
-	celEnv       *cel.Env
+// AccountParam describes an auto-generated {cred}_account parameter for
+// multi-account credential selection.
+type AccountParam struct {
+	ParamName   string   // e.g. "google_workspace_account"
+	CredName    string   // e.g. "google_workspace"
+	Accounts    []string // sorted account names (enum values)
+	Description string   // e.g. "Account for google_workspace credential"
 }
 
-// Builder incrementally assembles a toolset from source package directories.
-//
-// For now it only records loaded packages from
-// toolbox.devpkg.json. Tool selection and binding come later.
-type Builder struct {
-	packages []packaging.LoadedPackage
-	resolver *registry.Resolver
+// PreparedToolset carries the visible tools and their compiled bindings.
+type PreparedToolset struct {
+	tools          []PreparedTool
+	byName         map[string]int
+	fetchTransport http.RoundTripper
 }
 
-// New creates an empty toolset builder.
-func New() *Builder {
-	return &Builder{}
+// FetchTransport returns the optional http.RoundTripper configured via
+// Config.FetchTransport. Used to intercept fetch calls in tests.
+func (r PreparedToolset) FetchTransport() http.RoundTripper {
+	return r.fetchTransport
 }
 
-// NewWithResolver creates a toolset builder that can resolve registry packages.
-func NewWithResolver(resolver *registry.Resolver) *Builder {
-	return &Builder{resolver: resolver}
-}
-
-// AddFromDir loads a package rooted at dir.
-//
-// A directory is treated as a package iff it contains toolbox.devpkg.json.
-func (b *Builder) AddFromDir(dir string) error {
-	pkg, err := packaging.LoadDev(dir)
-	if err != nil {
-		return err
-	}
-	b.packages = append(b.packages, pkg)
-	return nil
-}
-
-// AddFromArchive loads a package from a .toolbox.pkg archive and its manifest.
-func (b *Builder) AddFromArchive(archivePath, manifestPath string) error {
-	pkg, err := packaging.LoadArchive(archivePath, manifestPath)
-	if err != nil {
-		return err
-	}
-	b.packages = append(b.packages, pkg)
-	return nil
-}
-
-// AddFromRegistry resolves a registry package by module path and version,
-// then appends it to the builder's package list.
-func (b *Builder) AddFromRegistry(ctx context.Context, modulePath, version string) error {
-	_, err := b.AddFromRegistryWithExpected(ctx, modulePath, version, nil)
-	return err
-}
-
-// AddFromRegistryWithExpected resolves a registry package through the shared
-// resolver path, optionally verifying cached/fetched bytes against expected
-// lock metadata, then appends the loaded package and returns the metadata that
-// was trusted for this package.
-func (b *Builder) AddFromRegistryWithExpected(ctx context.Context, modulePath, version string, expected *registry.ResolveMetadata) (registry.ResolveMetadata, error) {
-	if b.resolver == nil {
-		return registry.ResolveMetadata{}, ErrNoResolver
-	}
-
-	module, err := tooldef.ParseModulePath(modulePath)
-	if err != nil {
-		return registry.ResolveMetadata{}, fmt.Errorf("parse module path: %w", err)
-	}
-	ver, err := tooldef.ParseVersion(version)
-	if err != nil {
-		return registry.ResolveMetadata{}, fmt.Errorf("parse version: %w", err)
-	}
-
-	result, err := b.resolver.ResolveWithExpected(ctx, module, ver, expected)
-	if err != nil {
-		return registry.ResolveMetadata{}, err
-	}
-	b.packages = append(b.packages, result.Package)
-	return result.Metadata, nil
-}
-
-// Packages returns the currently loaded source packages.
-func (b *Builder) Packages() []tooldef.Package {
-	out := make([]tooldef.Package, len(b.packages))
-	for i, loaded := range b.packages {
-		out[i] = loaded.Package
-	}
-	return out
-}
-
-// Resolve materializes visible tools from loaded packages, compiling any
-// bindings from cfg. An empty Config{} produces the same result as before
-// bindings existed — all tools visible, no bindings applied.
-func (b *Builder) Resolve(cfg Config) (ResolvedToolset, error) {
-	var tools []tooldef.ResolvedTool
-	for _, loaded := range b.packages {
-		tools = append(tools, loaded.ResolvedTools()...)
-	}
-	return b.resolveTools(tools, cfg)
-}
-
-func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
+// PrepareTools prepares a pre-built list of loaded tools with the given config.
+// This is useful for testing with synthetic tool definitions.
+func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config) (PreparedToolset, error) {
 	// Build binding lookup: tool ref -> param name -> Binding
 	toolBindings := make(map[string]map[string]Binding, len(cfg.Tools))
 	for _, bt := range cfg.Tools {
@@ -127,13 +41,13 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 
 	env, err := newCELEnv()
 	if err != nil {
-		return ResolvedToolset{}, fmt.Errorf("create CEL env: %w", err)
+		return PreparedToolset{}, fmt.Errorf("create CEL env: %w", err)
 	}
 
-	allCompiled := make(map[string]map[string]compiledBinding, len(toolBindings))
-	allHidden := make(map[string]map[string]bool)
-
-	for _, tool := range tools {
+	out := make([]PreparedTool, len(tools))
+	byName := make(map[string]int, len(tools))
+	policies := make(map[string]PackageCredentialPolicy)
+	for i, tool := range tools {
 		// Start with explicit per-tool bindings
 		bindings := make(map[string]Binding)
 		if tb, ok := toolBindings[tool.Name]; ok {
@@ -143,7 +57,7 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 		}
 
 		// Merge resource-level bindings from the two-tier model:
-		// ResolvedTool.ResourceParams maps param name -> canonical binding name
+		// assembler.LoadedTool.ResourceParams maps param name -> canonical binding name
 		// Config.ResourceBindings maps canonical name -> Binding
 		for _, rp := range tool.ResourceParams {
 			// Skip if explicit per-tool binding already set
@@ -155,57 +69,100 @@ func (b *Builder) resolveTools(tools []tooldef.ResolvedTool, cfg Config) (Resolv
 			}
 		}
 
-		if len(bindings) == 0 {
-			continue
-		}
-
-		compiled, err := compileBindings(env, bindings)
-		if err != nil {
-			return ResolvedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
-		}
-		allCompiled[tool.Name] = compiled
-
-		hidden := make(map[string]bool)
-		for paramName, binding := range bindings {
-			if binding.Hidden {
-				hidden[paramName] = true
+		var compiled map[string]compiledBinding
+		var hidden map[string]bool
+		if len(bindings) > 0 {
+			compiled, err = compileBindings(env, bindings)
+			if err != nil {
+				return PreparedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
+			}
+			hidden = make(map[string]bool)
+			for paramName, binding := range bindings {
+				if binding.Hidden {
+					hidden[paramName] = true
+				}
+			}
+			if len(hidden) == 0 {
+				hidden = nil
 			}
 		}
-		if len(hidden) > 0 {
-			allHidden[tool.Name] = hidden
+
+		policy := PackageCredentialPolicy{}
+		if tool.PackageMeta != nil {
+			if cached, ok := policies[tool.PackageMeta.Module.String()]; ok {
+				policy = cached
+			} else {
+				policy, err = packagePolicyForTool(ctx, cfg, tool)
+				if err != nil {
+					return PreparedToolset{}, fmt.Errorf("tool %q: load package credential policy: %w", tool.Name, err)
+				}
+				policies[tool.PackageMeta.Module.String()] = policy
+			}
 		}
+
+		prepared, err := buildPreparedTool(tool, compiled, hidden, cfg.EnvContext, policy)
+		if err != nil {
+			return PreparedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
+		}
+		out[i] = prepared
+		byName[tool.Name] = i
 	}
 
-	out := make([]tooldef.ResolvedTool, len(tools))
-	copy(out, tools)
-	return ResolvedToolset{
-		tools:        out,
-		bindings:     allCompiled,
-		hiddenParams: allHidden,
-		context:      cfg.Context,
-		celEnv:       env,
+	return PreparedToolset{
+		tools:          out,
+		byName:         byName,
+		fetchTransport: cfg.FetchTransport,
 	}, nil
 }
 
-// ResolveTools resolves a pre-built list of tools with the given config.
-// This is useful for testing with synthetic tool definitions.
-func ResolveTools(tools []tooldef.ResolvedTool, cfg Config) (ResolvedToolset, error) {
-	b := &Builder{}
-	// Inject pre-resolved tools directly into the resolve flow.
-	return b.resolveTools(tools, cfg)
-}
-
-// NewResolvedToolset creates a resolved toolset from a visible tool list
+// NewPreparedToolset creates a prepared toolset from a visible tool list
 // with no bindings. This is a convenience for callers that don't use bindings.
-func NewResolvedToolset(tools []tooldef.ResolvedTool) ResolvedToolset {
-	out := make([]tooldef.ResolvedTool, len(tools))
-	copy(out, tools)
-	return ResolvedToolset{tools: out}
+func NewPreparedToolset(tools []assembler.LoadedTool) PreparedToolset {
+	out := make([]PreparedTool, len(tools))
+	byName := make(map[string]int, len(tools))
+	for i, tool := range tools {
+		out[i] = PreparedTool{
+			LoadedTool: tool,
+			allowlist:  effectiveAllowlist(tool.PackageMeta, nil),
+		}
+		byName[tool.Name] = i
+	}
+	return PreparedToolset{tools: out, byName: byName}
 }
 
-// Tools returns a shallow copy of the visible tools for this resolved toolset.
-func (r ResolvedToolset) Tools() []tooldef.ResolvedTool {
-	out := make([]tooldef.ResolvedTool, len(r.tools))
+// Tools returns a shallow copy of the visible tools for this prepared toolset.
+func (r PreparedToolset) Tools() []PreparedTool {
+	out := make([]PreparedTool, len(r.tools))
 	copy(out, r.tools)
 	return out
+}
+
+// Tool returns one prepared tool by name.
+func (r PreparedToolset) Tool(name string) (PreparedTool, bool) {
+	if idx, ok := r.byName[name]; ok {
+		return r.tools[idx], true
+	}
+	return PreparedTool{}, false
+}
+
+// FilterTools returns a prepared toolset containing only tools that match keep.
+// The filtered toolset preserves prepared tool metadata such as bindings.
+func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedToolset {
+	if keep == nil {
+		return r
+	}
+	out := make([]PreparedTool, 0, len(r.tools))
+	byName := make(map[string]int, len(r.tools))
+	for _, tool := range r.tools {
+		if !keep(tool) {
+			continue
+		}
+		byName[tool.Name] = len(out)
+		out = append(out, tool)
+	}
+	return PreparedToolset{
+		tools:          out,
+		byName:         byName,
+		fetchTransport: r.fetchTransport,
+	}
 }

@@ -1,23 +1,96 @@
 package main
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"io"
-	"log"
-	"net/http"
 	"os"
 	"strings"
 
-	mcpgoserver "github.com/mark3labs/mcp-go/server"
-	"github.com/solidarity-ai/toolbox/mcpserver"
-	"github.com/solidarity-ai/toolbox/registry"
-	tooldef "github.com/solidarity-ai/toolbox/tool"
-	"github.com/solidarity-ai/toolbox/toolsetfile"
+	"github.com/alecthomas/kong"
 )
 
-const defaultToolsetFilename = "toolbox.toolset.json"
+type cli struct {
+	Install   installCmd   `cmd:"" help:"Resolve the selected toolset and write or update its lockfile."`
+	Update    updateCmd    `cmd:"" help:"Update one installed package or all installed packages in the selected toolset."`
+	Versions  versionsCmd  `cmd:"" help:"List cached and published versions for a package target."`
+	Info      infoCmd      `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
+	Outdated  outdatedCmd  `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
+	Search    searchCmd    `cmd:"" help:"Search the tool registry for packages or tools."`
+	MCP       mcpCmd       `cmd:"" help:"Serve the selected toolset over MCP stdio."`
+	Codemode  codemodeCmd  `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
+	Auth      authCmd      `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
+	SDKBridge sdkBridgeCmd `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
+}
+
+type installCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to resolve."`
+	Package string `arg:"" optional:"" name:"package" help:"Package module path or module@version to declare before resolving."`
+}
+
+func (installCmd) Help() string {
+	return `Without <package>, install resolves the selected toolset and updates its lockfile.
+
+With <package>, install first updates the toolset file, then resolves it.
+
+Use <module> to install the latest available version.
+Use <module>@<version> to install that exact version.
+
+For a specific commit, pass the Go pseudo-version directly, for example
+<module>@v0.0.0-20260410153000-abcdef123456.
+
+If the selected toolset file does not exist, install creates a default empty
+toolset file before adding the package.`
+}
+
+type updateCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to update."`
+	All     bool   `help:"Update all installed packages in the selected toolset."`
+	Patch   bool   `help:"Limit updates to patch releases for semver packages."`
+	Minor   bool   `help:"Limit updates to minor releases for semver packages."`
+	Target  string `arg:"" optional:"" name:"target" help:"Installed package target to update."`
+}
+
+type versionsCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file used to resolve non-module targets."`
+	Source  string `default:"all" enum:"all,local,registry" help:"Version sources to include."`
+	Target  string `arg:"" name:"target" help:"Module path or installed package target."`
+}
+
+type infoCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file used to resolve non-version targets."`
+	JSON    bool   `help:"Emit structured JSON output."`
+	Target  string `arg:"" name:"target" help:"Installed target, local package dir, or package@version."`
+}
+
+type outdatedCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to inspect."`
+}
+
+type replCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to load for session instructions."`
+	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
+	File    string `name:"file" short:"f" default:".toolbox-session" type:"path" help:"SQLite session database path."`
+}
+
+type mcpCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to serve."`
+	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
+}
+
+type codemodeCmd struct {
+	Repl replCmd `cmd:"" help:"Start a persistent TypeScript REPL backed by SQLite session storage."`
+	MCP  mcpCmd  `cmd:"" name:"mcp" help:"Serve the selected toolset over the codemode MCP stdio surface."`
+}
+
+type authCmd struct {
+	Args []string `arg:"" optional:"" passthrough:"all" name:"arg" help:"Legacy auth arguments."`
+}
+
+type sdkBridgeCmd struct {
+	ServeStdio sdkBridgeServeStdioCmd `cmd:"" name:"serve-stdio" hidden:"" help:"Serve the internal SDK bridge over stdio."`
+}
+
+type sdkBridgeServeStdioCmd struct{}
 
 func main() {
 	if err := runWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -31,218 +104,54 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	var parsed cli
+	parser, err := kong.New(
+		&parsed,
+		kong.Name("toolbox"),
+		kong.Description("Toolbox resolves toolsets, inspects package metadata, and serves tools over MCP."),
+		kong.Writers(stdout, stderr),
+	)
+	if err != nil {
+		return err
+	}
 	if len(args) == 0 {
-		printUsage(stderr)
-		return fmt.Errorf("missing subcommand")
-	}
-
-	switch args[0] {
-	case "resolve":
-		return runResolve(args[1:], stdout)
-	case "versions":
-		return runVersions(args[1:], stdout)
-	case "mcp":
-		return runMCP(args[1:], stdin, stdout, stderr)
-	case "help", "-h", "--help":
-		printUsage(stdout)
-		return nil
-	default:
-		printUsage(stderr)
-		return fmt.Errorf("unknown subcommand %q", args[0])
-	}
-}
-
-func runResolve(args []string, stdout io.Writer) error {
-	fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
-	fs.SetOutput(stdout)
-	file := fs.String("file", defaultToolsetFilename, "toolset file")
-	fileShort := fs.String("f", "", "toolset file")
-	upgrade := fs.String("upgrade", "", "module path to upgrade before resolve")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *fileShort != "" {
-		file = fileShort
-	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("resolve: unexpected args: %s", strings.Join(fs.Args(), " "))
-	}
-
-	resolver, err := newResolver()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-
-	ts, err := toolsetfile.Load(*file)
-	if err != nil {
-		return err
-	}
-
-	if strings.TrimSpace(*upgrade) != "" {
-		module, err := tooldef.ParseModulePath(*upgrade)
-		if err != nil {
-			return fmt.Errorf("parse upgrade module path: %w", err)
-		}
-		currentRaw, ok := ts.Packages[module.String()]
-		if !ok {
-			return fmt.Errorf("upgrade module %q is not declared in %s", module, ts.SourceFilename())
-		}
-		current, err := tooldef.ParseVersion(currentRaw)
-		if err != nil {
-			return fmt.Errorf("parse current version for %s: %w", module, err)
-		}
-		versions, err := resolver.ListVersions(ctx, module)
+		ctx, err := kong.Trace(parser, nil)
 		if err != nil {
 			return err
 		}
-		latest := versions[0]
-		if latest != current {
-			if err := ts.SetPackageVersion(module, latest); err != nil {
-				return err
-			}
-			if err := ts.Write(ts.SourceFilename()); err != nil {
-				return err
-			}
-			fmt.Fprintf(stdout, "upgraded %s: %s -> %s\n", module, current, latest)
-		} else {
-			fmt.Fprintf(stdout, "upgrade %s: already at %s\n", module, current)
-		}
+		return ctx.PrintUsage(false)
 	}
 
-	resolved, err := ts.Resolve(ctx, resolver)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(stdout, "resolved %d tools\n", len(resolved.Tools()))
-	if ts.LockFilename() != "" {
-		fmt.Fprintf(stdout, "lockfile: %s\n", ts.LockFilename())
-	}
-	return nil
-}
-
-func runVersions(args []string, stdout io.Writer) error {
-	fs := flag.NewFlagSet("versions", flag.ContinueOnError)
-	fs.SetOutput(stdout)
-	file := fs.String("file", defaultToolsetFilename, "toolset file (optional context only)")
-	fileShort := fs.String("f", "", "toolset file (optional context only)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *fileShort != "" {
-		file = fileShort
-	}
-	_ = file
-	if fs.NArg() != 1 {
-		return fmt.Errorf("versions: expected exactly one module path argument")
-	}
-	module, err := tooldef.ParseModulePath(fs.Arg(0))
+	ctx, err := parser.Parse(args)
 	if err != nil {
 		return err
 	}
 
-	resolver, err := newResolver()
-	if err != nil {
-		return err
-	}
-	versions, err := resolver.ListVersions(context.Background(), module)
-	if err != nil {
-		return err
-	}
-	for _, version := range versions {
-		fmt.Fprintln(stdout, version.String())
-	}
-	return nil
-}
-
-func runMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		printUsage(stderr)
-		return fmt.Errorf("mcp: missing subcommand")
-	}
-
-	switch args[0] {
-	case "serve":
-		return runMCPServe(args[1:], stdin, stdout, stderr)
+	command := ctx.Command()
+	switch {
+	case strings.HasPrefix(command, "install"):
+		return runInstall(parsed.Install, stdout)
+	case strings.HasPrefix(command, "update"):
+		return runUpdate(parsed.Update, stdout)
+	case strings.HasPrefix(command, "versions"):
+		return runVersions(parsed.Versions, stdout)
+	case strings.HasPrefix(command, "info"):
+		return runInfo(parsed.Info, stdout)
+	case strings.HasPrefix(command, "outdated"):
+		return runOutdated(parsed.Outdated, stdout)
+	case strings.HasPrefix(command, "search"):
+		return runSearch(parsed.Search, stdout)
+	case strings.HasPrefix(command, "mcp"):
+		return runMCP(parsed.MCP, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "codemode repl"):
+		return runRepl(parsed.Codemode.Repl, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "codemode mcp"):
+		return runCodemodeMCP(parsed.Codemode.MCP, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "auth"):
+		return runAuth(parsed.Auth.Args, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "_sdkbridge serve-stdio"):
+		return runSDKBridgeServeStdio(stdin, stdout, stderr)
 	default:
-		printUsage(stderr)
-		return fmt.Errorf("mcp: unknown subcommand %q", args[0])
+		return fmt.Errorf("unknown command %q", command)
 	}
-}
-
-func runMCPServe(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	file := fs.String("file", defaultToolsetFilename, "toolset file")
-	fileShort := fs.String("f", "", "toolset file")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *fileShort != "" {
-		file = fileShort
-	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("mcp serve: unexpected args: %s", strings.Join(fs.Args(), " "))
-	}
-
-	resolver, err := newResolver()
-	if err != nil {
-		return err
-	}
-	ts, err := toolsetfile.Load(*file)
-	if err != nil {
-		return err
-	}
-	resolved, err := ts.Resolve(context.Background(), resolver)
-	if err != nil {
-		return err
-	}
-
-	stdioServer := mcpgoserver.NewStdioServer(mcpserver.New(resolved))
-	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
-	return stdioServer.Listen(context.Background(), stdin, stdout)
-}
-
-func newResolver() (*registry.Resolver, error) {
-	cache, err := registry.NewCache("")
-	if err != nil {
-		return nil, err
-	}
-	githubBaseURL := os.Getenv("GITHUB_BASE_URL")
-	gitURLPrefix := os.Getenv("TOOLBOX_GIT_URL_PREFIX")
-	client := newGitHubHTTPClient(os.Getenv("GITHUB_TOKEN"))
-	return registry.NewResolver(
-		cache,
-		registry.NewGitHubReleaseSource(githubBaseURL, client),
-		&registry.GitSourceFallback{URLPrefix: gitURLPrefix},
-	), nil
-}
-
-func newGitHubHTTPClient(token string) *http.Client {
-	if strings.TrimSpace(token) == "" {
-		return http.DefaultClient
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	return &http.Client{Transport: authTransport{base: transport, token: token}}
-}
-
-type authTransport struct {
-	base  http.RoundTripper
-	token string
-}
-
-func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.Header = req.Header.Clone()
-	if clone.Header.Get("Authorization") == "" {
-		clone.Header.Set("Authorization", "token "+t.token)
-	}
-	return t.base.RoundTrip(clone)
-}
-
-func printUsage(f io.Writer) {
-	fmt.Fprintln(f, "usage:")
-	fmt.Fprintln(f, "  toolbox resolve [--file FILE] [--upgrade MODULE]")
-	fmt.Fprintln(f, "  toolbox versions [--file FILE] <module>")
-	fmt.Fprintln(f, "  toolbox mcp serve [--file FILE]")
 }

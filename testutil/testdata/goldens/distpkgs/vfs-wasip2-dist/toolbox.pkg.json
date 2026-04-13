@@ -1,7 +1,8 @@
 {
+  "module": "fixtures.local/vfs-wasip2",
   "name": "vfs-wasip2",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "1880e99329d2c03e8732e4fd20a5fcbac681da6002c6bafcd333c0330a1b516a",
+  "sha256": "bda406fcda3c6b0cdf488adb5ddf4992e25aaf93fe6a414889dbf3f359d3762f",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

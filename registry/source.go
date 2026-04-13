@@ -18,9 +18,10 @@ import (
 const defaultGitHubAPIBaseURL = "https://api.github.com"
 
 var (
-	ErrReleaseNotFound  = errors.New("github release not found")
-	sha256HexPattern    = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
-	gitCommitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	ErrReleaseNotFound   = errors.New("release not found")
+	ErrSourceUnavailable = errors.New("source unavailable")
+	sha256HexPattern     = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+	gitCommitSHAPattern  = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 )
 
 type ResolvedFrom string
@@ -28,6 +29,7 @@ type ResolvedFrom string
 const (
 	ResolvedFromGitHubRelease ResolvedFrom = "github-release"
 	ResolvedFromGitSource     ResolvedFrom = "git-source"
+	ResolvedFromToolRegistry  ResolvedFrom = "tool-registry"
 )
 
 type ResolveMetadata struct {
@@ -45,7 +47,7 @@ func (m ResolveMetadata) Validate() error {
 		return fmt.Errorf("git_sha %q must be a 40-character hex git commit", m.GitSHA)
 	}
 	switch m.ResolvedFrom {
-	case ResolvedFromGitHubRelease, ResolvedFromGitSource:
+	case ResolvedFromGitHubRelease, ResolvedFromGitSource, ResolvedFromToolRegistry:
 		// okay
 	default:
 		return fmt.Errorf("resolved_from %q is invalid", m.ResolvedFrom)

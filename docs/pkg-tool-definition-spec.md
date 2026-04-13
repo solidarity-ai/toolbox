@@ -89,6 +89,83 @@ Per-tool descriptions and some defaults may come from tool source during local d
 }
 ```
 
+### Source package with credentials:
+
+```json
+{
+  "name": "github",
+  "runtime": "typescript-sandbox",
+  "credentials": [
+    {
+      "name": "github_token",
+      "type": "bearer",
+      "instructions": "Create a personal access token in GitHub settings.",
+      "inject": {
+        "hosts": ["api.github.com"],
+        "method": "bearer_header"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/issues.list.ts",
+      "idempotent": false,
+      "effect": "readOnly"
+    }
+  ]
+}
+```
+
+`credentials[].instructions` is optional. When present, Toolbox shows it to the
+user during credential setup and in missing-credential status output so the
+user knows where to get or create the required credential.
+
+If a credential uses `inject.path_prefix`, `/` is the catch-all prefix and
+matches both the bare host URL (for example `https://api.example.com`) and any
+subpath on that host.
+
+### Source package with explicit network allowlist:
+
+```json
+{
+  "name": "webhook-relay",
+  "runtime": "typescript-sandbox",
+  "allowed_hosts": ["api.example.com", "*.internal.example.com"],
+  "tools": [
+    {
+      "entry_ts": "tools/events.forward.ts",
+      "idempotent": false,
+      "effect": "readOnly"
+    }
+  ]
+}
+```
+
+`allowed_hosts` is package-scoped and applies to every tool in the package.
+
+- If `allowed_hosts` is omitted or empty, outbound network access is denied by default.
+- Use `["*"]` to explicitly allow requests to any host.
+- Exact hosts and subdomain wildcards such as `*.googleapis.com` are supported.
+
+Tools may optionally set `max_fetch_response_bytes` in their manifest entry to
+override the default `fetch()` response-body limit for that tool. If omitted,
+Toolbox uses a default limit of 10 MiB.
+
+```json
+{
+  "name": "large-export-tool",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {
+      "entry_ts": "tools/export.download.ts",
+      "idempotent": true,
+      "effect": "readOnly",
+      "max_fetch_response_bytes": 25000000
+    }
+  ]
+}
+```
+
 ## Tool Definitions
 
 Each tool is a TypeScript file in the `tools/` directory. The filename is the resource path + method.
@@ -229,6 +306,13 @@ Makes an HTTP request. Routed through Go's proxy for credential replacement, sco
 - `opts` — standard fetch options: method, headers, body
 - Returns: response object with status, headers, body
 - Credentials are replaced automatically by the proxy — tool code never sees real secrets
+- Outbound network access is denied unless the package `allowed_hosts` permits
+  the target host; `["*"]` is the explicit allow-all form
+- Response bodies are limited to 10 MiB by default; if the body exceeds the
+  limit, `fetch()` fails with an explicit error instead of returning truncated
+  partial data
+- A tool can raise or lower that limit with `max_fetch_response_bytes` on its
+  manifest entry
 
 ### `exec(binary, args)`
 

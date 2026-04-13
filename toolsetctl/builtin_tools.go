@@ -238,6 +238,11 @@ func decodeBuiltInArgs(args map[string]any, dst any) error {
 	if args == nil {
 		args = map[string]any{}
 	}
+	if len(args) == 1 {
+		if nested, ok := args["params"].(map[string]any); ok {
+			args = nested
+		}
+	}
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("marshal builtin args: %w", err)

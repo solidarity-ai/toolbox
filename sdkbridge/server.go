@@ -16,9 +16,12 @@ import (
 	"sync/atomic"
 
 	"github.com/solidarity-ai/toolbox/codemodesession"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/toolpkgdiscovery"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/toolsetctl"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -46,12 +49,16 @@ var codeModeParamsSchema = map[string]any{
 type Options struct {
 	Resolver               *registry.Resolver
 	CredentialPolicySource toolset.PackageCredentialPolicySource
+	CredentialRepository   *credentialrepo.Repository
+	SearchClientFactory    func() (toolsetctl.SearchClient, error)
 	Version                string
 }
 
 type Bridge struct {
 	resolver               *registry.Resolver
 	credentialPolicySource toolset.PackageCredentialPolicySource
+	credentialRepository   *credentialrepo.Repository
+	searchClientFactory    func() (toolsetctl.SearchClient, error)
 	version                string
 
 	mu          sync.RWMutex
@@ -60,10 +67,12 @@ type Bridge struct {
 }
 
 type composedToolset struct {
+	mu       sync.RWMutex
 	mode     ComposeMode
 	prepared toolset.PreparedToolset
 	tools    []ToolDescriptor
 	session  *codemodesession.Session
+	backend  toolsetctl.ToolsetBackend
 }
 
 type rpcRequest struct {
@@ -89,6 +98,8 @@ func New(opts Options) *Bridge {
 	return &Bridge{
 		resolver:               opts.Resolver,
 		credentialPolicySource: opts.CredentialPolicySource,
+		credentialRepository:   opts.CredentialRepository,
+		searchClientFactory:    opts.SearchClientFactory,
 		version:                resolveVersion(opts.Version),
 		toolsets:               make(map[string]*composedToolset),
 	}
@@ -202,6 +213,36 @@ func (b *Bridge) handleMethod(ctx context.Context, method string, raw json.RawMe
 			return nil, err
 		}
 		return b.compose(ctx, params)
+	case "toolset.search":
+		var params ToolsetSearchParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return b.search(ctx, params)
+	case "toolset.inspect":
+		var params ToolsetInspectParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return b.inspect(ctx, params)
+	case "toolset.install":
+		var params ToolsetInstallParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return b.install(ctx, params)
+	case "toolset.uninstall":
+		var params ToolsetUninstallParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return b.uninstall(ctx, params)
+	case "toolset.auth":
+		var params ToolsetAuthParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return b.auth(ctx, params)
 	case "toolset.close":
 		var params ToolsetCloseParams
 		if err := decodeParams(raw, &params); err != nil {
@@ -257,31 +298,56 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 		cfg = params.Config.toToolsetConfig(b.credentialPolicySource)
 	}
 
-	prepared, err := file.Prepare(ctx, b.resolver, cfg)
-	if err != nil {
-		return ComposeResult{}, err
-	}
-
 	var session *codemodesession.Session
 	if params.Mode == ComposeModeCodemode {
-		session, err = codemodesession.OpenMemory(ctx, composeCurrentDir(params.ToolsetFile), codemodesession.SessionConfig{
-			PreparedTools: prepared,
-		})
+		session, err = codemodesession.OpenMemory(ctx, composeCurrentDir(params.ToolsetFile), codemodesession.SessionConfig{})
 		if err != nil {
 			return ComposeResult{}, err
 		}
 	}
 
-	descriptors := b.describeTools(params.Mode, prepared, session)
+	handle := &composedToolset{
+		mode:    params.Mode,
+		session: session,
+	}
+	if strings.TrimSpace(params.ToolsetFile) != "" {
+		backend, err := toolsetctl.NewFileBackend(ctx, toolsetctl.FileBackendOptions{
+			ToolsetPath:          params.ToolsetFile,
+			Resolver:             b.resolver,
+			Config:               cfg,
+			SearchClientFactory:  b.searchClientFactory,
+			CredentialRepository: b.credentialRepository,
+			Consumer:             handle,
+		})
+		if err != nil {
+			handle.close()
+			return ComposeResult{}, err
+		}
+		handle.setBackend(backend)
+	} else {
+		if file.AgentAllowsToolsetManagement() {
+			handle.close()
+			return ComposeResult{}, fmt.Errorf("inline toolset compose does not support agent.unsafe.allow_toolset_management")
+		}
+		backend, err := newInlineBackend(ctx, inlineBackendOptions{
+			File:                file,
+			Resolver:            b.resolver,
+			Config:              cfg,
+			SearchClientFactory: b.searchClientFactory,
+			Consumer:            handle,
+		})
+		if err != nil {
+			handle.close()
+			return ComposeResult{}, err
+		}
+		handle.setBackend(backend)
+	}
+
+	descriptors := handle.toolDescriptors()
 	id := fmt.Sprintf("ts_%d", atomic.AddUint64(&b.nextToolset, 1))
 
 	b.mu.Lock()
-	b.toolsets[id] = &composedToolset{
-		mode:     params.Mode,
-		prepared: prepared,
-		tools:    descriptors,
-		session:  session,
-	}
+	b.toolsets[id] = handle
 	b.mu.Unlock()
 
 	return ComposeResult{
@@ -290,19 +356,13 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	}, nil
 }
 
-func (b *Bridge) describeTools(mode ComposeMode, prepared toolset.PreparedToolset, session *codemodesession.Session) []ToolDescriptor {
+func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, session *codemodesession.Session) []ToolDescriptor {
 	if mode == ComposeModeCodemode {
-		instructions := ""
-		if session != nil {
-			instructions = session.Instructions()
-		} else {
-			metaSession := &codemodesession.Session{}
-			metaSession.SetPreparedTools(prepared)
-			instructions = metaSession.Instructions()
-		}
+		metaSession := &codemodesession.Session{}
+		metaSession.SetPreparedTools(prepared)
 		return []ToolDescriptor{{
 			Name:         CodeModeToolName,
-			Description:  instructions,
+			Description:  metaSession.Instructions(),
 			ParamsSchema: cloneMap(codeModeParamsSchema),
 		}}
 	}
@@ -319,6 +379,67 @@ func (b *Bridge) describeTools(mode ComposeMode, prepared toolset.PreparedToolse
 	return out
 }
 
+func (h *composedToolset) SetPreparedTools(prepared toolset.PreparedToolset) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.prepared = prepared
+	if h.session != nil {
+		h.session.SetPreparedTools(prepared)
+	}
+	h.tools = describeTools(h.mode, prepared, h.session)
+}
+
+func (h *composedToolset) setBackend(backend toolsetctl.ToolsetBackend) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.backend = backend
+}
+
+func (h *composedToolset) backendSnapshot() toolsetctl.ToolsetBackend {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.backend
+}
+
+func (h *composedToolset) snapshot() (ComposeMode, toolset.PreparedToolset, *codemodesession.Session) {
+	if h == nil {
+		return ComposeModeDirect, toolset.PreparedToolset{}, nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.mode, h.prepared, h.session
+}
+
+func (h *composedToolset) toolDescriptors() []ToolDescriptor {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return cloneToolDescriptors(h.tools)
+}
+
+func (h *composedToolset) close() {
+	if h == nil {
+		return
+	}
+	h.mu.RLock()
+	session := h.session
+	h.mu.RUnlock()
+	if session != nil {
+		_ = session.Close()
+	}
+}
+
 func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvokeResult, error) {
 	if strings.TrimSpace(params.ToolsetID) == "" {
 		return ToolInvokeResult{}, invalidParams("toolset_id is required")
@@ -332,25 +453,143 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 		return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown toolset_id %q", params.ToolsetID))
 	}
 
-	if handle.mode == ComposeModeCodemode {
+	mode, prepared, session := handle.snapshot()
+	if mode == ComposeModeCodemode {
 		if params.ToolName != CodeModeToolName {
 			return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 		}
-		if handle.session == nil {
+		if session == nil {
 			return ToolInvokeResult{}, fmt.Errorf("codemode session is not available")
 		}
 		code, ok := params.Params[codemodesession.TypeScriptCellSourceParam].(string)
 		if !ok || strings.TrimSpace(code) == "" {
 			return ToolInvokeResult{}, invalidParams("codemode tool requires params." + codemodesession.TypeScriptCellSourceParam)
 		}
-		return ToolInvokeResult{Content: handle.session.Submit(ctx, code)}, nil
+		return ToolInvokeResult{Content: session.Submit(ctx, code)}, nil
 	}
 
-	result, err := invoke.Run(handle.prepared, params.ToolName, params.Params)
+	result, err := invoke.RunContext(ctx, prepared, params.ToolName, params.Params)
 	if err != nil {
 		return ToolInvokeResult{}, err
 	}
 	return ToolInvokeResult{Content: result}, nil
+}
+
+func (b *Bridge) search(ctx context.Context, params ToolsetSearchParams) (ToolsetSearchResult, error) {
+	backend, err := b.requireToolsetBackend(params.ToolsetID)
+	if err != nil {
+		return ToolsetSearchResult{}, err
+	}
+	result, err := backend.Search(ctx, toolsetctlSearchRequest(params))
+	if err != nil {
+		return ToolsetSearchResult{}, err
+	}
+	return ToolsetSearchResult{
+		Packages: result.Packages,
+		Tools:    result.Tools,
+	}, nil
+}
+
+func (b *Bridge) inspect(ctx context.Context, params ToolsetInspectParams) (ToolsetInspectResult, error) {
+	backend, err := b.requireToolsetBackend(params.ToolsetID)
+	if err != nil {
+		return ToolsetInspectResult{}, err
+	}
+	result, err := backend.Inspect(ctx, toolsetctlInspectRequest(params))
+	if err != nil {
+		return ToolsetInspectResult{}, err
+	}
+	return ToolsetInspectResult{
+		Target:  result.Target,
+		Version: result.Version,
+		Source:  result.Source,
+		Package: result.Package,
+	}, nil
+}
+
+func (b *Bridge) install(ctx context.Context, params ToolsetInstallParams) (ToolsetUpdateResult, error) {
+	handle, backend, err := b.requireToolsetHandleBackend(params.ToolsetID)
+	if err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	if _, err := backend.Install(ctx, toolsetctl.InstallRequest{
+		Package: params.Package,
+	}); err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	return ToolsetUpdateResult{Tools: handle.toolDescriptors()}, nil
+}
+
+func (b *Bridge) uninstall(ctx context.Context, params ToolsetUninstallParams) (ToolsetUpdateResult, error) {
+	handle, backend, err := b.requireToolsetHandleBackend(params.ToolsetID)
+	if err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	if _, err := backend.Uninstall(ctx, toolsetctl.UninstallRequest{
+		Target: params.Target,
+	}); err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	return ToolsetUpdateResult{Tools: handle.toolDescriptors()}, nil
+}
+
+func (b *Bridge) auth(ctx context.Context, params ToolsetAuthParams) (ToolsetUpdateResult, error) {
+	handle, backend, err := b.requireToolsetHandleBackend(params.ToolsetID)
+	if err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	if _, err := backend.Auth(ctx, toolsetctl.AuthRequest{
+		Target:            params.Target,
+		Account:           params.Account,
+		Credential:        params.Credential,
+		Check:             params.Check,
+		DeleteCredential:  params.DeleteCredential,
+		RenameAccountFrom: params.RenameAccountFrom,
+		RenameAccountTo:   params.RenameAccountTo,
+		DeleteAccount:     params.DeleteAccount,
+	}); err != nil {
+		return ToolsetUpdateResult{}, err
+	}
+	return ToolsetUpdateResult{Tools: handle.toolDescriptors()}, nil
+}
+
+func (b *Bridge) requireToolsetBackend(toolsetID string) (toolsetctl.ToolsetBackend, error) {
+	_, backend, err := b.requireToolsetHandleBackend(toolsetID)
+	if err != nil {
+		return nil, err
+	}
+	return backend, nil
+}
+
+func (b *Bridge) requireToolsetHandleBackend(toolsetID string) (*composedToolset, toolsetctl.ToolsetBackend, error) {
+	if strings.TrimSpace(toolsetID) == "" {
+		return nil, nil, invalidParams("toolset_id is required")
+	}
+	handle, ok := b.lookupToolset(toolsetID)
+	if !ok {
+		return nil, nil, invalidParams(fmt.Sprintf("unknown toolset_id %q", toolsetID))
+	}
+	backend := handle.backendSnapshot()
+	if backend == nil {
+		return nil, nil, fmt.Errorf("toolset %q does not have a runtime backend", toolsetID)
+	}
+	return handle, backend, nil
+}
+
+func toolsetctlSearchRequest(params ToolsetSearchParams) toolpkgdiscovery.SearchRequest {
+	return toolpkgdiscovery.SearchRequest{
+		Query:    params.Query,
+		Tools:    params.Tools,
+		Packages: params.Packages,
+		Runtime:  params.Runtime,
+		Effect:   params.Effect,
+		Limit:    params.Limit,
+		Offset:   params.Offset,
+	}
+}
+
+func toolsetctlInspectRequest(params ToolsetInspectParams) toolpkgdiscovery.InspectRequest {
+	return toolpkgdiscovery.InspectRequest{Target: params.Target}
 }
 
 func (b *Bridge) lookupToolset(id string) (*composedToolset, bool) {
@@ -365,8 +604,8 @@ func (b *Bridge) closeToolset(id string) {
 	handle := b.toolsets[id]
 	delete(b.toolsets, id)
 	b.mu.Unlock()
-	if handle != nil && handle.session != nil {
-		_ = handle.session.Close()
+	if handle != nil {
+		handle.close()
 	}
 }
 
@@ -376,8 +615,8 @@ func (b *Bridge) clearToolsets() {
 	b.toolsets = make(map[string]*composedToolset)
 	b.mu.Unlock()
 	for _, handle := range toolsets {
-		if handle != nil && handle.session != nil {
-			_ = handle.session.Close()
+		if handle != nil {
+			handle.close()
 		}
 	}
 }
@@ -493,6 +732,21 @@ func cloneMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for key, value := range in {
 		out[key] = cloneValue(value)
+	}
+	return out
+}
+
+func cloneToolDescriptors(in []ToolDescriptor) []ToolDescriptor {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ToolDescriptor, len(in))
+	for i := range in {
+		out[i] = ToolDescriptor{
+			Name:         in[i].Name,
+			Description:  in[i].Description,
+			ParamsSchema: cloneMap(in[i].ParamsSchema),
+		}
 	}
 	return out
 }

@@ -414,7 +414,9 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 
 	if tool.Sig != nil {
 		if desc := tool.Sig.Description(); desc != "" {
-			fmt.Fprintf(b, "%s// %s\n", indent, desc)
+			for _, line := range strings.Split(desc, "\n") {
+				fmt.Fprintf(b, "%s// %s\n", indent, line)
+			}
 		}
 	}
 

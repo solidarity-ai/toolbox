@@ -10,6 +10,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/codemodemcp"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 func TestMCPServerListsSuperTool(t *testing.T) {
@@ -68,6 +70,29 @@ func TestMCPServerCustomName(t *testing.T) {
 	if initRes.ServerInfo.Name != "example" {
 		t.Fatalf("server name = %q, want example", initRes.ServerInfo.Name)
 	}
+}
+
+func TestManagedMCPServerUpdatesSuperToolAtRuntime(t *testing.T) {
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	h := mcptest.NewHarness(t, managed.Server())
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{}))
+
+	tools := h.ListTools()
+	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "calc")
+
+	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		"typescript_cell_source": "calc.calc.add(2, 3)",
+	})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+	text := resultText(t, result)
+	assertTextContains(t, text, "=> 5")
 }
 
 func resultText(t testing.TB, result *mcp.CallToolResult) string {

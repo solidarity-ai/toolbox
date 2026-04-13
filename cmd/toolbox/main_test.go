@@ -902,11 +902,17 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools(): %v", err)
 	}
-	if len(tools.Tools) != 3 {
-		t.Fatalf("len(tools) = %d, want 3", len(tools.Tools))
+	if len(tools.Tools) != 5 {
+		t.Fatalf("len(tools) = %d, want 5", len(tools.Tools))
 	}
 	if !hasToolNamed(tools.Tools, "calc.add") {
 		t.Fatalf("tools = %#v, want calc.add", tools.Tools)
+	}
+	if !hasToolNamed(tools.Tools, "toolbox.search") {
+		t.Fatalf("tools = %#v, want toolbox.search", tools.Tools)
+	}
+	if !hasToolNamed(tools.Tools, "toolbox.inspect") {
+		t.Fatalf("tools = %#v, want toolbox.inspect", tools.Tools)
 	}
 
 	callReq := mcp.CallToolRequest{}

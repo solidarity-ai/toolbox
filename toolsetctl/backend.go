@@ -8,7 +8,8 @@ import (
 )
 
 // PreparedToolConsumer accepts effective prepared-tool snapshots pushed by a
-// backend as its active tool surface changes over time.
+// backend as its active tool surface changes over time, for example to update
+// a running MCP server or codemode session.
 type PreparedToolConsumer interface {
 	SetPreparedTools(toolset.PreparedToolset)
 }

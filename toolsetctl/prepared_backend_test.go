@@ -74,6 +74,33 @@ func TestPreparedBackendPreparedIncludesPackageDiscoveryToolsWhenEnabled(t *test
 	}
 }
 
+func TestPreparedBackendPreparedIncludesToolsetManagementToolsWhenEnabled(t *testing.T) {
+	base := toolset.NewPreparedToolset([]assembler.LoadedTool{
+		{Name: "calc.add", PackageMeta: &tooldef.Package{Name: "calc"}},
+	})
+	backend := toolsetctl.NewPreparedBackend(base, nil)
+	backend.SetEnableToolsForToolsetManagement(true)
+
+	got, err := backend.Prepared(context.Background())
+	if err != nil {
+		t.Fatalf("Prepared() error: %v", err)
+	}
+
+	var names []string
+	for _, tool := range got.Tools() {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "toolbox.install") {
+		t.Fatalf("Prepared() tools = %v, want toolbox.install", names)
+	}
+	if !slices.Contains(names, "toolbox.uninstall") {
+		t.Fatalf("Prepared() tools = %v, want toolbox.uninstall", names)
+	}
+	if !slices.Contains(names, "toolbox.auth") {
+		t.Fatalf("Prepared() tools = %v, want toolbox.auth", names)
+	}
+}
+
 func TestPreparedBackendSetPreparedReplacesStoredSnapshot(t *testing.T) {
 	backend := toolsetctl.NewPreparedBackend(toolset.PreparedToolset{}, nil)
 	next := toolset.NewPreparedToolset([]assembler.LoadedTool{
@@ -126,12 +153,20 @@ func TestPreparedBackendPushesPreparedToolsToConsumer(t *testing.T) {
 		t.Fatalf("consumer tools = %v, want toolbox.search", consumer.toolNames())
 	}
 
+	backend.SetEnableToolsForToolsetManagement(true)
+	if consumer.callCount != 3 {
+		t.Fatalf("consumer call count = %d, want 3 after enabling management", consumer.callCount)
+	}
+	if !slices.Contains(consumer.toolNames(), "toolbox.install") {
+		t.Fatalf("consumer tools = %v, want toolbox.install", consumer.toolNames())
+	}
+
 	next := toolset.NewPreparedToolset([]assembler.LoadedTool{
 		{Name: "calc.sub", PackageMeta: &tooldef.Package{Name: "calc"}},
 	})
 	backend.SetPrepared(next)
-	if consumer.callCount != 3 {
-		t.Fatalf("consumer call count = %d, want 3 after SetPrepared", consumer.callCount)
+	if consumer.callCount != 4 {
+		t.Fatalf("consumer call count = %d, want 4 after SetPrepared", consumer.callCount)
 	}
 	if !slices.Contains(consumer.toolNames(), "calc.sub") {
 		t.Fatalf("consumer tools = %v, want calc.sub", consumer.toolNames())

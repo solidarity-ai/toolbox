@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
-	"github.com/dop251/goja"
-	repl "github.com/solidarity-ai/repl"
-	storemem "github.com/solidarity-ai/repl/store/mem"
-	replsqlite "github.com/solidarity-ai/repl/store/sqlite"
+	repl "github.com/mackross/repljs"
+	storemem "github.com/mackross/repljs/store/mem"
+	replsqlite "github.com/mackross/repljs/store/sqlite"
 	"github.com/solidarity-ai/toolbox/codemodesdks"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -33,10 +33,31 @@ type storeCloser interface {
 	Close() error
 }
 
-type submissionFrame struct {
-	original             string
-	submitted            string
-	wrappedObjectLiteral bool
+type preparedState struct {
+	mu       sync.RWMutex
+	prepared toolset.PreparedToolset
+}
+
+func newPreparedState(prepared toolset.PreparedToolset) *preparedState {
+	return &preparedState{prepared: prepared}
+}
+
+func (s *preparedState) Get() toolset.PreparedToolset {
+	if s == nil {
+		return toolset.PreparedToolset{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.prepared
+}
+
+func (s *preparedState) Set(prepared toolset.PreparedToolset) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prepared = prepared
 }
 
 // SessionConfig controls codemode session startup behavior.
@@ -52,7 +73,11 @@ type Session struct {
 	storeCloser storeCloser
 	id          repl.SessionID
 	resumed     bool
-	prepared    toolset.PreparedToolset
+	prepared    *preparedState
+	applied     toolset.PreparedToolset
+	submitting  atomic.Bool
+	preparedSeq atomic.Uint64
+	appliedSeq  uint64
 }
 
 // OpenSQLite opens or resumes a persistent TypeScript session backed by SQLite.
@@ -74,18 +99,25 @@ func OpenSQLite(ctx context.Context, sqlitePath, currentDir string, cfgs ...Sess
 	}
 
 	cfg := firstConfig(cfgs)
-	deps := sessionDeps(currentDir, st, func() toolset.PreparedToolset { return cfg.PreparedTools })
+	prepared := newPreparedState(cfg.PreparedTools)
+	deps := sessionDeps(currentDir, st, prepared.Get)
 	sess, resumed, err := openOrStartSQLiteSession(ctx, st, deps)
 	if err != nil {
 		_ = st.Close()
 		return nil, err
+	}
+	if err := transitionSessionPreparedTools(ctx, sess, prepared.Get()); err != nil {
+		_ = sess.Close()
+		_ = st.Close()
+		return nil, fmt.Errorf("apply prepared tools: %w", err)
 	}
 	return &Session{
 		session:     sess,
 		storeCloser: st,
 		id:          sess.ID(),
 		resumed:     resumed,
-		prepared:    cfg.PreparedTools,
+		prepared:    prepared,
+		applied:     prepared.Get(),
 	}, nil
 }
 
@@ -93,9 +125,10 @@ func OpenSQLite(ctx context.Context, sqlitePath, currentDir string, cfgs ...Sess
 func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (*Session, error) {
 	st := storemem.New()
 	cfg := firstConfig(cfgs)
+	prepared := newPreparedState(cfg.PreparedTools)
 	sess, err := repl.New().StartSession(ctx, repl.SessionConfig{
 		Manifest: repl.Manifest{ID: manifestID},
-	}, sessionDeps(currentDir, st, func() toolset.PreparedToolset { return cfg.PreparedTools }))
+	}, sessionDeps(currentDir, st, prepared.Get))
 	if err != nil {
 		return nil, fmt.Errorf("start session: %w", err)
 	}
@@ -103,7 +136,8 @@ func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (
 	return &Session{
 		session:  sess,
 		id:       sess.ID(),
-		prepared: cfg.PreparedTools,
+		prepared: prepared,
+		applied:  prepared.Get(),
 	}, nil
 }
 
@@ -124,6 +158,17 @@ func sessionDeps(currentDir string, st repl.Store, prepared func() toolset.Prepa
 			return typeScriptEnv(currentDir, prepared()), nil
 		},
 	}
+}
+
+func transitionSessionPreparedTools(ctx context.Context, sess repl.Session, prepared toolset.PreparedToolset) error {
+	if sess == nil {
+		return nil
+	}
+	state, err := runtimeStateJSON(prepared)
+	if err != nil {
+		return err
+	}
+	return sess.TransitionToState(ctx, state)
 }
 
 func openOrStartSQLiteSession(ctx context.Context, st *replsqlite.Store, deps repl.SessionDeps) (repl.Session, bool, error) {
@@ -169,9 +214,25 @@ func (s *Session) SetPreparedTools(prepared toolset.PreparedToolset) {
 	if s == nil {
 		return
 	}
+	if s.submitting.Load() {
+		if s.prepared == nil {
+			s.mu.Lock()
+			if s.prepared == nil {
+				s.prepared = newPreparedState(prepared)
+			}
+			s.mu.Unlock()
+		}
+		if s.prepared != nil {
+			s.prepared.Set(prepared)
+		}
+		s.preparedSeq.Add(1)
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prepared = prepared
+	s.setPreparedLocked(prepared)
+	s.applyPendingPreparedToolsLocked()
 }
 
 // Instructions describes how to interact with the codemode session.
@@ -179,7 +240,9 @@ func (s *Session) Instructions() string {
 	var prepared toolset.PreparedToolset
 	if s != nil {
 		s.mu.Lock()
-		prepared = s.prepared
+		if s.prepared != nil {
+			prepared = s.prepared.Get()
+		}
 		s.mu.Unlock()
 	}
 
@@ -350,19 +413,48 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 	if s.session == nil {
 		return formatSubmitError(repl.SubmitResult{}, errors.New("session closed"))
 	}
-
-	frame := newSubmissionFrame(tsSource)
+	s.submitting.Store(true)
+	defer s.submitting.Store(false)
 
 	res, err := s.session.SubmitCell(ctx, repl.SubmitInput{
-		Source:   frame.submitted,
+		Source:   tsSource,
 		Language: repl.CellLanguageTypeScript,
 	})
-	res = frame.translateSubmitResult(res)
+	s.applyPendingPreparedToolsLocked()
 	if err != nil {
-		err = frame.translateSubmitError(err)
 		return formatSubmitError(res, err)
 	}
 	return formatSubmitResult(ctx, s.session, res)
+}
+
+func (s *Session) setPreparedLocked(prepared toolset.PreparedToolset) {
+	if s == nil {
+		return
+	}
+	if s.prepared == nil {
+		s.prepared = newPreparedState(prepared)
+	} else {
+		s.prepared.Set(prepared)
+	}
+	s.preparedSeq.Add(1)
+}
+
+func (s *Session) applyPendingPreparedToolsLocked() {
+	if s == nil || s.session == nil || s.prepared == nil {
+		return
+	}
+	desiredSeq := s.preparedSeq.Load()
+	if desiredSeq == s.appliedSeq {
+		return
+	}
+
+	desired := s.prepared.Get()
+	if err := transitionSessionPreparedTools(context.Background(), s.session, desired); err != nil {
+		s.prepared.Set(s.applied)
+		return
+	}
+	s.applied = desired
+	s.appliedSeq = desiredSeq
 }
 
 // Close releases the session and any owned storage.
@@ -384,61 +476,6 @@ func (s *Session) Close() error {
 		s.storeCloser = nil
 	}
 	return errors.Join(errs...)
-}
-
-func rewriteTopLevelObjectLiteral(trimmed string) (string, bool) {
-	if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
-		return "", false
-	}
-	wrapped := "(" + trimmed + ")"
-	if _, err := goja.Parse("cell.ts", wrapped); err != nil {
-		return "", false
-	}
-	return wrapped, true
-}
-
-func newSubmissionFrame(tsSource string) submissionFrame {
-	frame := submissionFrame{
-		original:  tsSource,
-		submitted: tsSource,
-	}
-	if rewritten, ok := rewriteTopLevelObjectLiteral(strings.TrimSpace(tsSource)); ok {
-		frame.submitted = rewritten
-		frame.wrappedObjectLiteral = true
-	}
-	return frame
-}
-
-func (f submissionFrame) translateSubmitResult(res repl.SubmitResult) repl.SubmitResult {
-	if !f.wrappedObjectLiteral || len(res.Diagnostics) == 0 {
-		return res
-	}
-	res.Diagnostics = translateDiagnosticsToOriginalSource(res.Diagnostics)
-	return res
-}
-
-func (f submissionFrame) translateSubmitError(err error) error {
-	if !f.wrappedObjectLiteral || err == nil {
-		return err
-	}
-	var checkErr *repl.SubmitCheckFailure
-	if !errors.As(err, &checkErr) {
-		return err
-	}
-	copyErr := *checkErr
-	copyErr.Diagnostics = translateDiagnosticsToOriginalSource(checkErr.Diagnostics)
-	return &copyErr
-}
-
-func translateDiagnosticsToOriginalSource(in []repl.Diagnostic) []repl.Diagnostic {
-	out := make([]repl.Diagnostic, len(in))
-	copy(out, in)
-	for i := range out {
-		if out[i].Line == 1 && out[i].Column > 1 {
-			out[i].Column--
-		}
-	}
-	return out
 }
 
 func formatSubmitResult(ctx context.Context, sess repl.Session, res repl.SubmitResult) string {

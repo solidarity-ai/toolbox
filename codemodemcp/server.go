@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/codemodesession"
+	"github.com/solidarity-ai/toolbox/toolset"
 )
 
 const (
@@ -41,6 +42,70 @@ func NewNamed(name string, cfgs ...codemodesession.SessionConfig) *server.MCPSer
 	mcpServer.AddTool(newSuperTool(instructions), runner.handleSuperTool)
 
 	return mcpServer
+}
+
+type ManagedServer struct {
+	server  *server.MCPServer
+	session *codemodesession.Session
+}
+
+func OpenManagedNamed(ctx context.Context, name, currentDir string) (*ManagedServer, error) {
+	if strings.TrimSpace(currentDir) == "" {
+		currentDir = currentWorkingDir()
+	}
+	if strings.TrimSpace(name) == "" {
+		name = defaultServerName
+	}
+
+	session, err := codemodesession.OpenMemory(ctx, currentDir)
+	if err != nil {
+		return nil, err
+	}
+
+	mcpServer := server.NewMCPServer(
+		name,
+		"0.1.0",
+		server.WithToolCapabilities(true),
+	)
+	managed := &ManagedServer{
+		server:  mcpServer,
+		session: session,
+	}
+	managed.SetPreparedTools(toolset.PreparedToolset{})
+	return managed, nil
+}
+
+func (s *ManagedServer) Server() *server.MCPServer {
+	if s == nil {
+		return nil
+	}
+	return s.server
+}
+
+func (s *ManagedServer) Close() error {
+	if s == nil || s.session == nil {
+		return nil
+	}
+	return s.session.Close()
+}
+
+func (s *ManagedServer) SetPreparedTools(prepared toolset.PreparedToolset) {
+	if s == nil || s.server == nil || s.session == nil {
+		return
+	}
+	s.session.SetPreparedTools(prepared)
+	s.server.SetTools(server.ServerTool{
+		Tool:    newSuperTool(s.session.Instructions()),
+		Handler: s.handleSuperTool,
+	})
+}
+
+func (s *ManagedServer) handleSuperTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	code, err := request.RequireString(codemodesession.TypeScriptCellSourceParam)
+	if err != nil {
+		return nil, err
+	}
+	return mcp.NewToolResultText(s.session.Submit(ctx, code)), nil
 }
 
 func newSuperTool(instructions string) mcp.Tool {

@@ -28,18 +28,14 @@ func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 
 	ctx := context.Background()
-	prepared, err := loadPreparedToolset(ctx, cmd.Toolset)
-	if err != nil {
-		return err
-	}
-
-	session, err := codemodesession.OpenSQLite(ctx, sqlitePath, cwd, codemodesession.SessionConfig{
-		PreparedTools: prepared,
-	})
+	session, err := codemodesession.OpenSQLite(ctx, sqlitePath, cwd, codemodesession.SessionConfig{})
 	if err != nil {
 		return err
 	}
 	defer session.Close()
+	if _, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, session); err != nil {
+		return err
+	}
 
 	fmt.Fprintln(stdout, "toolbox repl started")
 	fmt.Fprintf(stdout, "session=%s sqlite=%s resumed=%t language=ts\n", session.ID(), sqlitePath, session.Resumed())

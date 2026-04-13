@@ -46,6 +46,36 @@ func TestMCPServerCustomName(t *testing.T) {
 	}
 }
 
+func TestManagedMCPServerUpdatesToolsAtRuntime(t *testing.T) {
+	managed := mcpserver.NewManagedNamed("example")
+	h := mcptest.NewHarness(t, managed.Server())
+
+	if got := len(h.ListTools().Tools); got != 0 {
+		t.Fatalf("initial tool count = %d, want 0", got)
+	}
+
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{}))
+
+	names := h.ToolNames()
+	assertContains(t, names, "calc.add")
+	assertContains(t, names, "calc.asyncAdd")
+
+	result := h.CallTool("calc.add", map[string]any{
+		"a": 2,
+		"b": 3,
+	})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+	text, ok := mcp.AsTextContent(result.Content[0])
+	if !ok {
+		t.Fatalf("expected text content, got %#v", result.Content[0])
+	}
+	if text.Text != "5" {
+		t.Fatalf("result text = %q, want 5", text.Text)
+	}
+}
+
 func TestMCPServerExposesResolvedParamSchema(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 	tools := h.ListTools()

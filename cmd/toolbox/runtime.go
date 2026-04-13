@@ -21,6 +21,10 @@ const (
 )
 
 func newCredentialPolicySource() toolset.PackageCredentialPolicySource {
+	return newCredentialRepository()
+}
+
+func newCredentialRepository() *credentialrepo.Repository {
 	return credentialrepo.New(secrets.NewLocalSecretStore("", ""))
 }
 

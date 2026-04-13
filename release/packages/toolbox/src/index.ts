@@ -20,6 +20,55 @@ interface ToolInvokeResult {
   content: unknown;
 }
 
+interface ToolsetUpdateResult {
+  tools: ToolDescriptor[];
+}
+
+export interface ToolsetSearchInput {
+  query: string;
+  tools?: boolean;
+  packages?: boolean;
+  runtime?: string;
+  effect?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ToolsetSearchResult {
+  packages?: JsonObject[];
+  tools?: JsonObject[];
+}
+
+export interface ToolsetInspectInput {
+  target: string;
+}
+
+export interface ToolsetInspectResult {
+  target?: string;
+  version?: string;
+  source: string;
+  package: JsonObject;
+}
+
+export interface ToolsetInstallInput {
+  package: string;
+}
+
+export interface ToolsetUninstallInput {
+  target: string;
+}
+
+export interface ToolsetAuthInput {
+  target: string;
+  account?: string;
+  credential?: string;
+  check?: boolean;
+  deleteCredential?: boolean;
+  renameAccountFrom?: string;
+  renameAccountTo?: string;
+  deleteAccount?: string;
+}
+
 interface SystemVersionResult {
   version: string;
 }
@@ -73,6 +122,52 @@ export class ToolsetHandle {
     this.#client = client;
     this.id = id;
     this.tools = descriptors.map((descriptor) => new Tool(client, id, descriptor));
+  }
+
+  #replaceTools(descriptors: ToolDescriptor[]): void {
+    const next = descriptors.map((descriptor) => new Tool(this.#client, this.id, descriptor));
+    this.tools.splice(0, this.tools.length, ...next);
+  }
+
+  async search(input: ToolsetSearchInput): Promise<ToolsetSearchResult> {
+    return this.#client.request<ToolsetSearchResult>("toolset.search", {
+      toolset_id: this.id,
+      ...input,
+    });
+  }
+
+  async inspect(input: ToolsetInspectInput): Promise<ToolsetInspectResult> {
+    return this.#client.request<ToolsetInspectResult>("toolset.inspect", {
+      toolset_id: this.id,
+      ...input,
+    });
+  }
+
+  async install(input: ToolsetInstallInput): Promise<Tool[]> {
+    const result = await this.#client.request<ToolsetUpdateResult>("toolset.install", {
+      toolset_id: this.id,
+      ...input,
+    });
+    this.#replaceTools(result.tools);
+    return this.tools;
+  }
+
+  async uninstall(input: ToolsetUninstallInput): Promise<Tool[]> {
+    const result = await this.#client.request<ToolsetUpdateResult>("toolset.uninstall", {
+      toolset_id: this.id,
+      ...input,
+    });
+    this.#replaceTools(result.tools);
+    return this.tools;
+  }
+
+  async auth(input: ToolsetAuthInput): Promise<Tool[]> {
+    const result = await this.#client.request<ToolsetUpdateResult>("toolset.auth", {
+      toolset_id: this.id,
+      ...input,
+    });
+    this.#replaceTools(result.tools);
+    return this.tools;
   }
 
   async close(): Promise<void> {

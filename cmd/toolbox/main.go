@@ -68,11 +68,13 @@ type outdatedCmd struct {
 
 type replCmd struct {
 	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to load for session instructions."`
+	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
 	File    string `name:"file" short:"f" default:".toolbox-session" type:"path" help:"SQLite session database path."`
 }
 
 type mcpCmd struct {
 	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to serve."`
+	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
 }
 
 type codemodeCmd struct {

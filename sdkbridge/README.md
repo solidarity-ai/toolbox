@@ -8,6 +8,8 @@ It owns:
 - NDJSON-framed JSON-RPC 2.0 over stdio
 - `toolsetfile.load` / `toolsetfile.write`
 - `toolset.compose` / `toolset.close`
+- `toolset.search` / `toolset.inspect`
+- `toolset.install` / `toolset.uninstall` / `toolset.auth`
 - `tool.invoke`
 - bridge lifecycle helpers like `system.version` and `bridge.shutdown`
 

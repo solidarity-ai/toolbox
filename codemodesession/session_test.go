@@ -69,7 +69,7 @@ func TestPackageMetadataExposesUseWhenHint(t *testing.T) {
 func TestSubmitCanCallPreparedToolPackages(t *testing.T) {
 	ctx := context.Background()
 	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
-		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}),
+		PreparedTools: prepareCalcToolset(t),
 	})
 	if err != nil {
 		t.Fatalf("OpenMemory() error: %v", err)
@@ -79,6 +79,153 @@ func TestSubmitCanCallPreparedToolPackages(t *testing.T) {
 	out := session.Submit(ctx, `calc.calc.add(2, 3)`)
 	assertContains(t, out, "cell 1")
 	assertContains(t, out, "=> 5")
+}
+
+func TestSubmitDoesNotExposeRuntimeHashToken(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	out := session.Submit(ctx, `(globalThis as any).__toolboxCurrentRuntimeHash === undefined && calc.calc.add(2, 3) === 5`)
+	assertContains(t, out, "=> true")
+}
+
+func TestSetPreparedTools_AddsBindingsBeforeFirstSubmit(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	session.SetPreparedTools(prepareCalcToolset(t))
+	out := session.Submit(ctx, `calc.calc.add(2, 3)`)
+	assertContains(t, out, "=> 5")
+}
+
+func TestSetPreparedTools_RemovesBindingsAfterCommittedCells(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertContains(t, session.Submit(ctx, `calc.calc.add`), "cell 1")
+	assertContains(t, session.Submit(ctx, `"alpha"`), "alpha")
+
+	session.SetPreparedTools(toolset.PreparedToolset{})
+
+	failed := session.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, failed, "failure:")
+	assertContains(t, failed, "tool calc.add came from a previous runtime and is no longer callable")
+
+	out := session.Submit(ctx, `$val(2) === "alpha" && ((globalThis as any).calc === undefined) && ($pkgMetadata["calc"] === undefined)`)
+	assertContains(t, out, "=> true")
+
+	gone := session.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, gone, "failure:")
+	assertContains(t, gone, "tool calc.add came from a previous runtime and is no longer callable")
+}
+
+func TestSetPreparedTools_WrappersDoNotExposeInternalMetadata(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertContains(t, session.Submit(ctx, `calc.calc.add`), "cell 1")
+
+	initial := session.Submit(ctx, `!Object.prototype.hasOwnProperty.call($val(1), "__replRuntimeHash") && !Object.prototype.hasOwnProperty.call($val(1), "__replStaleIndexedMessage")`)
+	assertContains(t, initial, "=> true")
+
+	session.SetPreparedTools(toolset.PreparedToolset{})
+
+	stale := session.Submit(ctx, `!Object.prototype.hasOwnProperty.call($val(1), "__replStaleIndexedMessage")`)
+	assertContains(t, stale, "=> true")
+}
+
+func TestSetPreparedTools_LastTransitionWinsAtSameHead(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	session.SetPreparedTools(prepareCalcToolset(t))
+	session.SetPreparedTools(toolset.PreparedToolset{})
+	session.SetPreparedTools(prepareCalcToolset(t))
+
+	out := session.Submit(ctx, `calc.calc.add(2, 3)`)
+	assertContains(t, out, "=> 5")
+}
+
+func TestSetPreparedTools_SavedWrapperRejectedAfterRuntimeChangeEvenWhenToolStillExists(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertContains(t, session.Submit(ctx, `calc.calc.add`), "cell 1")
+
+	session.SetPreparedTools(prepareCalcAndEdgeCasesToolset(t))
+
+	staleLast := session.Submit(ctx, `($last as any)(2, 3)`)
+	assertContains(t, staleLast, "failure:")
+	assertContains(t, staleLast, "tool calc.add came from a previous runtime and is no longer callable")
+
+	stale := session.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, stale, "failure:")
+	assertContains(t, stale, "tool calc.add came from a previous runtime and is no longer callable")
+
+	fresh := session.Submit(ctx, `calc.calc.add(2, 3)`)
+	assertContains(t, fresh, "=> 5")
+}
+
+func TestSetPreparedTools_RebuildsDirtyRuntimeBeforeTransition(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertContains(t, session.Submit(ctx, `calc.calc.add`), "cell 1")
+	assertContains(t, session.Submit(ctx, `"alpha"`), "alpha")
+
+	failed := session.Submit(ctx, `globalThis.leaked = 1; throw new Error("boom")`)
+	assertContains(t, failed, "failure:")
+
+	session.SetPreparedTools(toolset.PreparedToolset{})
+
+	removed := session.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, removed, "failure:")
+	assertContains(t, removed, "tool calc.add came from a previous runtime and is no longer callable")
+
+	out := session.Submit(ctx, `((globalThis as any).leaked === undefined) && $val(2) === "alpha" && ((globalThis as any).calc === undefined) && ($pkgMetadata["calc"] === undefined)`)
+	assertContains(t, out, "=> true")
+
+	gone := session.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, gone, "failure:")
+	assertContains(t, gone, "tool calc.add came from a previous runtime and is no longer callable")
 }
 
 func TestSubmitRendersTypeScriptDiagnostics(t *testing.T) {
@@ -176,7 +323,7 @@ func TestOpenSQLiteReopensToolCellsWithoutPreparedTools(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "codemode-tools.toolbox-session")
 
 	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
-		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{}),
+		PreparedTools: prepareCalcToolset(t),
 	})
 	if err != nil {
 		t.Fatalf("OpenSQLite(first) error: %v", err)
@@ -197,6 +344,102 @@ func TestOpenSQLiteReopensToolCellsWithoutPreparedTools(t *testing.T) {
 	out := second.Submit(ctx, `const ok: number = 1; ok`)
 	assertContains(t, out, "warn: TypeScript static context was reset because the TypeScript env changed.")
 	assertContains(t, out, "=> 1")
+}
+
+func TestOpenSQLiteResumesWithCurrentPreparedToolsBeforeFirstSubmit(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "codemode-live-tools.toolbox-session")
+
+	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
+	if err != nil {
+		t.Fatalf("OpenSQLite(first) error: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error: %v", err)
+	}
+
+	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenSQLite(second) error: %v", err)
+	}
+	defer second.Close()
+
+	if !second.Resumed() {
+		t.Fatal("second session resumed = false, want true")
+	}
+	out := second.Submit(ctx, `calc.calc.add(2, 3)`)
+	assertContains(t, out, "=> 5")
+}
+
+func TestOpenSQLiteResumesCommittedValuesAndAddsCurrentPreparedTools(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "codemode-live-tools-with-history.toolbox-session")
+
+	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
+	if err != nil {
+		t.Fatalf("OpenSQLite(first) error: %v", err)
+	}
+	assertContains(t, first.Submit(ctx, `"alpha"`), "alpha")
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error: %v", err)
+	}
+
+	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenSQLite(second) error: %v", err)
+	}
+	defer second.Close()
+
+	if !second.Resumed() {
+		t.Fatal("second session resumed = false, want true")
+	}
+	out := second.Submit(ctx, `$val(1) === "alpha" && calc.calc.add(2, 3) === 5`)
+	assertContains(t, out, "warn: TypeScript static context was reset because the TypeScript env changed.")
+	assertContains(t, out, "=> true")
+}
+
+func TestOpenSQLiteResumesWithCurrentPreparedToolsAfterCommittedCells(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "codemode-remove-tools.toolbox-session")
+
+	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepareCalcToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenSQLite(first) error: %v", err)
+	}
+	assertContains(t, first.Submit(ctx, `calc.calc.add`), "cell 1")
+	assertContains(t, first.Submit(ctx, `"alpha"`), "alpha")
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error: %v", err)
+	}
+
+	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
+	if err != nil {
+		t.Fatalf("OpenSQLite(second) error: %v", err)
+	}
+	defer second.Close()
+
+	if !second.Resumed() {
+		t.Fatal("second session resumed = false, want true")
+	}
+	failed := second.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, failed, "failure:")
+	assertContains(t, failed, "tool calc.add came from a previous runtime and is no longer callable")
+
+	out := second.Submit(ctx, `$val(2) === "alpha" && ((globalThis as any).calc === undefined) && ($pkgMetadata["calc"] === undefined)`)
+	assertContains(t, out, "=> true")
+
+	gone := second.Submit(ctx, `($val(1) as any)(2, 3)`)
+	assertContains(t, gone, "failure:")
+	assertContains(t, gone, "tool calc.add came from a previous runtime and is no longer callable")
 }
 
 func TestInstructionsDescribeSessionUsage(t *testing.T) {
@@ -235,6 +478,16 @@ func TestInstructionsDescribeSessionUsage(t *testing.T) {
 
 func newPreparedTool(name, packageName string) assembler.LoadedTool {
 	return newPreparedToolWithUseWhenHint(name, packageName, "")
+}
+
+func prepareCalcToolset(t testing.TB) toolset.PreparedToolset {
+	t.Helper()
+	return tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{})
+}
+
+func prepareCalcAndEdgeCasesToolset(t testing.TB) toolset.PreparedToolset {
+	t.Helper()
+	return tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc", "edge-cases"), toolset.Config{})
 }
 
 func newPreparedToolWithUseWhenHint(name, packageName, useWhenHint string) assembler.LoadedTool {

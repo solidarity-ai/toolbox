@@ -20,23 +20,55 @@ func New(prepared toolset.PreparedToolset) *server.MCPServer {
 
 // NewNamed creates an MCP server that exposes one MCP tool per visible invoke tool.
 func NewNamed(name string, prepared toolset.PreparedToolset) *server.MCPServer {
+	mcpServer := newServer(name)
+	mcpServer.SetTools(serverToolsFromPrepared(prepared)...)
+	return mcpServer
+}
+
+type ManagedServer struct {
+	server *server.MCPServer
+}
+
+func NewManagedNamed(name string) *ManagedServer {
+	return &ManagedServer{server: newServer(name)}
+}
+
+func (s *ManagedServer) Server() *server.MCPServer {
+	if s == nil {
+		return nil
+	}
+	return s.server
+}
+
+func (s *ManagedServer) SetPreparedTools(prepared toolset.PreparedToolset) {
+	if s == nil || s.server == nil {
+		return
+	}
+	s.server.SetTools(serverToolsFromPrepared(prepared)...)
+}
+
+func newServer(name string) *server.MCPServer {
 	if strings.TrimSpace(name) == "" {
 		name = defaultServerName
 	}
 
-	mcpServer := server.NewMCPServer(
+	return server.NewMCPServer(
 		name,
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
+}
 
+func serverToolsFromPrepared(prepared toolset.PreparedToolset) []server.ServerTool {
 	view := prepared.AgentView()
+	tools := make([]server.ServerTool, 0, len(view.Tools))
 	for _, at := range view.Tools {
-		mcpTool := newMCPTool(at)
-		mcpServer.AddTool(mcpTool, handleToolCall(prepared, at.Name))
+		tools = append(tools, server.ServerTool{
+			Tool:    newMCPTool(at),
+			Handler: handleToolCall(prepared, at.Name),
+		})
 	}
-
-	return mcpServer
+	return tools
 }
 
 func newMCPTool(at toolset.AgentTool) mcp.Tool {

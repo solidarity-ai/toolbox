@@ -4,37 +4,45 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
 	mcpgoserver "github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/codemodemcp"
-	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/mcpserver"
 	"github.com/solidarity-ai/toolbox/sdkbridge"
+	"github.com/solidarity-ai/toolbox/toolsetctl"
 )
 
 func runMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
-	prepared, err := loadPreparedToolset(context.Background(), cmd.Toolset)
-	if err != nil {
+	managed := mcpserver.NewManagedNamed(mcpServerNameForToolsetPath(cmd.Toolset))
+	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, managed); err != nil {
 		return err
 	}
 
-	stdioServer := mcpgoserver.NewStdioServer(mcpserver.NewNamed(mcpServerNameForToolsetPath(cmd.Toolset), prepared))
+	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
 
 func runCodemodeMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
-	prepared, err := loadPreparedToolset(context.Background(), cmd.Toolset)
+	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	stdioServer := mcpgoserver.NewStdioServer(codemodemcp.NewNamed(
-		mcpServerNameForToolsetPath(cmd.Toolset),
-		codemodesession.SessionConfig{PreparedTools: prepared},
-	))
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), mcpServerNameForToolsetPath(cmd.Toolset), cwd)
+	if err != nil {
+		return err
+	}
+	defer managed.Close()
+
+	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, managed); err != nil {
+		return err
+	}
+
+	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
@@ -60,10 +68,13 @@ func runSDKBridgeServeStdio(stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	repo := newCredentialRepository()
 
 	bridge := sdkbridge.New(sdkbridge.Options{
 		Resolver:               resolver,
-		CredentialPolicySource: newCredentialPolicySource(),
+		CredentialPolicySource: repo,
+		CredentialRepository:   repo,
+		SearchClientFactory:    func() (toolsetctl.SearchClient, error) { return newToolRegistrySearchClient() },
 	})
 	return bridge.ServeStdio(context.Background(), stdin, stdout)
 }

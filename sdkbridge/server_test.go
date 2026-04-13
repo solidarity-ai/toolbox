@@ -238,6 +238,34 @@ func TestBridgeComposeDirectFromFileAndInvoke(t *testing.T) {
 	}
 }
 
+func TestBridgeComposeDirectFromFileIncludesBuiltinManagementToolsWhenEnabled(t *testing.T) {
+	path := writeLocalToolsetFileWithToolsetManagement(t, "calc")
+	bridge := New(Options{})
+
+	result, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
+		Mode:        ComposeModeDirect,
+		ToolsetFile: path,
+	}))
+	if err != nil {
+		t.Fatalf("toolset.compose: %v", err)
+	}
+
+	composed := result.(ComposeResult)
+	var names []string
+	for _, tool := range composed.Tools {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "calc.add") {
+		t.Fatalf("compose tools = %#v, want calc.add", names)
+	}
+	if !slices.Contains(names, "toolbox.search") {
+		t.Fatalf("compose tools = %#v, want toolbox.search", names)
+	}
+	if !slices.Contains(names, "toolbox.install") {
+		t.Fatalf("compose tools = %#v, want toolbox.install", names)
+	}
+}
+
 func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	path := writeLocalToolsetFile(t, "calc")
 	bridge := New(Options{})
@@ -318,6 +346,140 @@ func TestBridgeComposeInlineToolset(t *testing.T) {
 	if composed.ToolsetID == "" || len(composed.Tools) == 0 {
 		t.Fatalf("compose result = %#v, want non-empty toolset_id and tools", composed)
 	}
+
+	var names []string
+	for _, tool := range composed.Tools {
+		names = append(names, tool.Name)
+	}
+	if !slices.Contains(names, "calc.add") {
+		t.Fatalf("compose tools = %#v, want calc.add", names)
+	}
+	if !slices.Contains(names, "toolbox.search") {
+		t.Fatalf("compose tools = %#v, want toolbox.search", names)
+	}
+	if !slices.Contains(names, "toolbox.inspect") {
+		t.Fatalf("compose tools = %#v, want toolbox.inspect", names)
+	}
+	if slices.Contains(names, "toolbox.install") {
+		t.Fatalf("compose tools = %#v, do not want toolbox.install", names)
+	}
+
+	inspectedAny, err := bridge.handleMethod(context.Background(), "toolset.inspect", mustJSON(t, ToolsetInspectParams{
+		ToolsetID: composed.ToolsetID,
+		Target:    "github.com/admin/stub",
+	}))
+	if err != nil {
+		t.Fatalf("toolset.inspect: %v", err)
+	}
+	inspected := inspectedAny.(ToolsetInspectResult)
+	if inspected.Source != "toolset" {
+		t.Fatalf("inspect source = %q, want %q", inspected.Source, "toolset")
+	}
+	if got := inspected.Package.Module.String(); got != "github.com/admin/stub" {
+		t.Fatalf("inspect package module = %q, want %q", got, "github.com/admin/stub")
+	}
+}
+
+func TestBridgeComposeInlineToolsetRejectsAgentToolsetManagement(t *testing.T) {
+	archiveBytes, manifestBytes := packSourceFixtureBytesWithModule(t, "calc", "github.com/admin/stub")
+
+	cache, err := registry.NewCache(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCache(): %v", err)
+	}
+	bridge := New(Options{
+		Resolver: registry.NewResolver(cache, stubSource{
+			archive:  archiveBytes,
+			manifest: manifestBytes,
+			metadata: registry.ResolveMetadata{
+				ArchiveSHA256: sha256Hex(archiveBytes),
+				GitSHA:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				ResolvedFrom:  registry.ResolvedFromGitHubRelease,
+				ResolvedAt:    "2026-04-10T12:00:00Z",
+			},
+		}),
+	})
+
+	_, err = bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, map[string]any{
+		"mode": "direct",
+		"toolset": map[string]any{
+			"packages": map[string]string{"github.com/admin/stub": "v1.0.0"},
+			"tools": []map[string]string{
+				{"tool": "github.com/admin/stub@v1.0.0/calc.add"},
+			},
+			"agent": map[string]any{
+				"unsafe": map[string]any{
+					"allow_toolset_management": true,
+				},
+			},
+		},
+	}))
+	if err == nil {
+		t.Fatal("inline toolset.compose error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "inline toolset compose does not support agent.unsafe.allow_toolset_management") {
+		t.Fatalf("inline toolset.compose error = %v, want unsupported inline management", err)
+	}
+}
+
+func TestBridgeInstallUpdatesFileEvenWhenAgentManagementToolsAreHidden(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc")
+	sharedTypesModule := fixtureModule(t, "shared-types")
+	dir := filepath.Dir(path)
+	if err := os.WriteFile(filepath.Join(dir, "toolbox.toolset.local.json"), mustJSON(t, map[string]any{
+		"replace": map[string]string{
+			fixtureModule(t, "calc"): loadSourceFixtureDir(t, "calc"),
+			sharedTypesModule:        loadSourceFixtureDir(t, "shared-types"),
+		},
+	}), 0o644); err != nil {
+		t.Fatalf("WriteFile(local): %v", err)
+	}
+
+	bridge := New(Options{})
+	composedAny, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
+		Mode:        ComposeModeDirect,
+		ToolsetFile: path,
+	}))
+	if err != nil {
+		t.Fatalf("toolset.compose: %v", err)
+	}
+	composed := composedAny.(ComposeResult)
+
+	var initialNames []string
+	for _, tool := range composed.Tools {
+		initialNames = append(initialNames, tool.Name)
+	}
+	if slices.Contains(initialNames, "toolbox.install") {
+		t.Fatalf("compose tools = %#v, do not want toolbox.install when agent management is disabled", initialNames)
+	}
+
+	updatedAny, err := bridge.handleMethod(context.Background(), "toolset.install", mustJSON(t, ToolsetInstallParams{
+		ToolsetID: composed.ToolsetID,
+		Package:   sharedTypesModule + "@v1.2.3",
+	}))
+	if err != nil {
+		t.Fatalf("toolset.install: %v", err)
+	}
+	updated := updatedAny.(ToolsetUpdateResult)
+
+	var updatedNames []string
+	for _, tool := range updated.Tools {
+		updatedNames = append(updatedNames, tool.Name)
+	}
+	if !slices.Contains(updatedNames, "tickets.list") {
+		t.Fatalf("updated tools = %#v, want tickets.list", updatedNames)
+	}
+	if !slices.Contains(updatedNames, "calc.add") {
+		t.Fatalf("updated tools = %#v, want calc.add", updatedNames)
+	}
+
+	written, err := toolsetfile.Load(path)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", path, err)
+	}
+	if got := written.Packages[sharedTypesModule]; got != "v1.2.3" {
+		t.Fatalf("written package version = %q, want %q", got, "v1.2.3")
+	}
 }
 
 func mustJSON(t *testing.T, value any) json.RawMessage {
@@ -330,6 +492,14 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 }
 
 func writeLocalToolsetFile(t *testing.T, fixtureName string) string {
+	return writeLocalToolsetFileForAgent(t, fixtureName, false)
+}
+
+func writeLocalToolsetFileWithToolsetManagement(t *testing.T, fixtureName string) string {
+	return writeLocalToolsetFileForAgent(t, fixtureName, true)
+}
+
+func writeLocalToolsetFileForAgent(t *testing.T, fixtureName string, allowToolsetManagement bool) string {
 	t.Helper()
 	dir := t.TempDir()
 	module := fixtureModule(t, fixtureName)
@@ -340,6 +510,12 @@ func writeLocalToolsetFile(t *testing.T, fixtureName string) string {
 		},
 		"tools": []map[string]string{
 			{"tool": module + "@v1.2.3/calc.add"},
+		},
+		"agent": map[string]any{
+			"allow_package_discovery": true,
+			"unsafe": map[string]any{
+				"allow_toolset_management": allowToolsetManagement,
+			},
 		},
 	}), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)

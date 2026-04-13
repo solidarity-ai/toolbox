@@ -260,6 +260,35 @@ func (f *ToolsetFile) PutPackageVersion(module tooldef.ModulePath, version toold
 	return f.validate()
 }
 
+// RemovePackage removes one declared package and drops any tool entries that
+// reference it, preserving the remaining tool order.
+func (f *ToolsetFile) RemovePackage(module tooldef.ModulePath) error {
+	if f == nil {
+		return fmt.Errorf("remove package: nil toolset file")
+	}
+	if f.Packages == nil {
+		return fmt.Errorf("remove package %s: no packages declared", module)
+	}
+
+	key := module.String()
+	if _, ok := f.Packages[key]; !ok {
+		return fmt.Errorf("remove package %s: module is not declared in packages", module)
+	}
+
+	delete(f.Packages, key)
+	if len(f.Tools) > 0 {
+		tools := f.Tools[:0]
+		for _, entry := range f.Tools {
+			if entry.parsed.Module == module {
+				continue
+			}
+			tools = append(tools, entry)
+		}
+		f.Tools = tools
+	}
+	return f.validate()
+}
+
 // Write validates the toolset contents and writes a stable JSON encoding while
 // preserving the declared tool order.
 func (f *ToolsetFile) Write(filename string) error {

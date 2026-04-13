@@ -3,7 +3,9 @@ package sdkbridge
 import (
 	"encoding/json"
 
+	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // ComposeMode selects which tool surface the bridge should expose for one
@@ -32,8 +34,62 @@ type ToolInvokeResult struct {
 	Content string `json:"content"`
 }
 
+type ToolsetUpdateResult struct {
+	Tools []ToolDescriptor `json:"tools"`
+}
+
 type ToolsetCloseParams struct {
 	ToolsetID string `json:"toolset_id"`
+}
+
+type ToolsetSearchParams struct {
+	ToolsetID string `json:"toolset_id"`
+	Query     string `json:"query"`
+	Tools     bool   `json:"tools,omitempty"`
+	Packages  bool   `json:"packages,omitempty"`
+	Runtime   string `json:"runtime,omitempty"`
+	Effect    string `json:"effect,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Offset    int    `json:"offset,omitempty"`
+}
+
+type ToolsetSearchResult struct {
+	Packages []registry.PackageSearchHit `json:"packages,omitempty"`
+	Tools    []registry.ToolSearchHit    `json:"tools,omitempty"`
+}
+
+type ToolsetInspectParams struct {
+	ToolsetID string `json:"toolset_id"`
+	Target    string `json:"target"`
+}
+
+type ToolsetInspectResult struct {
+	Target  string          `json:"target,omitempty"`
+	Version string          `json:"version,omitempty"`
+	Source  string          `json:"source"`
+	Package tooldef.Package `json:"package"`
+}
+
+type ToolsetInstallParams struct {
+	ToolsetID string `json:"toolset_id"`
+	Package   string `json:"package"`
+}
+
+type ToolsetUninstallParams struct {
+	ToolsetID string `json:"toolset_id"`
+	Target    string `json:"target"`
+}
+
+type ToolsetAuthParams struct {
+	ToolsetID          string `json:"toolset_id"`
+	Target             string `json:"target"`
+	Account            string `json:"account,omitempty"`
+	Credential         string `json:"credential,omitempty"`
+	Check              bool   `json:"check,omitempty"`
+	DeleteCredential   bool   `json:"deleteCredential,omitempty"`
+	RenameAccountFrom  string `json:"renameAccountFrom,omitempty"`
+	RenameAccountTo    string `json:"renameAccountTo,omitempty"`
+	DeleteAccount      string `json:"deleteAccount,omitempty"`
 }
 
 type ToolInvokeParams struct {

@@ -11,8 +11,9 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/microsoft/typescript-go/toolbox"
-	repl "github.com/solidarity-ai/repl"
-	"github.com/solidarity-ai/repl/jswire"
+	repl "github.com/mackross/repljs"
+	replengine "github.com/mackross/repljs/engine"
+	"github.com/mackross/repljs/jswire"
 	"github.com/solidarity-ai/toolbox/invoke"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -45,32 +46,50 @@ func newRuntimeDelegate(prepared func() toolset.PreparedToolset) repl.VMDelegate
 	return runtimeDelegate{prepared: prepared}
 }
 
-func (d runtimeDelegate) ConfigureRuntime(_ repl.SessionRuntimeContext, rt *goja.Runtime, host repl.HostFuncBuilder, state json.RawMessage) (json.RawMessage, error) {
+func (d runtimeDelegate) ConfigureRuntime(ctx repl.SessionRuntimeContext, rt *goja.Runtime, host repl.HostFuncBuilder, state json.RawMessage) (json.RawMessage, error) {
 	bindings, nextState, err := configureRuntimeBindings(d.prepared, state)
 	if err != nil {
 		return nil, err
 	}
-	if err := installRuntimeBindings(rt, host, bindings); err != nil {
+	if err := installRuntimeBindings(rt, host, bindings, ctx.IsCurrentRuntime); err != nil {
 		return nil, err
 	}
 	return nextState, nil
 }
 
+func (d runtimeDelegate) TransitionRuntime(ctx repl.RuntimeTransitionContext, rt *goja.Runtime, host repl.HostFuncBuilder, fromState, toState json.RawMessage) error {
+	fromDecoded, err := decodeRuntimeState(fromState)
+	if err != nil {
+		return err
+	}
+	toDecoded, err := decodeRuntimeState(toState)
+	if err != nil {
+		return err
+	}
+	if err := removeRuntimeBindings(rt, fromDecoded.Tools); err != nil {
+		return err
+	}
+	return installRuntimeBindings(rt, host, runtimeBindingsFromState(d.prepared, toDecoded.Tools), ctx.IsCurrentRuntime)
+}
+
 func configureRuntimeBindings(prepared func() toolset.PreparedToolset, state json.RawMessage) ([]runtimeBinding, json.RawMessage, error) {
 	if len(state) == 0 {
-		toolStates := buildRuntimeToolStates(prepared())
-		nextState, err := marshalRuntimeState(toolStates)
+		nextState, err := runtimeStateJSON(prepared())
 		if err != nil {
 			return nil, nil, err
 		}
-		return runtimeBindingsFromState(prepared, toolStates), nextState, nil
+		decoded, err := decodeRuntimeState(nextState)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runtimeBindingsFromState(prepared, decoded.Tools), nextState, nil
+	}
+	decoded, err := decodeRuntimeState(state)
+	if err != nil {
+		return nil, nil, err
 	}
 	normalized, err := normalizeRawJSON(state)
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode persisted runtime state: %w", err)
-	}
-	var decoded runtimeState
-	if err := json.Unmarshal(normalized, &decoded); err != nil {
 		return nil, nil, fmt.Errorf("decode persisted runtime state: %w", err)
 	}
 	return runtimeBindingsFromState(prepared, decoded.Tools), normalized, nil
@@ -135,6 +154,25 @@ func marshalRuntimeState(toolStates []runtimeToolState) (json.RawMessage, error)
 	return data, nil
 }
 
+func runtimeStateJSON(prepared toolset.PreparedToolset) (json.RawMessage, error) {
+	return marshalRuntimeState(buildRuntimeToolStates(prepared))
+}
+
+func decodeRuntimeState(raw json.RawMessage) (runtimeState, error) {
+	if len(raw) == 0 {
+		return runtimeState{}, nil
+	}
+	normalized, err := normalizeRawJSON(raw)
+	if err != nil {
+		return runtimeState{}, fmt.Errorf("decode persisted runtime state: %w", err)
+	}
+	var decoded runtimeState
+	if err := json.Unmarshal(normalized, &decoded); err != nil {
+		return runtimeState{}, fmt.Errorf("decode persisted runtime state: %w", err)
+	}
+	return decoded, nil
+}
+
 func normalizeRawJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -150,7 +188,7 @@ func normalizeRawJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return normalized, nil
 }
 
-func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, bindings []runtimeBinding) error {
+func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, bindings []runtimeBinding, isCurrentRuntime func() bool) error {
 	global := rt.GlobalObject()
 	for _, binding := range bindings {
 		pkgObj, err := ensureObjectPath(rt, global, packageNamespaceSegments(binding.state.Package))
@@ -166,14 +204,60 @@ func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, binding
 		if err != nil {
 			return fmt.Errorf("install tool namespace for %q: %w", binding.state.Name, err)
 		}
-		if err := parent.Set(sanitizeIdentifierSegment(toolSegments[len(toolSegments)-1]), buildRuntimeWrapper(rt, host, binding)); err != nil {
+		wrapper, err := buildRuntimeWrapper(rt, host, binding, isCurrentRuntime)
+		if err != nil {
+			return fmt.Errorf("build tool %q wrapper: %w", binding.state.Name, err)
+		}
+		if err := parent.Set(sanitizeIdentifierSegment(toolSegments[len(toolSegments)-1]), wrapper); err != nil {
 			return fmt.Errorf("install tool %q: %w", binding.state.Name, err)
 		}
 	}
 	return nil
 }
 
-func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding) func(goja.FunctionCall) goja.Value {
+func removeRuntimeBindings(rt *goja.Runtime, toolStates []runtimeToolState) error {
+	global := rt.GlobalObject()
+	for _, toolState := range toolStates {
+		if err := removeRuntimeBinding(global, toolState); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error {
+	path := append(packageNamespaceSegments(toolState.Package), sanitizeSegments(splitDotted(toolState.Name))...)
+	if len(path) == 0 {
+		return nil
+	}
+	objects := make([]*goja.Object, 1, len(path))
+	objects[0] = global
+	current := global
+	for _, segment := range path[:len(path)-1] {
+		next, ok := current.Get(segment).(*goja.Object)
+		if !ok || next == nil {
+			return nil
+		}
+		objects = append(objects, next)
+		current = next
+	}
+	if err := current.Delete(path[len(path)-1]); err != nil {
+		return err
+	}
+	for i := len(objects) - 1; i >= 1; i-- {
+		obj := objects[i]
+		if len(obj.Keys()) != 0 {
+			break
+		}
+		if err := objects[i-1].Delete(path[i-1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, isCurrentRuntime func() bool) (goja.Value, error) {
+	staleMessage := fmt.Sprintf("tool %s came from a previous runtime and is no longer callable", binding.state.Name)
 	rawInvoke := host.WrapSync(binding.state.Name, binding.replay(), func(ctx context.Context, params []byte) ([]byte, error) {
 		args, err := decodeRuntimeArgs(params)
 		if err != nil {
@@ -191,7 +275,10 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 		return encodeRuntimeResult(currentReturnType(tool), result)
 	})
 
-	return func(call goja.FunctionCall) goja.Value {
+	wrapper := func(call goja.FunctionCall) goja.Value {
+		if isCurrentRuntime != nil && !isCurrentRuntime() {
+			panic(rt.NewTypeError("%s", staleMessage))
+		}
 		argsObj := rt.NewObject()
 		for i, paramName := range binding.state.Params {
 			if i >= len(call.Arguments) {
@@ -204,6 +291,9 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			Arguments: []goja.Value{argsObj},
 		})
 	}
+	wrapped := rt.ToValue(wrapper)
+	replengine.SetIndexedValueMetadata(wrapped, replengine.IndexedValueMetadata{StaleMessage: staleMessage})
+	return wrapped, nil
 }
 
 func (b runtimeBinding) replay() repl.ReplayPolicy {

@@ -16,8 +16,20 @@ import (
 )
 
 func runMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	sessionDelegate, err := ensureSessionDaemon("mcp", cwd, stderr)
+	if err != nil {
+		return err
+	}
+	defer sessionDelegate.Close()
+
 	managed := mcpserver.NewManagedNamed(mcpServerNameForToolsetPath(cmd.Toolset))
-	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, managed); err != nil {
+	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
+	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, consumer); err != nil {
 		return err
 	}
 
@@ -32,13 +44,20 @@ func runCodemodeMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error
 		return err
 	}
 
+	sessionDelegate, err := ensureSessionDaemon("codemode_mcp", cwd, stderr)
+	if err != nil {
+		return err
+	}
+	defer sessionDelegate.Close()
+
 	managed, err := codemodemcp.OpenManagedNamed(context.Background(), mcpServerNameForToolsetPath(cmd.Toolset), cwd)
 	if err != nil {
 		return err
 	}
 	defer managed.Close()
 
-	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, managed); err != nil {
+	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
+	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, consumer); err != nil {
 		return err
 	}
 
@@ -63,7 +82,16 @@ func mcpServerNameForToolsetPath(path string) string {
 }
 
 func runSDKBridgeServeStdio(stdin io.Reader, stdout, stderr io.Writer) error {
-	_ = stderr
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	sessionDelegate, err := ensureSessionDaemon("sdkbridge", cwd, stderr)
+	if err != nil {
+		return err
+	}
+	defer sessionDelegate.Close()
 	resolver, err := newResolver()
 	if err != nil {
 		return err
@@ -75,6 +103,7 @@ func runSDKBridgeServeStdio(stdin io.Reader, stdout, stderr io.Writer) error {
 		CredentialPolicySource: repo,
 		CredentialRepository:   repo,
 		SearchClientFactory:    func() (toolsetctl.SearchClient, error) { return newToolRegistrySearchClient() },
+		PreparedToolsConsumer:  sessionDelegate,
 	})
 	return bridge.ServeStdio(context.Background(), stdin, stdout)
 }

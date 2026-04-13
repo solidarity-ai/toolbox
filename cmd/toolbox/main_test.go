@@ -375,6 +375,8 @@ func TestRunOutdatedReportsNewerPublishedVersion(t *testing.T) {
 }
 
 func TestRunSDKBridgeServeStdio(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	var stdout, stderr bytes.Buffer
 	input := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"system.version\"}\n")
 
@@ -397,6 +399,9 @@ func TestRunSDKBridgeServeStdio(t *testing.T) {
 	}
 	if resp.Result.Version == "" {
 		t.Fatalf("version result = %#v, want non-empty version", resp.Result)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
 	}
 }
 
@@ -839,6 +844,8 @@ func TestRunInstallSiblingLocalOverlayPreservesLockfile(t *testing.T) {
 }
 
 func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	packageDir := filepath.Join(workspace, "package-repo")
 	consumerDir := filepath.Join(workspace, "consumer-repo")
@@ -947,9 +954,14 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for mcp to exit")
 	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
 }
 
 func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	packageDir := filepath.Join(workspace, "package-repo")
 	consumerDir := filepath.Join(workspace, "consumer-repo")
@@ -1051,6 +1063,9 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for mcp to exit")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
 	}
 }
 

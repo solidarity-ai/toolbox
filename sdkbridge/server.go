@@ -11,10 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/invoke"
@@ -51,6 +53,7 @@ type Options struct {
 	CredentialPolicySource toolset.PackageCredentialPolicySource
 	CredentialRepository   *credentialrepo.Repository
 	SearchClientFactory    func() (toolsetctl.SearchClient, error)
+	PreparedToolsConsumer  toolsetctl.PreparedToolConsumer
 	Version                string
 }
 
@@ -59,6 +62,7 @@ type Bridge struct {
 	credentialPolicySource toolset.PackageCredentialPolicySource
 	credentialRepository   *credentialrepo.Repository
 	searchClientFactory    func() (toolsetctl.SearchClient, error)
+	preparedToolsConsumer  toolsetctl.PreparedToolConsumer
 	version                string
 
 	mu          sync.RWMutex
@@ -68,6 +72,7 @@ type Bridge struct {
 
 type composedToolset struct {
 	mu       sync.RWMutex
+	owner    *Bridge
 	mode     ComposeMode
 	prepared toolset.PreparedToolset
 	tools    []ToolDescriptor
@@ -100,6 +105,7 @@ func New(opts Options) *Bridge {
 		credentialPolicySource: opts.CredentialPolicySource,
 		credentialRepository:   opts.CredentialRepository,
 		searchClientFactory:    opts.SearchClientFactory,
+		preparedToolsConsumer:  opts.PreparedToolsConsumer,
 		version:                resolveVersion(opts.Version),
 		toolsets:               make(map[string]*composedToolset),
 	}
@@ -307,6 +313,7 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	}
 
 	handle := &composedToolset{
+		owner:   b,
 		mode:    params.Mode,
 		session: session,
 	}
@@ -349,6 +356,7 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	b.mu.Lock()
 	b.toolsets[id] = handle
 	b.mu.Unlock()
+	b.publishPreparedTools()
 
 	return ComposeResult{
 		ToolsetID: id,
@@ -384,12 +392,16 @@ func (h *composedToolset) SetPreparedTools(prepared toolset.PreparedToolset) {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.prepared = prepared
 	if h.session != nil {
 		h.session.SetPreparedTools(prepared)
 	}
 	h.tools = describeTools(h.mode, prepared, h.session)
+	owner := h.owner
+	h.mu.Unlock()
+	if owner != nil {
+		owner.publishPreparedTools()
+	}
 }
 
 func (h *composedToolset) setBackend(backend toolsetctl.ToolsetBackend) {
@@ -604,6 +616,7 @@ func (b *Bridge) closeToolset(id string) {
 	handle := b.toolsets[id]
 	delete(b.toolsets, id)
 	b.mu.Unlock()
+	b.publishPreparedTools()
 	if handle != nil {
 		handle.close()
 	}
@@ -614,11 +627,52 @@ func (b *Bridge) clearToolsets() {
 	toolsets := b.toolsets
 	b.toolsets = make(map[string]*composedToolset)
 	b.mu.Unlock()
+	b.publishPreparedTools()
 	for _, handle := range toolsets {
 		if handle != nil {
 			handle.close()
 		}
 	}
+}
+
+func (b *Bridge) publishPreparedTools() {
+	if b == nil || b.preparedToolsConsumer == nil {
+		return
+	}
+
+	b.preparedToolsConsumer.SetPreparedTools(b.preparedTools())
+}
+
+func (b *Bridge) preparedTools() toolset.PreparedToolset {
+	if b == nil {
+		return toolset.PreparedToolset{}
+	}
+
+	b.mu.RLock()
+	handles := make([]*composedToolset, 0, len(b.toolsets))
+	for _, handle := range b.toolsets {
+		handles = append(handles, handle)
+	}
+	b.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	refs := make([]string, 0)
+	for _, handle := range handles {
+		_, prepared, _ := handle.snapshot()
+		for _, ref := range toolset.PreparedToolRefs(prepared) {
+			if _, ok := seen[ref]; ok {
+				continue
+			}
+			seen[ref] = struct{}{}
+			refs = append(refs, ref)
+		}
+	}
+	sort.Strings(refs)
+	tools := make([]assembler.LoadedTool, 0, len(refs))
+	for _, ref := range refs {
+		tools = append(tools, assembler.LoadedTool{Name: ref})
+	}
+	return toolset.NewPreparedToolset(tools)
 }
 
 func composeCurrentDir(toolsetFile string) string {

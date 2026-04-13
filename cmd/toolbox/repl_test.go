@@ -9,6 +9,8 @@ import (
 )
 
 func TestRunReplUsesDefaultSQLitePathAndTypeScriptMode(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	tempDir := t.TempDir()
 	withWorkingDir(t, tempDir)
 	writeJSONFile(t, filepath.Join(tempDir, defaultToolsetFilename), map[string]any{
@@ -49,9 +51,14 @@ func TestRunReplUsesDefaultSQLitePathAndTypeScriptMode(t *testing.T) {
 	if !strings.Contains(stdout.String(), "=> 2") {
 		t.Fatalf("stdout = %q, want completion preview for second cell", stdout.String())
 	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
 }
 
 func TestRunReplResumesLatestSessionFromFileFlag(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	dbPath := filepath.Join(t.TempDir(), "custom.toolbox-session")
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]any{},
@@ -76,9 +83,14 @@ func TestRunReplResumesLatestSessionFromFileFlag(t *testing.T) {
 	if !strings.Contains(secondOut.String(), "=> 3") {
 		t.Fatalf("second stdout = %q, want resumed completion preview", secondOut.String())
 	}
+	if calls.Load() != 2 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 2", calls.Load())
+	}
 }
 
 func TestRunReplSupportsSubmitAndRejectsOtherCommands(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	dbPath := filepath.Join(t.TempDir(), "submit.toolbox-session")
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]any{},
@@ -103,9 +115,14 @@ func TestRunReplSupportsSubmitAndRejectsOtherCommands(t *testing.T) {
 	if !strings.Contains(stdout.String(), "inspect(x : any) : string") {
 		t.Fatalf("stdout = %q, want help footer", stdout.String())
 	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
 }
 
 func TestRunReplPrintsConsoleLogsAtEndOfSubmitOutput(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
 	dbPath := filepath.Join(t.TempDir(), "logs.toolbox-session")
 	toolsetPath := writeToolsetFile(t, map[string]any{
 		"packages": map[string]any{},
@@ -120,6 +137,9 @@ func TestRunReplPrintsConsoleLogsAtEndOfSubmitOutput(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "--\nok [object Object]\n=> 1\n") {
 		t.Fatalf("stdout = %q, want console logs footer after completion output", stdout.String())
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
 	}
 }
 

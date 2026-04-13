@@ -19,6 +19,7 @@ type LoadedTool struct {
 	MaxFetchResponseBytes *int64
 	ResourceParams        []tooldef.ResourceParam
 	PackageMeta           *tooldef.Package
+	PackageVersion        tooldef.Version
 	BuiltIn               BuiltInFunc
 	TS                    *tooldef.TSToolDef
 	TSWasm                *tooldef.TSWasmToolDef

@@ -16,6 +16,7 @@ import (
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -236,6 +237,58 @@ func TestBridgeComposeDirectFromFileAndInvoke(t *testing.T) {
 	if got := invoked.(ToolInvokeResult).Content; got != "3" {
 		t.Fatalf("invoke result = %q, want %q", got, "3")
 	}
+}
+
+func TestBridgePublishesPreparedTools(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc")
+
+	var snapshots [][]string
+	bridge := New(Options{
+		PreparedToolsConsumer: preparedToolConsumerFunc(func(prepared toolset.PreparedToolset) {
+			snapshots = append(snapshots, toolNames(prepared))
+		}),
+	})
+
+	result, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
+		Mode:        ComposeModeDirect,
+		ToolsetFile: path,
+	}))
+	if err != nil {
+		t.Fatalf("toolset.compose: %v", err)
+	}
+	composed := result.(ComposeResult)
+
+	if len(snapshots) == 0 {
+		t.Fatal("observer snapshots = 0, want at least one publish")
+	}
+	wantRef := fixtureModule(t, "calc") + "@v1.2.3/calc.add"
+	if got := snapshots[len(snapshots)-1]; !slices.Contains(got, wantRef) {
+		t.Fatalf("latest observer snapshot = %#v, want %q", got, wantRef)
+	}
+
+	if _, err := bridge.handleMethod(context.Background(), "toolset.close", mustJSON(t, ToolsetCloseParams{
+		ToolsetID: composed.ToolsetID,
+	})); err != nil {
+		t.Fatalf("toolset.close: %v", err)
+	}
+	if got := snapshots[len(snapshots)-1]; len(got) != 0 {
+		t.Fatalf("latest observer snapshot after close = %#v, want empty", got)
+	}
+}
+
+type preparedToolConsumerFunc func(toolset.PreparedToolset)
+
+func (f preparedToolConsumerFunc) SetPreparedTools(prepared toolset.PreparedToolset) {
+	f(prepared)
+}
+
+func toolNames(prepared toolset.PreparedToolset) []string {
+	tools := prepared.Tools()
+	out := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, tool.Name)
+	}
+	return out
 }
 
 func TestBridgeComposeDirectFromFileIncludesBuiltinManagementToolsWhenEnabled(t *testing.T) {

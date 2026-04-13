@@ -97,7 +97,7 @@ func Load(ctx context.Context, resolver *registry.Resolver, decl Declaration) (L
 			loadedPkgs = append(loadedPkgs, LoadedPackage{
 				Version: pkgDecl.Version,
 				Package: pkg,
-				Tools:   LoadedTools(pkg),
+				Tools:   withPackageVersion(LoadedTools(pkg), pkgDecl.Version),
 				Local:   true,
 			})
 			continue
@@ -113,7 +113,7 @@ func Load(ctx context.Context, resolver *registry.Resolver, decl Declaration) (L
 			loadedPkgs = append(loadedPkgs, LoadedPackage{
 				Version: pkgDecl.Version,
 				Package: pkg,
-				Tools:   LoadedTools(pkg),
+				Tools:   withPackageVersion(LoadedTools(pkg), pkgDecl.Version),
 				Local:   true,
 			})
 			continue
@@ -134,12 +134,19 @@ func Load(ctx context.Context, resolver *registry.Resolver, decl Declaration) (L
 		loadedPkgs = append(loadedPkgs, LoadedPackage{
 			Version:  pkgDecl.Version,
 			Package:  result.Package,
-			Tools:    LoadedTools(result.Package),
+			Tools:    withPackageVersion(LoadedTools(result.Package), pkgDecl.Version),
 			Metadata: &metadata,
 		})
 	}
 
 	return LoadedPackages{Packages: loadedPkgs}, nil
+}
+
+func withPackageVersion(tools []LoadedTool, version tooldef.Version) []LoadedTool {
+	for i := range tools {
+		tools[i].PackageVersion = version
+	}
+	return tools
 }
 
 func validateLoadedModule(packageKey string, declared, actual tooldef.ModulePath) error {

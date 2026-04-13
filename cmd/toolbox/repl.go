@@ -13,12 +13,17 @@ import (
 )
 
 func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
-	_ = stderr
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
+
+	sessionDelegate, err := ensureSessionDaemon("codemode_repl", cwd, stderr)
+	if err != nil {
+		return err
+	}
+	defer sessionDelegate.Close()
+
 	sqlitePath := cmd.File
 	if strings.TrimSpace(sqlitePath) == "" {
 		sqlitePath = ".toolbox-session"
@@ -33,7 +38,8 @@ func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer session.Close()
-	if _, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, session); err != nil {
+	consumer := combinedPreparedToolConsumer{session, sessionDelegate}
+	if _, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, consumer); err != nil {
 		return err
 	}
 

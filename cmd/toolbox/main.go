@@ -19,6 +19,7 @@ type cli struct {
 	MCP       mcpCmd       `cmd:"" help:"Serve the selected toolset over MCP stdio."`
 	Codemode  codemodeCmd  `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
 	Auth      authCmd      `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
+	Daemon    daemonCmd    `cmd:"" name:"_daemon" hidden:"" help:"Internal daemon commands."`
 	SDKBridge sdkBridgeCmd `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
 }
 
@@ -149,6 +150,10 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runCodemodeMCP(parsed.Codemode.MCP, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):
 		return runAuth(parsed.Auth.Args, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "_daemon serve"):
+		return runDaemonServe(stderr)
+	case strings.HasPrefix(command, "_daemon ping"):
+		return runDaemonPing(parsed.Daemon.Ping, stdout)
 	case strings.HasPrefix(command, "_sdkbridge serve-stdio"):
 		return runSDKBridgeServeStdio(stdin, stdout, stderr)
 	default:

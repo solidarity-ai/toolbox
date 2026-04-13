@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package toolbox.daemon.v1;
+
+option go_package = "github.com/solidarity-ai/toolbox/daemon/apiv1;daemonv1";
+
+import "google/protobuf/timestamp.proto";
+
+message PingRequest {}
+
+message PingResponse {
+  string payload = 1;
+  int32 pid = 2;
+}
+
+message SessionState {
+  int32 pid = 1;
+  string mode = 2;
+  string working_dir = 3;
+  repeated string prepared_tools = 4;
+}
+
+message ClientSnapshot {
+  int32 pid = 1;
+  string mode = 2;
+  string working_dir = 3;
+  repeated string prepared_tools = 4;
+  google.protobuf.Timestamp connected_at = 5;
+  google.protobuf.Timestamp last_sync_at = 6;
+}
+
+message StateUpdate {
+  repeated ClientSnapshot clients = 1;
+}
+
+service SessionService {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc SyncState(stream SessionState) returns (stream StateUpdate);
+}

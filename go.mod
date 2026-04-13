@@ -23,6 +23,7 @@ require (
 
 require (
 	cel.dev/expr v0.25.1 // indirect
+	connectrpc.com/connect v1.19.1 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

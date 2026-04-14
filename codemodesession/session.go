@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	repl "github.com/mackross/repljs"
 	storemem "github.com/mackross/repljs/store/mem"
@@ -28,7 +29,10 @@ const manifestID = "toolbox-codemode-session-ts-v1"
 const (
 	SuperToolName             = "super_tool"
 	TypeScriptCellSourceParam = "typescript_cell_source"
+	TimeoutSecsParam          = "timeout_secs"
 )
+
+var DefaultSubmitTimeout = 30 * time.Second
 
 type storeCloser interface {
 	Close() error
@@ -248,14 +252,22 @@ func (s *Session) Instructions() string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s submits a code cell to a REPL. The sandboxed environment has installed tools which connect to outside systems.\n", SuperToolName)
+	fmt.Fprintf(&b, "%s submits a code cell to a notebook like environment. The notebook has globally installed tools which connect to outside systems.\n", SuperToolName)
 	fmt.Fprintf(&b, "%s is much more efficient and effective than regular tool calling and should be used when ever possible.\n", SuperToolName)
+	fmt.Fprintln(&b, "Important Notebook Usage Information:")
+	fmt.Fprintln(&b, "- `console.log(inspect($last))` is automatically added when console.log is NOT in the source.")
+	fmt.Fprintln(&b, "- Variables and state persist between cells. Promises must settle before the timeout or the cell will error.")
+	fmt.Fprintln(&b, "	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (use var or leave global).")
+	fmt.Fprintln(&b, "  - For long cells use unique variable names")
+	fmt.Fprintln(&b, "  - For small cells use it'ss easier to use $last / $val(cell_index) to reuse prior results.")
+	fmt.Fprintln(&b, "- There are no imports")
+	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, "===")
-	fmt.Fprintln(&b, "// REPL input")
+	fmt.Fprintln(&b, "// Notebook Input")
 	fmt.Fprintln(&b, `Object.entries($pkgMetadata).map(([name, meta]) => [`)
 	fmt.Fprintln(&b, "  name, meta.toolCount, (meta.useWhenHint || \"\")")
 	fmt.Fprintln(&b, "])")
-	fmt.Fprintln(&b, "// REPL output ")
+	fmt.Fprintln(&b, "// Notebook Output ")
 	var names []string
 	var rows []string
 	for _, row := range summarizePreparedTools(prepared) {
@@ -263,8 +275,7 @@ func (s *Session) Instructions() string {
 		names = append(names, row.Name)
 	}
 	fmt.Fprintln(&b, "[", strings.Join(rows, ", "), "]")
-	fmt.Fprintln(&b, "")
-	fmt.Fprintln(&b, "")
+	fmt.Fprintln(&b, "===")
 	fmt.Fprintln(&b, "")
 	if lockedPackages := lockedOmittedPackageNames(prepared); len(lockedPackages) > 0 {
 		fmt.Fprintf(&b, "Some tools are unavailable because the toolbox secret store is locked: %s.\n", strings.Join(lockedPackages, ", "))
@@ -274,11 +285,11 @@ func (s *Session) Instructions() string {
 	fmt.Fprintln(&b, "Note:")
 	fmt.Fprintln(&b, "`console.log(inspect(<last expression>))` is automatically added if console.log is NOT in the source.")
 	fmt.Fprintln(&b, "")
-	fmt.Fprintln(&b, "REPL Env:")
-	fmt.Fprintln(&b, "// last cell value")
-	fmt.Fprintln(&b, "$last : any")
+	fmt.Fprintln(&b, "Notebook Env:")
 	fmt.Fprintln(&b, "// value for a prior cell index")
 	fmt.Fprintln(&b, "$val(index : number) : any")
+	fmt.Fprintln(&b, "// $val(<last-cell>) / last value in an expression in prior cell")
+	fmt.Fprintln(&b, "$last : any")
 	fmt.Fprintln(&b, "// truncated object summary for inspecting data shape (limited depth and length traversal) ")
 	fmt.Fprintln(&b, "inspect(x : any) : string")
 	fmt.Fprintln(&b, "")
@@ -386,7 +397,7 @@ declare const $pkgMetadata: Record<string, {
   toolCount: number;
   // present when the package needs extra guidance
   useWhenHint?: string;
-  /* .d.ts for package */
+  /* .d.ts for package, always use console.log to view */
   api: string;
 }>;
 `)
@@ -434,7 +445,10 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 	s.submitting.Store(true)
 	defer s.submitting.Store(false)
 
-	res, err := s.session.SubmitCell(ctx, repl.SubmitInput{
+	submitCtx, cancel := withSubmitTimeout(ctx)
+	defer cancel()
+
+	res, err := s.session.SubmitCell(submitCtx, repl.SubmitInput{
 		Source:   tsSource,
 		Language: repl.CellLanguageTypeScript,
 	})
@@ -443,6 +457,16 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 		return formatSubmitError(res, err)
 	}
 	return formatSubmitResult(ctx, s.session, res)
+}
+
+func withSubmitTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		return context.WithTimeout(context.Background(), DefaultSubmitTimeout)
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, DefaultSubmitTimeout)
 }
 
 func (s *Session) setPreparedLocked(prepared toolset.PreparedToolset) {

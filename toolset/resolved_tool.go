@@ -2,7 +2,11 @@ package toolset
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"io/fs"
 	"strings"
 
 	"github.com/solidarity-ai/toolbox/assembler"
@@ -22,6 +26,8 @@ type PreparedTool struct {
 	allowlist          *transport.HostAllowlist
 	context            map[string]any
 	unavailableReason  ToolUnavailableReason
+	jsonCallable       bool
+	jsonCallWhyNot     string
 }
 
 type ToolUnavailableReason string
@@ -69,6 +75,96 @@ func (t PreparedTool) UnavailableError() error {
 		ToolName: t.Name,
 		Reason:   t.unavailableReason,
 	}
+}
+
+// JSONCallable reports whether this tool's prepared input surface can be
+// supplied faithfully over the direct JSON transport used by non-codemode
+// surfaces.
+func (t PreparedTool) JSONCallable() bool { return t.jsonCallable }
+
+// JSONCallWhyNot explains why JSONCallable is false.
+func (t PreparedTool) JSONCallWhyNot() string { return t.jsonCallWhyNot }
+
+// FileSystem returns the filesystem containing the tool's files.
+func (t PreparedTool) FileSystem() fs.FS {
+	switch {
+	case t.TS != nil:
+		return t.TS.Files
+	case t.TSWasm != nil:
+		return t.TSWasm.Files
+	default:
+		return nil
+	}
+}
+
+// ContentHash returns a hash of the tool's file contents for identification.
+func (t PreparedTool) ContentHash() string {
+	fsys := t.FileSystem()
+	if fsys == nil {
+		return ""
+	}
+	hash := sha256.New()
+	if err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(hash, path); err != nil {
+			return err
+		}
+		if _, err := hash.Write([]byte{0}); err != nil {
+			return err
+		}
+		if _, err := hash.Write(data); err != nil {
+			return err
+		}
+		_, err = hash.Write([]byte{0})
+		return err
+	}); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// CacheKey returns a stable key suitable for caching and session identification.
+func (t PreparedTool) CacheKey() string {
+	var parts []string
+	if t.PackageMeta != nil {
+		if module := strings.TrimSpace(t.PackageMeta.Module.String()); module != "" {
+			parts = append(parts, "module="+module)
+		}
+		if name := strings.TrimSpace(t.PackageMeta.Name); name != "" {
+			parts = append(parts, "name="+name)
+		}
+		if runtime := strings.TrimSpace(string(t.PackageMeta.Runtime)); runtime != "" {
+			parts = append(parts, "runtime="+runtime)
+		}
+		if sha := strings.TrimSpace(t.PackageMeta.SHA256); sha != "" {
+			parts = append(parts, "sha="+sha)
+		}
+	}
+	if t.PackageMeta == nil || strings.TrimSpace(t.PackageMeta.SHA256) == "" {
+		if contentHash := t.ContentHash(); contentHash != "" {
+			parts = append(parts, "content="+contentHash)
+		}
+	}
+	if len(parts) == 0 {
+		switch {
+		case t.TS != nil:
+			parts = append(parts, "entry="+t.TS.Entry)
+		case t.TSWasm != nil:
+			parts = append(parts, "entry="+t.TSWasm.Entry)
+		default:
+			parts = append(parts, "tool="+t.Name)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (t PreparedTool) ValidateCall(agentParams map[string]any) (map[string]any, error) {
@@ -191,6 +287,7 @@ func buildPreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBi
 		return PreparedTool{}, err
 	}
 	prepared.accountParams = accountParams
+	prepared.setJSONCallable()
 
 	return prepared, nil
 }
@@ -207,6 +304,12 @@ func buildUnavailablePreparedTool(tool assembler.LoadedTool, bindings map[string
 	}
 	prepared.unavailableReason = reason
 	return prepared, nil
+}
+
+func (t *PreparedTool) setJSONCallable() {
+	ok, whyNot := jsonCallableForTool(*t)
+	t.jsonCallable = ok
+	t.jsonCallWhyNot = whyNot
 }
 
 func effectiveAllowlist(pkg *tooldef.Package, override *transport.HostAllowlist) *transport.HostAllowlist {

@@ -30,7 +30,7 @@ func TestRunReplUsesDefaultSQLitePathAndTypeScriptMode(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tempDir, ".toolbox-session")); err != nil {
 		t.Fatalf("Stat(.toolbox-session): %v", err)
 	}
-	if !strings.Contains(stdout.String(), "super_tool submits a code cell to a REPL") {
+	if !strings.Contains(stdout.String(), "super_tool submits a code cell to a notebook like environment") {
 		t.Fatalf("stdout = %q, want super_tool instructions", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "$pkgMetadata") {
@@ -109,7 +109,7 @@ func TestRunReplSupportsSubmitAndRejectsOtherCommands(t *testing.T) {
 	if !strings.Contains(stdout.String(), "unknown command: :inspect nope") {
 		t.Fatalf("stdout = %q, want unknown-command rejection", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "// REPL input") {
+	if !strings.Contains(stdout.String(), "// Notebook Input") {
 		t.Fatalf("stdout = %q, want help output", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "inspect(x : any) : string") {

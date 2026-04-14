@@ -170,6 +170,7 @@ func NewPreparedToolset(tools []assembler.LoadedTool) PreparedToolset {
 			LoadedTool: tool,
 			allowlist:  effectiveAllowlist(tool.PackageMeta, nil),
 		}
+		out[i].setJSONCallable()
 		byName[tool.Name] = i
 	}
 	return PreparedToolset{tools: out, byName: byName}

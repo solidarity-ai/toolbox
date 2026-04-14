@@ -46,6 +46,15 @@ type returnTypeInfo struct {
 	typeName string // for "named" mode
 }
 
+type returnCandidate struct {
+	method           string
+	shape            *toolbox.TSType
+	properties       []toolbox.PropertyInfo
+	refName          string
+	hasDescriptions  bool
+	hasMultiLineDesc bool
+}
+
 type declNamespaceNode struct {
 	funcs    []toolset.AgentTool
 	children map[string]*declNamespaceNode
@@ -86,9 +95,6 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 	if len(tools) == 0 {
 		return ""
 	}
-
-	// Collect $ref type declarations (used for both params and returns).
-	refDeclLines := collectUniqueDeclarations(tools)
 
 	// Build a map from canonical type structure to $ref definition name.
 	defNameByStructure := map[string]string{}
@@ -149,29 +155,11 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 		}
 	}
 
-	var inputDeclLines []string
-	declLineSet := map[string]bool{}
-	for _, info := range sharedParamTypes {
-		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
-		if !declLineSet[declLine] {
-			inputDeclLines = append(inputDeclLines, declLine)
-			declLineSet[declLine] = true
-		}
-	}
-	var refLines []string
-	for _, line := range refDeclLines {
-		if !declLineSet[line] {
-			refLines = append(refLines, line)
-			declLineSet[line] = true
-		}
-	}
-
 	returnTypes := map[string]returnTypeInfo{}
-	type sharedInfo struct {
-		typeName   string
-		properties []toolbox.PropertyInfo
-	}
-	sharedReturnTypes := map[string]*sharedInfo{}
+	returnCandidates := map[string]returnCandidate{}
+	canonicalUsage := map[string]int{}
+	canonicalRefNames := map[string]map[string]int{}
+	canonicalFallbackNames := map[string]string{}
 	for _, tool := range tools {
 		if tool.Sig == nil {
 			continue
@@ -180,11 +168,11 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 		if rt == nil {
 			continue
 		}
-		unwrapped := rt.UnwrapPromise()
-		if !unwrapped.IsObject() {
+		shape, refName := sdkReturnShape(rt)
+		if shape == nil || !shape.IsObject() {
 			continue
 		}
-		props := unwrapped.ObjectProperties()
+		props := shape.ObjectProperties()
 		if len(props) == 0 {
 			continue
 		}
@@ -199,72 +187,68 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 				}
 			}
 		}
-		if !hasDesc {
-			continue
-		}
-
-		canonicalKey := canonicalReturnTypeKey(props)
 		parts := strings.Split(tool.Name, ".")
 		method := parts[len(parts)-1]
-		deriveName := func(fallback string) string {
-			if defName, ok := defNameByStructure[canonicalKey]; ok {
-				return defName
+
+		canonicalKey := canonicalReturnTypeKey(props)
+		canonicalUsage[canonicalKey]++
+		if refName != "" {
+			if canonicalRefNames[canonicalKey] == nil {
+				canonicalRefNames[canonicalKey] = map[string]int{}
 			}
-			return fallback
+			canonicalRefNames[canonicalKey][refName]++
 		}
-		if hasMultiLineDesc {
-			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
-				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
-			} else {
-				typeName := deriveName(upperFirst(method) + "Result")
-				sharedReturnTypes[canonicalKey] = &sharedInfo{typeName: typeName, properties: props}
-				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: typeName}
-			}
-		} else {
-			if existing, ok := sharedReturnTypes[canonicalKey]; ok {
-				returnTypes[tool.Name] = returnTypeInfo{mode: "named", typeName: existing.typeName}
-			} else {
-				sharedReturnTypes[canonicalKey] = &sharedInfo{
-					typeName:   deriveName(upperFirst(method) + "Result"),
-					properties: props,
-				}
-				returnTypes[tool.Name] = returnTypeInfo{mode: "inline-comments"}
-			}
+		if _, ok := canonicalFallbackNames[canonicalKey]; !ok {
+			canonicalFallbackNames[canonicalKey] = upperFirst(method) + "Result"
+		}
+
+		returnCandidates[tool.Name] = returnCandidate{
+			method:           method,
+			shape:            shape,
+			properties:       props,
+			refName:          refName,
+			hasDescriptions:  hasDesc,
+			hasMultiLineDesc: hasMultiLineDesc,
 		}
 	}
 
-	canonicalUsage := map[string]int{}
-	for _, tool := range tools {
-		if tool.Sig == nil {
-			continue
-		}
-		rt := tool.Sig.Return()
-		if rt == nil {
-			continue
-		}
-		unwrapped := rt.UnwrapPromise()
-		if !unwrapped.IsObject() {
-			continue
-		}
-		cProps := unwrapped.ObjectProperties()
-		if len(cProps) == 0 {
-			continue
-		}
-		key := canonicalReturnTypeKey(cProps)
-		canonicalUsage[key]++
-	}
-	for toolName, info := range returnTypes {
-		if info.mode != "inline-comments" {
-			continue
-		}
-		tool := findTool(tools, toolName)
-		if tool == nil || tool.Sig == nil || tool.Sig.Return() == nil {
-			continue
-		}
-		key := canonicalReturnTypeKey(tool.Sig.Return().UnwrapPromise().ObjectProperties())
+	for toolName, candidate := range returnCandidates {
+		key := canonicalReturnTypeKey(candidate.properties)
 		if canonicalUsage[key] > 1 {
-			shared := sharedReturnTypes[key]
-			returnTypes[toolName] = returnTypeInfo{mode: "named", typeName: shared.typeName}
+			returnTypes[toolName] = returnTypeInfo{
+				mode:     "named",
+				typeName: preferredSharedReturnTypeName(key, defNameByStructure, canonicalRefNames, canonicalFallbackNames),
+			}
+			continue
+		}
+		if !candidate.hasDescriptions {
+			continue
+		}
+		if candidate.hasMultiLineDesc {
+			returnTypes[toolName] = returnTypeInfo{
+				mode:     "named",
+				typeName: canonicalFallbackNames[key],
+			}
+			continue
+		}
+		returnTypes[toolName] = returnTypeInfo{mode: "inline-comments"}
+	}
+
+	refDeclLines := collectUniqueDeclarations(tools, returnTypes)
+	var inputDeclLines []string
+	declLineSet := map[string]bool{}
+	for _, info := range sharedParamTypes {
+		declLine := fmt.Sprintf("type %s = %s;", info.typeName, info.tsType)
+		if !declLineSet[declLine] {
+			inputDeclLines = append(inputDeclLines, declLine)
+			declLineSet[declLine] = true
+		}
+	}
+	var refLines []string
+	for _, line := range refDeclLines {
+		if !declLineSet[line] {
+			refLines = append(refLines, line)
+			declLineSet[line] = true
 		}
 	}
 
@@ -289,10 +273,13 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 			continue
 		}
 
-		unwrapped := tool.Sig.Return().UnwrapPromise()
-		props := unwrapped.ObjectProperties()
+		candidate, ok := returnCandidates[tool.Name]
+		if !ok || candidate.shape == nil {
+			continue
+		}
+		props := candidate.properties
 		var ib strings.Builder
-		if desc := unwrapped.Description(); desc != "" {
+		if desc := candidate.shape.Description(); desc != "" {
 			fmt.Fprintf(&ib, "// %s\n", desc)
 		}
 		fmt.Fprintf(&ib, "interface %s {\n", info.typeName)
@@ -455,18 +442,21 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 	returnType := "string"
 	if tool.Sig != nil {
 		if rt := tool.Sig.Return(); rt != nil {
-			unwrapped := rt.UnwrapPromise()
+			shape, _ := sdkReturnShape(rt)
+			if shape == nil {
+				shape = rt.UnwrapPromise()
+			}
 			if info, ok := returnTypes[tool.Name]; ok {
 				switch info.mode {
 				case "named":
 					returnType = info.typeName
 				case "inline-comments":
-					returnType = renderReturnTypeInlineComments(unwrapped)
+					returnType = renderReturnTypeInlineComments(shape)
 				default:
-					returnType = unwrapped.ToTS()
+					returnType = shape.ToTS()
 				}
 			} else {
-				returnType = unwrapped.ToTS()
+				returnType = shape.ToTS()
 			}
 		}
 	}
@@ -807,7 +797,7 @@ func collectSplitDeclarations(tools []toolset.AgentTool) (paramLines, returnLine
 }
 
 // collectUniqueDeclarations gathers type declarations used by the emitted SDK.
-func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
+func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string]returnTypeInfo) []string {
 	// First pass: collect all definition types keyed by name from all tools'
 	// param and return types. These contain the property-level descriptions.
 	defTypes := map[string]*toolbox.TSType{}
@@ -834,11 +824,11 @@ func collectUniqueDeclarations(tools []toolset.AgentTool) []string {
 	seen := map[string]bool{}
 	var lines []string
 	for _, tool := range tools {
-		sources := []*toolbox.TSType{}
+		var sources []*toolbox.TSType
 		if pt := tool.ParamsType(); pt != nil {
 			sources = append(sources, pt)
 		}
-		if tool.Sig != nil {
+		if shouldEmitReturnDeclarations(tool, returnTypes) && tool.Sig != nil {
 			if rt := tool.Sig.Return(); rt != nil {
 				sources = append(sources, rt)
 			}
@@ -981,4 +971,55 @@ func findTool(tools []toolset.AgentTool, name string) *toolset.AgentTool {
 		}
 	}
 	return nil
+}
+
+func shouldEmitReturnDeclarations(tool toolset.AgentTool, returnTypes map[string]returnTypeInfo) bool {
+	if tool.Sig == nil || tool.Sig.Return() == nil {
+		return false
+	}
+	shape, refName := sdkReturnShape(tool.Sig.Return())
+	if refName != "" && shape != nil && shape.IsObject() {
+		info, ok := returnTypes[tool.Name]
+		return ok && info.mode == "named" && info.typeName == refName
+	}
+	return true
+}
+
+func preferredSharedReturnTypeName(key string, paramDefNames map[string]string, refNames map[string]map[string]int, fallbackNames map[string]string) string {
+	if defName, ok := paramDefNames[key]; ok && defName != "" {
+		return defName
+	}
+	if names := refNames[key]; len(names) == 1 {
+		for name := range names {
+			if name != "" {
+				return name
+			}
+		}
+	}
+	if fallback := fallbackNames[key]; fallback != "" {
+		return fallback
+	}
+	return "Result"
+}
+
+func sdkReturnShape(rt *toolbox.TSType) (*toolbox.TSType, string) {
+	if rt == nil {
+		return nil, ""
+	}
+	unwrapped := rt.UnwrapPromise()
+	if unwrapped == nil {
+		return nil, ""
+	}
+	if props := unwrapped.ObjectProperties(); len(props) > 0 {
+		return unwrapped, ""
+	}
+	name := strings.TrimSpace(unwrapped.ToTS())
+	if name == "" {
+		return unwrapped, ""
+	}
+	defs := unwrapped.DefinitionTypes()
+	if def, ok := defs[name]; ok && def != nil && len(def.ObjectProperties()) > 0 {
+		return def, name
+	}
+	return unwrapped, ""
 }

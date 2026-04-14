@@ -72,8 +72,8 @@ github.com/mackross/qjs v0.0.7-0.20260409233706-931ab4cd91ce h1:Mdu5BapFyJxV+3nm
 github.com/mackross/qjs v0.0.7-0.20260409233706-931ab4cd91ce/go.mod h1:bbg36wxXnx8g0FdKIe5+nCubrQvHa7XEVWqUptjHt/A=
 github.com/mackross/repljs v0.0.0-20260413021201-84857fea19b4 h1:p+/wi87nBxBAHLxfe7NUskVgnCsWrm+Yhf5QOz3FR6k=
 github.com/mackross/repljs v0.0.0-20260413021201-84857fea19b4/go.mod h1:jsspsGJJh4grNOmNDix8GBxAeHeRUq5kBtJHQq9pLOU=
-github.com/mackross/typescript-go v0.0.0-20260411003622-6a0db70e7185 h1:s7W1IeZ1LVsNgsowRltycNydfvk8RK72MVTzR+aqzjU=
-github.com/mackross/typescript-go v0.0.0-20260411003622-6a0db70e7185/go.mod h1:Ajb6LblaIYhTLpnDifbEis0802DKrHpH/FUMKmzrCFA=
+github.com/mackross/typescript-go v0.0.0-20260413221607-258fc08ac866 h1:2s2LGpTQEWl9XwURM9rdWtLrnxQOxeXKsnaNPaLFofE=
+github.com/mackross/typescript-go v0.0.0-20260413221607-258fc08ac866/go.mod h1:Ajb6LblaIYhTLpnDifbEis0802DKrHpH/FUMKmzrCFA=
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/mark3labs/mcp-go v0.45.0 h1:s0S8qR/9fWaQ3pHxz7pm1uQ0DrswoSnRIxKIjbiQtkc=

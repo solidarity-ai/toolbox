@@ -1,4 +1,3 @@
-import "./shims.ts";
 import { z } from "zod";
 
 interface Issue {

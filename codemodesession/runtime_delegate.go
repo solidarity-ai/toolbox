@@ -10,10 +10,10 @@ import (
 	"unicode"
 
 	"github.com/dop251/goja"
-	"github.com/microsoft/typescript-go/toolbox"
 	repl "github.com/mackross/repljs"
 	replengine "github.com/mackross/repljs/engine"
 	"github.com/mackross/repljs/jswire"
+	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/invoke"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"

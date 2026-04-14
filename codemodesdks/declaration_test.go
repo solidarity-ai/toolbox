@@ -138,6 +138,64 @@ func TestDeclarationSource_KeepsSharedTypesWithinPackageNamespace(t *testing.T) 
 	}
 }
 
+func TestDeclarationSource_SingleUseNamedAsyncReturnInlinesShape(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `interface Issue {
+  id: string;
+  title: string;
+}
+
+export default async function tool(id: string): Promise<Issue> {
+  return { id, title: "Example" };
+}
+`,
+	})
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	got := codemodesdks.DeclarationSource(prepared)
+
+	if !strings.Contains(got, `function get(id: string): { id: string; title: string };`) {
+		t.Fatalf("expected single-use named async return to inline:\n%s", got)
+	}
+	if strings.Contains(got, `function get(id: string): Issue;`) {
+		t.Fatalf("unexpected top-level ref for single-use named async return:\n%s", got)
+	}
+}
+
+func TestDeclarationSource_SharedNamedAsyncReturnKeepsSharedName(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/tickets", "tickets", map[string]string{
+		"tools/get.ts": `interface Ticket {
+  id: string;
+}
+
+export default async function tool(id: string): Promise<Ticket> {
+  return { id };
+}
+`,
+		"tools/create.ts": `interface Ticket {
+  id: string;
+}
+
+export default async function tool(): Promise<Ticket> {
+  return { id: "T-1" };
+}
+`,
+	})
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	got := codemodesdks.DeclarationSource(prepared)
+
+	if !strings.Contains(got, `function create(): Ticket;`) || !strings.Contains(got, `function get(id: string): Ticket;`) {
+		t.Fatalf("expected shared async return to use shared Ticket name:\n%s", got)
+	}
+	if strings.Contains(got, "CreateResult") || strings.Contains(got, "GetResult") {
+		t.Fatalf("unexpected synthetic shared name for shared async return:\n%s", got)
+	}
+	if !strings.Contains(got, "interface Ticket {") && !strings.Contains(got, "type Ticket = {") {
+		t.Fatalf("expected shared Ticket declaration:\n%s", got)
+	}
+}
+
 func writePackage(t testing.TB, dir, module, name string, files map[string]string) string {
 	t.Helper()
 

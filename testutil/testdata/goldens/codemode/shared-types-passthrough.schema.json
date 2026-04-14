@@ -49,36 +49,6 @@
     "type": "object"
   },
   "tickets.list": {
-    "definitions": {
-      "Ticket": {
-        "description": "A support ticket",
-        "properties": {
-          "assignee": {
-            "description": "Name of the assigned agent",
-            "type": "string"
-          },
-          "id": {
-            "description": "Unique ticket identifier",
-            "type": "string"
-          },
-          "status": {
-            "description": "Current ticket status",
-            "enum": [
-              "closed",
-              "in_progress",
-              "open",
-              "resolved"
-            ],
-            "type": "string"
-          },
-          "title": {
-            "description": "Short summary of the issue",
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
     "properties": {
       "status": {
         "enum": [

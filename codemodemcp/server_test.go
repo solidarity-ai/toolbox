@@ -4,11 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/solidarity-ai/toolbox/codemodemcp"
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -20,10 +22,11 @@ func TestMCPServerListsSuperTool(t *testing.T) {
 	names := h.ToolNames()
 
 	assertSliceContains(t, names, codemodemcp.ToolSuperTool)
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "super_tool submits a code cell to a REPL")
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// REPL input")
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// REPL output")
+	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "super_tool submits a code cell to a notebook like environment")
+	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// Notebook Input")
+	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// Notebook Output")
 	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "$pkgMetadata")
+	assertToolPropertyDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TimeoutSecsParam, "Maximum seconds to allow this cell to run")
 }
 
 func TestMCPServerCallsSuperTool(t *testing.T) {
@@ -56,6 +59,27 @@ func TestMCPServerCallsSuperTool(t *testing.T) {
 	actionText := resultText(t, action)
 	assertTextContains(t, actionText, "cell 2")
 	assertTextContains(t, actionText, "=> 3")
+}
+
+func TestMCPServerSuperToolUsesDefaultTimeout(t *testing.T) {
+	originalTimeout := codemodesession.DefaultSubmitTimeout
+	codemodesession.DefaultSubmitTimeout = 250 * time.Millisecond
+	t.Cleanup(func() {
+		codemodesession.DefaultSubmitTimeout = originalTimeout
+	})
+
+	h := mcptest.NewHarness(t, codemodemcp.New())
+
+	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TypeScriptCellSourceParam: `await new Promise(() => {})`,
+	})
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+
+	text := resultText(t, result)
+	assertTextContains(t, text, "cell (failed to commit)")
+	assertTextContains(t, text, "context deadline exceeded")
 }
 
 func TestMCPServerDefaultName(t *testing.T) {
@@ -136,6 +160,25 @@ func assertToolDescriptionContains(t testing.TB, tools []mcp.Tool, name, want st
 		t.Fatalf("expected %q in description for %s, got %q", want, name, tool.Description)
 	}
 	t.Fatalf("tool %q not found", name)
+}
+
+func assertToolPropertyDescriptionContains(t testing.TB, tools []mcp.Tool, toolName, propertyName, want string) {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name != toolName {
+			continue
+		}
+		prop, ok := tool.InputSchema.Properties[propertyName].(map[string]any)
+		if !ok {
+			t.Fatalf("property %q missing from %s schema: %#v", propertyName, toolName, tool.InputSchema.Properties)
+		}
+		desc, _ := prop["description"].(string)
+		if !strings.Contains(desc, want) {
+			t.Fatalf("expected %q in description for %s.%s, got %q", want, toolName, propertyName, desc)
+		}
+		return
+	}
+	t.Fatalf("tool %q not found", toolName)
 }
 
 func initializeServer(t testing.TB, srv *server.MCPServer) *mcp.InitializeResult {

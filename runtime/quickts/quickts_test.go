@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 func TestRunCalcAddStub(t *testing.T) {
@@ -118,6 +120,41 @@ func TestRunnerSourceExcludesAccountParams(t *testing.T) {
 		"export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestRunInstallsBrowserCompat(t *testing.T) {
+	got, err := quickts.RunWithHost(tooldef.TSToolDef{
+		Entry: "tools/browser-compat.ts",
+		Files: fstest.MapFS{
+			"tools/browser-compat.ts": &fstest.MapFile{Data: []byte(`
+export default function tool(_args?: any, _ctx?: any) {
+  const bytes = new Uint8Array(4);
+  return JSON.stringify({
+    hasNavigatorUserAgent: typeof (globalThis as any).navigator.userAgent === "string" && (globalThis as any).navigator.userAgent.length > 0,
+    textRoundTrip: new TextDecoder().decode(new TextEncoder().encode("A€😀")),
+    btoa: (globalThis as any).btoa("Man"),
+    atob: (globalThis as any).atob("TWE="),
+    bytes: Array.from((globalThis as any).crypto.getRandomValues(bytes)),
+    uuid: (globalThis as any).crypto.randomUUID(),
+  });
+}
+`)},
+		},
+	}, map[string]any{}, quickts.Host{
+		RandomBytes: func(n int) ([]byte, error) {
+			out := make([]byte, n)
+			for i := range out {
+				out[i] = byte(i)
+			}
+			return out, nil
+		},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != `{"hasNavigatorUserAgent":true,"textRoundTrip":"A€😀","btoa":"TWFu","atob":"Ma","bytes":[0,1,2,3],"uuid":"00010203-0405-4607-8809-0a0b0c0d0e0f"}` {
+		t.Fatalf("unexpected browser compat result: %q", got)
 	}
 }
 

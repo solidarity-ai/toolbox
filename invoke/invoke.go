@@ -27,19 +27,25 @@ const defaultMaxFetchResponseBody = 10 << 20 // 10 MiB
 
 var (
 	checkSessionsMu sync.RWMutex
-	checkSessions   = map[*tooldef.Package]*toolbox.CheckSession{}
+	checkSessions   = map[string]*toolbox.CheckSession{}
 )
 
-func getCheckSession(pkg *tooldef.Package) *toolbox.CheckSession {
+func getCheckSession(key string) *toolbox.CheckSession {
+	if strings.TrimSpace(key) == "" {
+		return nil
+	}
 	checkSessionsMu.RLock()
 	defer checkSessionsMu.RUnlock()
-	return checkSessions[pkg]
+	return checkSessions[key]
 }
 
-func setCheckSession(pkg *tooldef.Package, session *toolbox.CheckSession) {
+func setCheckSession(key string, session *toolbox.CheckSession) {
+	if strings.TrimSpace(key) == "" {
+		return
+	}
 	checkSessionsMu.Lock()
 	defer checkSessionsMu.Unlock()
-	checkSessions[pkg] = session
+	checkSessions[key] = session
 }
 
 // Run selects a visible tool by name, evaluates any bindings to produce the
@@ -106,11 +112,12 @@ func findTool(prepared toolset.PreparedToolset, toolName string) (toolset.Prepar
 }
 
 func runTSTool(tool toolset.PreparedTool, args map[string]any, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (string, error) {
-	session := getCheckSession(tool.PackageMeta)
+	key := tool.CacheKey()
+	session := getCheckSession(key)
 	result, err := quickts.RunWithHost(*tool.TS, args, quickts.Host{
 		Fetch: fetchFn,
 	}, &session, tool.Sig)
-	setCheckSession(tool.PackageMeta, session)
+	setCheckSession(key, session)
 	return result, err
 }
 
@@ -136,7 +143,8 @@ func runTSWasmToolWithVFS(tool toolset.PreparedTool, args map[string]any, memFS 
 	}
 	defer cleanup()
 
-	session := getCheckSession(tool.PackageMeta)
+	key := tool.CacheKey()
+	session := getCheckSession(key)
 	result, err := quickts.RunWithHost(tool.TSWasm.TSToolDef, args, quickts.Host{
 		ReadFile: func(path string) (string, error) {
 			data, err := memFS.ReadAll(path)
@@ -183,9 +191,11 @@ func runTSWasmToolWithVFS(tool toolset.PreparedTool, args map[string]any, memFS 
 			}, nil
 		},
 	}, &session, tool.Sig)
-	setCheckSession(tool.PackageMeta, session)
+	setCheckSession(key, session)
 	return result, err
 }
+
+
 
 // startVFSServer creates a UDS, starts the VFS server goroutine, and returns
 // the socket path and a cleanup function.

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/solidarity-ai/toolbox/registry"
-	"github.com/solidarity-ai/toolbox/toolsetfile"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
+	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
 // ComposeMode selects which tool surface the bridge should expose for one
@@ -81,15 +81,15 @@ type ToolsetUninstallParams struct {
 }
 
 type ToolsetAuthParams struct {
-	ToolsetID          string `json:"toolset_id"`
-	Target             string `json:"target"`
-	Account            string `json:"account,omitempty"`
-	Credential         string `json:"credential,omitempty"`
-	Check              bool   `json:"check,omitempty"`
-	DeleteCredential   bool   `json:"deleteCredential,omitempty"`
-	RenameAccountFrom  string `json:"renameAccountFrom,omitempty"`
-	RenameAccountTo    string `json:"renameAccountTo,omitempty"`
-	DeleteAccount      string `json:"deleteAccount,omitempty"`
+	ToolsetID         string `json:"toolset_id"`
+	Target            string `json:"target"`
+	Account           string `json:"account,omitempty"`
+	Credential        string `json:"credential,omitempty"`
+	Check             bool   `json:"check,omitempty"`
+	DeleteCredential  bool   `json:"deleteCredential,omitempty"`
+	RenameAccountFrom string `json:"renameAccountFrom,omitempty"`
+	RenameAccountTo   string `json:"renameAccountTo,omitempty"`
+	DeleteAccount     string `json:"deleteAccount,omitempty"`
 }
 
 type ToolInvokeParams struct {

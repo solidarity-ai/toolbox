@@ -2,4 +2,6 @@ github.com/alecthomas/kong v1.15.0 h1:BVJstKbpO73zKpmIu+m/aLRrNmWwxXPIGTNin9VmLV
 github.com/alecthomas/kong v1.15.0/go.mod h1:wrlbXem1CWqUV5Vbmss5ISYhsVPkBb1Yo7YKJghju2I=
 github.com/mackross/repljs v0.0.0-20260413021201-84857fea19b4 h1:p+/wi87nBxBAHLxfe7NUskVgnCsWrm+Yhf5QOz3FR6k=
 github.com/mackross/repljs v0.0.0-20260413021201-84857fea19b4/go.mod h1:jsspsGJJh4grNOmNDix8GBxAeHeRUq5kBtJHQq9pLOU=
+github.com/mackross/typescript-go v0.0.0-20260413221607-258fc08ac866 h1:2s2LGpTQEWl9XwURM9rdWtLrnxQOxeXKsnaNPaLFofE=
+github.com/mackross/typescript-go v0.0.0-20260413221607-258fc08ac866/go.mod h1:Ajb6LblaIYhTLpnDifbEis0802DKrHpH/FUMKmzrCFA=
 github.com/solidarity-ai/toolbox v0.0.0-20260321144313-a0f540464d2c/go.mod h1:mymh1txholQZPm3K6Admglu3x3SMRt2ACYBLX/TlIxc=

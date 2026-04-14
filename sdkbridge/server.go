@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
@@ -36,16 +38,24 @@ const (
 	errCodeInternal     = -32603
 )
 
-var codeModeParamsSchema = map[string]any{
-	"type":                 "object",
-	"additionalProperties": false,
-	"properties": map[string]any{
-		codemodesession.TypeScriptCellSourceParam: map[string]any{
-			"type":        "string",
-			"description": "TypeScript code (can be multiline) for next cell.",
+func codeModeParamsSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			codemodesession.TypeScriptCellSourceParam: map[string]any{
+				"type":        "string",
+				"description": "TypeScript code (can be multiline) for next cell.",
+			},
+			codemodesession.TimeoutSecsParam: map[string]any{
+				"type":        "number",
+				"description": fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds()),
+				"default":     codemodesession.DefaultSubmitTimeout.Seconds(),
+				"minimum":     0.001,
+			},
 		},
-	},
-	"required": []any{codemodesession.TypeScriptCellSourceParam},
+		"required": []any{codemodesession.TypeScriptCellSourceParam},
+	}
 }
 
 type Options struct {
@@ -376,13 +386,17 @@ func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, session *
 		return []ToolDescriptor{{
 			Name:         CodeModeToolName,
 			Description:  metaSession.Instructions(),
-			ParamsSchema: cloneMap(codeModeParamsSchema),
+			ParamsSchema: codeModeParamsSchema(),
 		}}
 	}
 
 	view := prepared.AgentView()
 	out := make([]ToolDescriptor, 0, len(view.Tools))
 	for _, tool := range view.Tools {
+		preparedTool, ok := prepared.Tool(tool.Name)
+		if !ok || !preparedTool.JSONCallable() {
+			continue
+		}
 		out = append(out, ToolDescriptor{
 			Name:         tool.Name,
 			Description:  tool.Description,
@@ -482,9 +496,21 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 		if !ok || strings.TrimSpace(code) == "" {
 			return ToolInvokeResult{}, invalidParams("codemode tool requires params." + codemodesession.TypeScriptCellSourceParam)
 		}
-		return ToolInvokeResult{Content: session.Submit(ctx, code)}, nil
+		timeout, err := codeModeTimeout(params.Params)
+		if err != nil {
+			return ToolInvokeResult{}, invalidParams(err.Error())
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		submitCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return ToolInvokeResult{Content: session.Submit(submitCtx, code)}, nil
 	}
 
+	if tool, ok := prepared.Tool(params.ToolName); !ok || !tool.JSONCallable() {
+		return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
+	}
 	result, err := invoke.RunContext(ctx, prepared, params.ToolName, params.Params)
 	if err != nil {
 		return ToolInvokeResult{}, err
@@ -819,6 +845,58 @@ func cloneMap(in map[string]any) map[string]any {
 		out[key] = cloneValue(value)
 	}
 	return out
+}
+
+func codeModeTimeout(params map[string]any) (time.Duration, error) {
+	raw, ok := params[codemodesession.TimeoutSecsParam]
+	if !ok || raw == nil {
+		return codemodesession.DefaultSubmitTimeout, nil
+	}
+
+	var seconds float64
+	switch v := raw.(type) {
+	case float64:
+		seconds = v
+	case float32:
+		seconds = float64(v)
+	case int:
+		seconds = float64(v)
+	case int8:
+		seconds = float64(v)
+	case int16:
+		seconds = float64(v)
+	case int32:
+		seconds = float64(v)
+	case int64:
+		seconds = float64(v)
+	case uint:
+		seconds = float64(v)
+	case uint8:
+		seconds = float64(v)
+	case uint16:
+		seconds = float64(v)
+	case uint32:
+		seconds = float64(v)
+	case uint64:
+		seconds = float64(v)
+	case json.Number:
+		parsed, err := strconv.ParseFloat(string(v), 64)
+		if err != nil {
+			return 0, fmt.Errorf("%s must be a positive number", codemodesession.TimeoutSecsParam)
+		}
+		seconds = parsed
+	default:
+		return 0, fmt.Errorf("%s must be a positive number", codemodesession.TimeoutSecsParam)
+	}
+
+	if seconds <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", codemodesession.TimeoutSecsParam)
+	}
+	timeout := time.Duration(seconds * float64(time.Second))
+	if timeout <= 0 {
+		return 0, fmt.Errorf("%s is too small", codemodesession.TimeoutSecsParam)
+	}
+	return timeout, nil
 }
 
 func cloneToolDescriptors(in []ToolDescriptor) []ToolDescriptor {

@@ -12,11 +12,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetctl"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
@@ -337,6 +341,106 @@ func toolNames(prepared toolset.PreparedToolset) []string {
 	return out
 }
 
+func TestDescribeToolsDirectSkipsNonJSONCallableTools(t *testing.T) {
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{
+		{
+			Name: "json.ok",
+			Sig: tooltest.NewTSSig(t, `
+export default function tool(input: { subject: string; labels?: string[] }) {
+  return input.subject.length;
+}
+`),
+			TS: inlineSDKBridgeToolDef(`
+export default function tool(input: { subject: string; labels?: string[] }) {
+  return input.subject.length;
+}
+`),
+		},
+		{
+			Name: "json.nope",
+			Sig: tooltest.NewTSSig(t, `
+export default function tool(when: Date) {
+  return when.toISOString();
+}
+`),
+			TS: inlineSDKBridgeToolDef(`
+export default function tool(when: Date) {
+  return when.toISOString();
+}
+`),
+		},
+	})
+
+	tools := describeTools(ComposeModeDirect, prepared, nil)
+	if len(tools) != 1 {
+		t.Fatalf("describeTools() returned %d tools, want 1: %#v", len(tools), tools)
+	}
+	if got := tools[0].Name; got != "json.ok" {
+		t.Fatalf("describeTools()[0].Name = %q, want %q", got, "json.ok")
+	}
+}
+
+func TestBridgeInvokeDirectRejectsNonJSONCallableTool(t *testing.T) {
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{
+		{
+			Name: "json.ok",
+			Sig: tooltest.NewTSSig(t, `
+export default function tool(input: { subject: string }) {
+  return input.subject.length;
+}
+`),
+			TS: inlineSDKBridgeToolDef(`
+export default function tool(input: { subject: string }) {
+  return input.subject.length;
+}
+`),
+		},
+		{
+			Name: "json.nope",
+			Sig: tooltest.NewTSSig(t, `
+export default function tool(when: Date) {
+  return when.toISOString();
+}
+`),
+			TS: inlineSDKBridgeToolDef(`
+export default function tool(when: Date) {
+  return when.toISOString();
+}
+`),
+		},
+	})
+
+	bridge := New(Options{})
+	bridge.toolsets["ts_1"] = &composedToolset{
+		mode:     ComposeModeDirect,
+		prepared: prepared,
+		tools:    describeTools(ComposeModeDirect, prepared, nil),
+	}
+
+	_, err := bridge.invoke(context.Background(), ToolInvokeParams{
+		ToolsetID: "ts_1",
+		ToolName:  "json.nope",
+		Params: map[string]any{
+			"when": "2026-04-13T12:00:00Z",
+		},
+	})
+	if err == nil {
+		t.Fatal("invoke error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), `unknown tool "json.nope"`) {
+		t.Fatalf("invoke error = %v, want unknown tool", err)
+	}
+}
+
+func inlineSDKBridgeToolDef(source string) *tooldef.TSToolDef {
+	return &tooldef.TSToolDef{
+		Entry: "tools/test.ts",
+		Files: fstest.MapFS{
+			"tools/test.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+}
+
 func TestBridgeComposeDirectFromFileIncludesBuiltinManagementToolsWhenEnabled(t *testing.T) {
 	path := writeLocalToolsetFileWithToolsetManagement(t, "calc")
 	bridge := New(Options{})
@@ -388,7 +492,10 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	if _, ok := props[codemodesession.TypeScriptCellSourceParam]; !ok {
 		t.Fatalf("codemode params schema = %#v, want %q", composed.Tools[0].ParamsSchema, codemodesession.TypeScriptCellSourceParam)
 	}
-	if !strings.Contains(composed.Tools[0].Description, "super_tool submits a code cell to a REPL") {
+	if _, ok := props[codemodesession.TimeoutSecsParam]; !ok {
+		t.Fatalf("codemode params schema = %#v, want %q", composed.Tools[0].ParamsSchema, codemodesession.TimeoutSecsParam)
+	}
+	if !strings.Contains(composed.Tools[0].Description, "super_tool submits a code cell to a notebook like environment") {
 		t.Fatalf("codemode description = %q, want super_tool instructions", composed.Tools[0].Description)
 	}
 
@@ -404,6 +511,21 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	}
 	if got := invoked.(ToolInvokeResult).Content; !strings.Contains(got, "=> 9") {
 		t.Fatalf("codemode invoke result = %q, want completion preview 9", got)
+	}
+
+	timedOut, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeToolName,
+		Params: map[string]any{
+			codemodesession.TypeScriptCellSourceParam: `await new Promise(() => {})`,
+			codemodesession.TimeoutSecsParam:          0.25,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("tool.invoke timeout case: %v", err)
+	}
+	if got := timedOut.(ToolInvokeResult).Content; !strings.Contains(got, "context deadline exceeded") {
+		t.Fatalf("codemode timeout result = %q, want timeout failure", got)
 	}
 }
 

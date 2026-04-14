@@ -20,6 +20,11 @@ import (
 const (
 	runnerTSFile = "__toolbox_run.ts"
 	runnerJSFile = "__toolbox_run.js"
+	// This static checker shim only covers the current plain typescript-sandbox
+	// delta beyond the default DOM libs. It deserves more design once we start
+	// composing distinct runtime shims/compat layers, and we may eventually
+	// want the checker to stop relying on the default DOM libs entirely.
+	hostCompatDTSFile = "__toolbox_host_compat.d.ts"
 )
 
 // nodeBuiltins are marked as external so esbuild doesn't try to bundle them.
@@ -49,6 +54,10 @@ type Host struct {
 	ReadFile  func(path string) (string, error)
 	WriteFile func(path string, data string) error
 	Fetch     func(url, method, headersJSON, body string) (FetchResult, error)
+	// RandomBytes supplies cryptographically secure random bytes for browser
+	// compatibility helpers like crypto.getRandomValues/randomUUID. If nil,
+	// installBrowserCompat falls back to crypto/rand.
+	RandomBytes func(size int) ([]byte, error)
 	// Console receives JS console output. If nil, console calls are no-ops.
 	Console func(level string, args []string)
 }
@@ -143,6 +152,10 @@ func installHost(rt *qjs.Runtime, host Host) error {
 		if _, err := rt.Eval("__toolbox_host.js", qjs.Code(`globalThis.exec = (binary, args) => JSON.parse(__toolboxExec(binary, args));`)); err != nil {
 			return fmt.Errorf("load host imports: %w", err)
 		}
+	}
+
+	if err := installBrowserCompat(rt, host); err != nil {
+		return err
 	}
 
 	if host.ReadFile != nil || host.WriteFile != nil {
@@ -282,10 +295,20 @@ func emit(files fs.FS, packageRoot string) (string, error) {
 func withRunner(base fs.FS, source string) (fs.FS, error) {
 	return fsoverlay.New(
 		fstest.MapFS{
-			runnerTSFile: &fstest.MapFile{Data: []byte(source)},
+			runnerTSFile:      &fstest.MapFile{Data: []byte(source)},
+			hostCompatDTSFile: &fstest.MapFile{Data: []byte(hostCompatDTS())},
 		},
 		base,
 	), nil
+}
+
+func hostCompatDTS() string {
+	return `// Intentionally empty for now. The plain typescript-sandbox runtime
+// currently relies on the default DOM libs, and this checker/runtime shim
+// surface deserves more design once we introduce additional compat layers.
+// We may eventually want the checker to stop relying on the default DOM libs
+// entirely and have this shim declare the full compat surface explicitly.
+`
 }
 
 func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {

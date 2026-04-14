@@ -2,9 +2,11 @@ package codemodemcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -105,7 +107,12 @@ func (s *ManagedServer) handleSuperTool(ctx context.Context, request mcp.CallToo
 	if err != nil {
 		return nil, err
 	}
-	return mcp.NewToolResultText(s.session.Submit(ctx, code)), nil
+	submitCtx, cancel, err := withSuperToolTimeout(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	return mcp.NewToolResultText(s.session.Submit(submitCtx, code)), nil
 }
 
 func newSuperTool(instructions string) mcp.Tool {
@@ -113,6 +120,11 @@ func newSuperTool(instructions string) mcp.Tool {
 		ToolSuperTool,
 		mcp.WithDescription(instructions),
 		mcp.WithString(codemodesession.TypeScriptCellSourceParam, mcp.Required(), mcp.Description("TypeScript code (can be multiline) for next cell.")),
+		mcp.WithNumber(codemodesession.TimeoutSecsParam,
+			mcp.Description(fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds())),
+			mcp.Min(0.001),
+			mcp.DefaultNumber(codemodesession.DefaultSubmitTimeout.Seconds()),
+		),
 	)
 }
 
@@ -128,7 +140,12 @@ func (r *sessionRunner) handleSuperTool(ctx context.Context, request mcp.CallToo
 	if err != nil {
 		return nil, err
 	}
-	return mcp.NewToolResultText(r.submit(ctx, code)), nil
+	submitCtx, cancel, err := withSuperToolTimeout(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	return mcp.NewToolResultText(r.submit(submitCtx, code)), nil
 }
 
 func (r *sessionRunner) submit(ctx context.Context, code string) string {
@@ -167,4 +184,35 @@ func currentWorkingDir() string {
 		return "."
 	}
 	return cwd
+}
+
+func withSuperToolTimeout(ctx context.Context, request mcp.CallToolRequest) (context.Context, context.CancelFunc, error) {
+	timeout, err := superToolTimeout(request)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	nextCtx, cancel := context.WithTimeout(ctx, timeout)
+	return nextCtx, cancel, nil
+}
+
+func superToolTimeout(request mcp.CallToolRequest) (time.Duration, error) {
+	args := request.GetArguments()
+	if _, ok := args[codemodesession.TimeoutSecsParam]; !ok {
+		return codemodesession.DefaultSubmitTimeout, nil
+	}
+	seconds, err := request.RequireFloat(codemodesession.TimeoutSecsParam)
+	if err != nil {
+		return 0, err
+	}
+	if seconds <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", codemodesession.TimeoutSecsParam)
+	}
+	timeout := time.Duration(seconds * float64(time.Second))
+	if timeout <= 0 {
+		return 0, fmt.Errorf("%s is too small", codemodesession.TimeoutSecsParam)
+	}
+	return timeout, nil
 }

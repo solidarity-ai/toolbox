@@ -28,6 +28,9 @@
     rather than copying the same helper logic into multiple tool entry files.
     `additionalTypeScriptGlobs` supports `**` globs, for example
     `"additionalTypeScriptGlobs": ["lib/**/*.ts"]`.
+11. For optional tool inputs, prefer `foo?: T` over `foo: T | undefined`.
+    JSON transports preserve omission, not `undefined`. If you need an explicit
+    empty value that survives JSON, use `null`.
 
 ## Examples
 

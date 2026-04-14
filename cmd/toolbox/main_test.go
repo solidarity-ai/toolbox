@@ -23,9 +23,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/credpath"
+	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/registry"
+	"github.com/solidarity-ai/toolbox/sdkbridge"
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -34,6 +36,8 @@ import (
 
 func TestMain(m *testing.M) {
 	_ = os.Setenv("TOOLBOX_REGISTRY", "off")
+	_ = os.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	_ = os.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
 	os.Exit(m.Run())
 }
 
@@ -81,6 +85,52 @@ func TestRunWithNoArgsPrintsHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "install [<package>] [flags]") {
 		t.Fatalf("stdout = %q, want command list", stdout.String())
+	}
+}
+
+func TestRunDaemonStopCommand(t *testing.T) {
+	prev := daemonStopAll
+	var called bool
+	daemonStopAll = func(func(string, ...any)) ([]int, error) {
+		called = true
+		return nil, nil
+	}
+	defer func() {
+		daemonStopAll = prev
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"daemon", "stop"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !called {
+		t.Fatal("daemon stop handler was not called")
+	}
+	if got := stdout.String(); got != "no running toolbox daemons\n" {
+		t.Fatalf("stdout = %q, want %q", got, "no running toolbox daemons\n")
+	}
+}
+
+func TestRunInternalDaemonStopCommand(t *testing.T) {
+	prev := daemonStopAll
+	var called bool
+	daemonStopAll = func(func(string, ...any)) ([]int, error) {
+		called = true
+		return []int{55}, nil
+	}
+	defer func() {
+		daemonStopAll = prev
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"_daemon", "stop"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run() error: %v\nstderr=%s", err, stderr.String())
+	}
+	if !called {
+		t.Fatal("_daemon stop handler was not called")
+	}
+	if got := stdout.String(); got != "stopped toolbox daemons: 55\n" {
+		t.Fatalf("stdout = %q, want %q", got, "stopped toolbox daemons: 55\n")
 	}
 }
 
@@ -403,6 +453,44 @@ func TestRunSDKBridgeServeStdio(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
 	}
+}
+
+func TestRunSDKBridgeServeStdioBindsSecretEpochReload(t *testing.T) {
+	prevEnsure := ensureSessionDaemon
+	prevNewBridge := newSDKBridgeServer
+	delegate := &recordingSessionDaemon{}
+	bridge := &recordingSDKBridgeServer{}
+	ensureSessionDaemon = func(string, string, io.Writer) (daemon.SessionDelegate, error) {
+		return delegate, nil
+	}
+	newSDKBridgeServer = func(sdkbridge.Options) sdkBridgeServer {
+		return bridge
+	}
+	t.Cleanup(func() {
+		ensureSessionDaemon = prevEnsure
+		newSDKBridgeServer = prevNewBridge
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := runSDKBridgeServeStdio(secretStoreOptions{}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("runSDKBridgeServeStdio() error: %v", err)
+	}
+
+	delegate.fire()
+	waitForAtomic(t, &bridge.reloads, 1)
+}
+
+type recordingSDKBridgeServer struct {
+	reloads atomic.Int32
+}
+
+func (s *recordingSDKBridgeServer) ReloadFileBackedToolsets(context.Context) error {
+	s.reloads.Add(1)
+	return nil
+}
+
+func (*recordingSDKBridgeServer) ServeStdio(context.Context, io.Reader, io.Writer) error {
+	return nil
 }
 
 func TestRunInstallWritesLockfile(t *testing.T) {

@@ -12,13 +12,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"filippo.io/age"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/credpath"
 	"github.com/solidarity-ai/toolbox/packaging"
@@ -28,17 +26,12 @@ import (
 
 func newTestSecretStore(t *testing.T) secrets.SecretStore {
 	t.Helper()
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
 	dir := t.TempDir()
-	identity, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
 	identityPath := filepath.Join(dir, "keys.txt")
-	if err := os.WriteFile(identityPath, []byte(identity.String()+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	storePath := filepath.Join(dir, "secrets")
-	return secrets.NewLocalSecretStore(storePath, identityPath)
+	return secrets.NewLocalSecretStoreWithKey(storePath, identityPath, "test-secret-key")
 }
 
 func newTestCredentialRepo(t *testing.T) (*credentialrepo.Repository, secrets.SecretStore) {
@@ -379,7 +372,7 @@ func TestRunAuthAPIKeyRejectsEmpty(t *testing.T) {
 
 func TestRunAuthMissingArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	err := runAuth(nil, strings.NewReader(""), &stdout, &stderr)
+	err := runAuth(nil, secretStoreOptions{NoDaemon: true, SecretKey: "test-secret-key"}, strings.NewReader(""), &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected error for missing args")
 	}

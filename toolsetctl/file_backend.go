@@ -81,6 +81,13 @@ func (b *FileBackend) Prepared(ctx context.Context) (toolset.PreparedToolset, er
 	return b.filterPrepared(prepared), nil
 }
 
+func (b *FileBackend) Reload(ctx context.Context) (toolset.PreparedToolset, error) {
+	if b == nil {
+		return toolset.PreparedToolset{}, nil
+	}
+	return b.reload(ctx)
+}
+
 func (b *FileBackend) EnableToolsForPackageDiscovery() bool {
 	if b == nil {
 		return false

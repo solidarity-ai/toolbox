@@ -120,6 +120,29 @@ func TestRunReplSupportsSubmitAndRejectsOtherCommands(t *testing.T) {
 	}
 }
 
+func TestRunReplInstructionsAliasPrintsInstructions(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
+	dbPath := filepath.Join(t.TempDir(), "instructions.toolbox-session")
+	toolsetPath := writeToolsetFile(t, map[string]any{
+		"packages": map[string]any{},
+		"tools":    []any{},
+	})
+
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader(":instructions\n:exit\n")
+	if err := runWithIO([]string{"codemode", "repl", "-t", toolsetPath, "-f", dbPath}, input, &stdout, &stderr); err != nil {
+		t.Fatalf("runWithIO() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	if strings.Count(stdout.String(), "// REPL input") < 2 {
+		t.Fatalf("stdout = %q, want instructions banner at startup and for :instructions", stdout.String())
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
+}
+
 func TestRunReplPrintsConsoleLogsAtEndOfSubmitOutput(t *testing.T) {
 	calls := stubSessionDaemon(t)
 

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
 	"github.com/solidarity-ai/toolbox/toolset"
+	"github.com/solidarity-ai/toolbox/toolsetctl"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
@@ -276,10 +278,54 @@ func TestBridgePublishesPreparedTools(t *testing.T) {
 	}
 }
 
+func TestBridgeReloadFileBackedToolsetsReloadsReloadableBackends(t *testing.T) {
+	bridge := New(Options{})
+	reloadable := &reloadableBackend{
+		ToolsetBackend: toolsetctl.NewPreparedBackend(toolset.PreparedToolset{}, nil),
+	}
+	bridge.toolsets["ts_1"] = &composedToolset{backend: reloadable}
+	bridge.toolsets["ts_2"] = &composedToolset{backend: toolsetctl.NewPreparedBackend(toolset.PreparedToolset{}, nil)}
+
+	if err := bridge.ReloadFileBackedToolsets(context.Background()); err != nil {
+		t.Fatalf("ReloadFileBackedToolsets() error: %v", err)
+	}
+	if reloadable.reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloadable.reloads)
+	}
+}
+
+func TestBridgeReloadFileBackedToolsetsReturnsReloadErrors(t *testing.T) {
+	bridge := New(Options{})
+	reloadable := &reloadableBackend{
+		ToolsetBackend: toolsetctl.NewPreparedBackend(toolset.PreparedToolset{}, nil),
+		err:            errors.New("boom"),
+	}
+	bridge.toolsets["ts_1"] = &composedToolset{backend: reloadable}
+
+	err := bridge.ReloadFileBackedToolsets(context.Background())
+	if err == nil {
+		t.Fatal("ReloadFileBackedToolsets() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("ReloadFileBackedToolsets() error = %v, want boom", err)
+	}
+}
+
 type preparedToolConsumerFunc func(toolset.PreparedToolset)
 
 func (f preparedToolConsumerFunc) SetPreparedTools(prepared toolset.PreparedToolset) {
 	f(prepared)
+}
+
+type reloadableBackend struct {
+	toolsetctl.ToolsetBackend
+	reloads int
+	err     error
+}
+
+func (b *reloadableBackend) Reload(context.Context) (toolset.PreparedToolset, error) {
+	b.reloads++
+	return toolset.PreparedToolset{}, b.err
 }
 
 func toolNames(prepared toolset.PreparedToolset) []string {

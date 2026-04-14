@@ -70,6 +70,11 @@ type Bridge struct {
 	nextToolset uint64
 }
 
+type reloadableToolsetBackend interface {
+	toolsetctl.ToolsetBackend
+	Reload(context.Context) (toolset.PreparedToolset, error)
+}
+
 type composedToolset struct {
 	mu       sync.RWMutex
 	owner    *Bridge
@@ -609,6 +614,32 @@ func (b *Bridge) lookupToolset(id string) (*composedToolset, bool) {
 	defer b.mu.RUnlock()
 	handle, ok := b.toolsets[id]
 	return handle, ok
+}
+
+func (b *Bridge) ReloadFileBackedToolsets(ctx context.Context) error {
+	if b == nil {
+		return nil
+	}
+
+	b.mu.RLock()
+	handles := make([]*composedToolset, 0, len(b.toolsets))
+	for _, handle := range b.toolsets {
+		handles = append(handles, handle)
+	}
+	b.mu.RUnlock()
+
+	var errs []error
+	for _, handle := range handles {
+		backend := handle.backendSnapshot()
+		reloadable, ok := backend.(reloadableToolsetBackend)
+		if !ok {
+			continue
+		}
+		if _, err := reloadable.Reload(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (b *Bridge) closeToolset(id string) {

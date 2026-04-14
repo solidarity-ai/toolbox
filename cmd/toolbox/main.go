@@ -10,17 +10,20 @@ import (
 )
 
 type cli struct {
-	Install   installCmd   `cmd:"" help:"Resolve the selected toolset and write or update its lockfile."`
-	Update    updateCmd    `cmd:"" help:"Update one installed package or all installed packages in the selected toolset."`
-	Versions  versionsCmd  `cmd:"" help:"List cached and published versions for a package target."`
-	Info      infoCmd      `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
-	Outdated  outdatedCmd  `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
-	Search    searchCmd    `cmd:"" help:"Search the tool registry for packages or tools."`
-	MCP       mcpCmd       `cmd:"" help:"Serve the selected toolset over MCP stdio."`
-	Codemode  codemodeCmd  `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
-	Auth      authCmd      `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
-	Daemon    daemonCmd    `cmd:"" name:"_daemon" hidden:"" help:"Internal daemon commands."`
-	SDKBridge sdkBridgeCmd `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
+	NoDaemon       bool             `name:"no-daemon" help:"Use the local secret store directly instead of the daemon."`
+	SecretKey      string           `name:"secret-key" env:"TOOLBOX_SECRET_KEY" help:"Unlock the secret store with this passphrase."`
+	Install        installCmd       `cmd:"" help:"Resolve the selected toolset and write or update its lockfile."`
+	Update         updateCmd        `cmd:"" help:"Update one installed package or all installed packages in the selected toolset."`
+	Versions       versionsCmd      `cmd:"" help:"List cached and published versions for a package target."`
+	Info           infoCmd          `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
+	Outdated       outdatedCmd      `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
+	Search         searchCmd        `cmd:"" help:"Search the tool registry for packages or tools."`
+	MCP            mcpCmd           `cmd:"" help:"Serve the selected toolset over MCP stdio."`
+	Codemode       codemodeCmd      `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
+	Auth           authCmd          `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
+	Daemon         daemonControlCmd `cmd:"" name:"daemon" help:"Manage the toolbox daemon."`
+	InternalDaemon daemonCmd        `cmd:"" name:"_daemon" hidden:"" help:"Internal daemon commands."`
+	SDKBridge      sdkBridgeCmd     `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
 }
 
 type installCmd struct {
@@ -87,11 +90,22 @@ type authCmd struct {
 	Args []string `arg:"" optional:"" passthrough:"all" name:"arg" help:"Legacy auth arguments."`
 }
 
+type daemonControlCmd struct {
+	Stop daemonStopCmd `cmd:"" help:"Stop all running toolbox daemon processes."`
+}
+
 type sdkBridgeCmd struct {
 	ServeStdio sdkBridgeServeStdioCmd `cmd:"" name:"serve-stdio" hidden:"" help:"Serve the internal SDK bridge over stdio."`
 }
 
 type sdkBridgeServeStdioCmd struct{}
+
+func (c cli) secretStoreOptions() secretStoreOptions {
+	return secretStoreOptions{
+		NoDaemon:  c.NoDaemon,
+		SecretKey: c.SecretKey,
+	}
+}
 
 func main() {
 	if err := runWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -129,6 +143,7 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 
 	command := ctx.Command()
+	secretOpts := parsed.secretStoreOptions()
 	switch {
 	case strings.HasPrefix(command, "install"):
 		return runInstall(parsed.Install, stdout)
@@ -143,19 +158,23 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case strings.HasPrefix(command, "search"):
 		return runSearch(parsed.Search, stdout)
 	case strings.HasPrefix(command, "mcp"):
-		return runMCP(parsed.MCP, stdin, stdout, stderr)
+		return runMCP(parsed.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "codemode repl"):
-		return runRepl(parsed.Codemode.Repl, stdin, stdout, stderr)
+		return runRepl(parsed.Codemode.Repl, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "codemode mcp"):
-		return runCodemodeMCP(parsed.Codemode.MCP, stdin, stdout, stderr)
+		return runCodemodeMCP(parsed.Codemode.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):
-		return runAuth(parsed.Auth.Args, stdin, stdout, stderr)
+		return runAuth(parsed.Auth.Args, secretOpts, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "daemon stop"):
+		return runDaemonStop(stdout, stderr)
 	case strings.HasPrefix(command, "_daemon serve"):
 		return runDaemonServe(stderr)
 	case strings.HasPrefix(command, "_daemon ping"):
-		return runDaemonPing(parsed.Daemon.Ping, stdout)
+		return runDaemonPing(parsed.InternalDaemon.Ping, stdout)
+	case strings.HasPrefix(command, "_daemon stop"):
+		return runDaemonStop(stdout, stderr)
 	case strings.HasPrefix(command, "_sdkbridge serve-stdio"):
-		return runSDKBridgeServeStdio(stdin, stdout, stderr)
+		return runSDKBridgeServeStdio(secretOpts, stdin, stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}

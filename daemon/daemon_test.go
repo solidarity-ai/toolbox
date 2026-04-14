@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,11 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	daemonprocessctl "github.com/solidarity-ai/toolbox/daemon/internal/processctl"
 	daemonpaths "github.com/solidarity-ai/toolbox/daemon/internal/processctl/paths"
+	"github.com/solidarity-ai/toolbox/secrets"
 )
 
 var (
@@ -26,6 +29,8 @@ var (
 
 func TestMain(m *testing.M) {
 	code := 1
+	_ = os.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	_ = os.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
 	if err := buildTestBinaries(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	} else {
@@ -113,6 +118,50 @@ func TestSessionRegistrationTracksClients(t *testing.T) {
 	waitForClientCount(t, registry, 0)
 }
 
+func TestSessionRegistrationSecretEpochHandlerFiresOnSecretChanges(t *testing.T) {
+	_, _ = startTrackedServer(t)
+
+	reg, err := OpenSessionRegistration(SessionState{
+		Mode:       "codemode_mcp",
+		WorkingDir: "/tmp/work",
+	})
+	if err != nil {
+		t.Fatalf("OpenSessionRegistration(): %v", err)
+	}
+	defer func() {
+		if err := reg.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+	}()
+
+	var changes atomic.Int32
+	reg.SetSecretEpochHandler(func() {
+		changes.Add(1)
+	})
+
+	ctx := context.Background()
+	store := NewSecretStore("test-secret-key")
+	if err := store.Unlock(ctx, "test-secret-key"); err != nil {
+		t.Fatalf("Unlock(): %v", err)
+	}
+	waitForAtomicCount(t, &changes, 1)
+
+	if err := store.Set(ctx, "service/token", []byte("value")); err != nil {
+		t.Fatalf("Set(): %v", err)
+	}
+	waitForAtomicCount(t, &changes, 2)
+
+	if err := store.Delete(ctx, "service/token"); err != nil {
+		t.Fatalf("Delete(): %v", err)
+	}
+	waitForAtomicCount(t, &changes, 3)
+
+	if err := store.Lock(ctx); err != nil {
+		t.Fatalf("Lock(): %v", err)
+	}
+	waitForAtomicCount(t, &changes, 4)
+}
+
 func TestEnsureConnection(t *testing.T) {
 	dir := newDaemonTempDir(t)
 	t.Cleanup(func() {
@@ -139,6 +188,51 @@ func TestEnsureConnection(t *testing.T) {
 	}
 	if pid1 == pid2 {
 		t.Fatalf("relaunch pid = %d, want different from %d", pid2, pid1)
+	}
+}
+
+func TestSecretStoreRoundTrip(t *testing.T) {
+	_, _ = startTrackedServer(t)
+
+	ctx := context.Background()
+	lockedStore := NewSecretStore("")
+	if _, err := lockedStore.List(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
+		t.Fatalf("List() error = %v, want ErrLocked", err)
+	}
+
+	store := NewSecretStore("test-secret-key")
+	if err := store.Set(ctx, "service/token", []byte("value")); err != nil {
+		t.Fatalf("Set(): %v", err)
+	}
+
+	value, err := store.Get(ctx, "service/token")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if string(value) != "value" {
+		t.Fatalf("Get() = %q, want value", string(value))
+	}
+
+	keys, err := store.List(ctx, "service/")
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	if len(keys) != 1 || keys[0] != "service/token" {
+		t.Fatalf("List() = %#v, want [service/token]", keys)
+	}
+
+	if err := store.Delete(ctx, "service/token"); err != nil {
+		t.Fatalf("Delete(): %v", err)
+	}
+	if _, err := store.Get(ctx, "service/token"); !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatalf("Get() after delete error = %v, want ErrNotFound", err)
+	}
+
+	if err := store.Lock(ctx); err != nil {
+		t.Fatalf("Lock(): %v", err)
+	}
+	if _, err := lockedStore.List(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
+		t.Fatalf("List() after lock error = %v, want ErrLocked", err)
 	}
 }
 
@@ -240,6 +334,8 @@ func startTrackedServer(t *testing.T) (string, *Server) {
 
 	dir := newDaemonTempDir(t)
 	t.Setenv(daemonpaths.DaemonDirEnv, dir)
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 
 	socketPath, err := daemonpaths.SocketPath()
 	if err != nil {
@@ -432,4 +528,17 @@ func waitForPreparedTool(t *testing.T, source clientSnapshotSource, want string)
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("PreparedTools did not reach %q; got %#v", want, source.Clients())
+}
+
+func waitForAtomicCount(t *testing.T, count *atomic.Int32, want int32) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if count.Load() >= want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("atomic count did not reach %d; got %d", want, count.Load())
 }

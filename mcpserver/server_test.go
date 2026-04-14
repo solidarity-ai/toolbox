@@ -15,8 +15,10 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/mcpserver"
+	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil/mcptest"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -159,6 +161,45 @@ func TestMCPServerCallsInvokeForDifferentArgs(t *testing.T) {
 	}
 }
 
+func TestMCPServerListsUnavailableToolsAndReturnsReason(t *testing.T) {
+	pkg := tooldef.Package{
+		Module:  tooldef.ModulePath("example.com/locked"),
+		Name:    "locked",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+	}
+	prepared, err := toolset.PrepareTools(context.Background(), []assembler.LoadedTool{
+		{
+			Name:        "locked.noop",
+			Description: "Locked tool",
+			PackageMeta: &pkg,
+		},
+	}, toolset.Config{
+		CredentialPolicySource: mcpErrPolicySource{
+			pkg.Module: secrets.ErrLocked,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+
+	h := mcptest.NewHarness(t, mcpserver.New(prepared))
+	tools := h.ListTools()
+	if len(tools.Tools) != 1 {
+		t.Fatalf("tool count = %d, want 1", len(tools.Tools))
+	}
+	if tools.Tools[0].Name != "locked.noop" {
+		t.Fatalf("tool name = %q, want locked.noop", tools.Tools[0].Name)
+	}
+	if !strings.Contains(tools.Tools[0].Description, "Currently unavailable because the toolbox secret store is locked.") {
+		t.Fatalf("description = %q, want unavailable note", tools.Tools[0].Description)
+	}
+
+	result := h.CallTool("locked.noop", nil)
+	if got := mcpResultErrorText(t, result); !strings.Contains(got, "tool locked.noop is unavailable because the toolbox secret store is locked") {
+		t.Fatalf("error text = %q, want locked reason", got)
+	}
+}
+
 func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	h := mcptest.NewHarness(t, mcpserver.New(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{})))
 
@@ -179,6 +220,15 @@ func TestMCPServerCallsInvokeForStringAndNumberArgs(t *testing.T) {
 	if !strings.Contains(text.Text, "typescript check failed") {
 		t.Fatalf("expected typecheck failure, got %#v", text.Text)
 	}
+}
+
+type mcpErrPolicySource map[tooldef.ModulePath]error
+
+func (s mcpErrPolicySource) PackageCredentialPolicy(_ context.Context, pkg tooldef.Package) (toolset.PackageCredentialPolicy, error) {
+	if err, ok := s[pkg.Module]; ok {
+		return toolset.PackageCredentialPolicy{}, err
+	}
+	return toolset.PackageCredentialPolicy{}, nil
 }
 
 func TestMCPServerCallsInvokeForDistArchivePackage(t *testing.T) {

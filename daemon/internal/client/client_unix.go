@@ -79,20 +79,22 @@ func (c *Client) Close() error {
 		c.httpClient.CloseIdleConnections()
 	}
 	c.httpClient = nil
-	c.service = nil
+	c.sessionService = nil
+	c.secretStoreService = nil
 	return nil
 }
 
 func (c *Client) reconnectLocked() error {
 	replacement := newClient(c.socketPath)
 	c.httpClient = replacement.httpClient
-	c.service = replacement.service
+	c.sessionService = replacement.sessionService
+	c.secretStoreService = replacement.secretStoreService
 	return nil
 }
 
 func dialAndPing(sockPath string) (*Client, error) {
 	client := newClient(sockPath)
-	resp, err := pingService(client.service)
+	resp, err := pingService(client.sessionService)
 	if err != nil {
 		return nil, err
 	}
@@ -123,28 +125,29 @@ func (c *Client) Ping() (PingResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.service == nil {
+	if c.sessionService == nil {
 		if err := c.reconnectLocked(); err != nil {
 			return PingResult{}, err
 		}
 	}
 
-	resp, err := pingService(c.service)
+	resp, err := pingService(c.sessionService)
 	if err == nil {
 		return resp, nil
 	}
 	if err := c.reconnectLocked(); err != nil {
 		return PingResult{}, fmt.Errorf("reconnect after daemon ping failed: %w", err)
 	}
-	return pingService(c.service)
+	return pingService(c.sessionService)
 }
 
 func newClient(socketPath string) *Client {
 	httpClient := transport.NewUnixHTTPClient(socketPath)
 	return &Client{
-		socketPath: socketPath,
-		httpClient: httpClient,
-		service:    daemonv1connect.NewSessionServiceClient(httpClient, sessionServiceBaseURL),
+		socketPath:         socketPath,
+		httpClient:         httpClient,
+		sessionService:     daemonv1connect.NewSessionServiceClient(httpClient, sessionServiceBaseURL),
+		secretStoreService: daemonv1connect.NewSecretStoreServiceClient(httpClient, sessionServiceBaseURL),
 	}
 }
 

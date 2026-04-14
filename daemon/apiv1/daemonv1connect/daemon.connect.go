@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// SessionServiceName is the fully-qualified name of the SessionService service.
 	SessionServiceName = "toolbox.daemon.v1.SessionService"
+	// SecretStoreServiceName is the fully-qualified name of the SecretStoreService service.
+	SecretStoreServiceName = "toolbox.daemon.v1.SecretStoreService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -38,6 +40,20 @@ const (
 	// SessionServiceSyncStateProcedure is the fully-qualified name of the SessionService's SyncState
 	// RPC.
 	SessionServiceSyncStateProcedure = "/toolbox.daemon.v1.SessionService/SyncState"
+	// SecretStoreServiceUnlockProcedure is the fully-qualified name of the SecretStoreService's Unlock
+	// RPC.
+	SecretStoreServiceUnlockProcedure = "/toolbox.daemon.v1.SecretStoreService/Unlock"
+	// SecretStoreServiceLockProcedure is the fully-qualified name of the SecretStoreService's Lock RPC.
+	SecretStoreServiceLockProcedure = "/toolbox.daemon.v1.SecretStoreService/Lock"
+	// SecretStoreServiceGetProcedure is the fully-qualified name of the SecretStoreService's Get RPC.
+	SecretStoreServiceGetProcedure = "/toolbox.daemon.v1.SecretStoreService/Get"
+	// SecretStoreServiceSetProcedure is the fully-qualified name of the SecretStoreService's Set RPC.
+	SecretStoreServiceSetProcedure = "/toolbox.daemon.v1.SecretStoreService/Set"
+	// SecretStoreServiceDeleteProcedure is the fully-qualified name of the SecretStoreService's Delete
+	// RPC.
+	SecretStoreServiceDeleteProcedure = "/toolbox.daemon.v1.SecretStoreService/Delete"
+	// SecretStoreServiceListProcedure is the fully-qualified name of the SecretStoreService's List RPC.
+	SecretStoreServiceListProcedure = "/toolbox.daemon.v1.SecretStoreService/List"
 )
 
 // SessionServiceClient is a client for the toolbox.daemon.v1.SessionService service.
@@ -134,4 +150,205 @@ func (UnimplementedSessionServiceHandler) Ping(context.Context, *connect.Request
 
 func (UnimplementedSessionServiceHandler) SyncState(context.Context, *connect.BidiStream[apiv1.SessionState, apiv1.StateUpdate]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SessionService.SyncState is not implemented"))
+}
+
+// SecretStoreServiceClient is a client for the toolbox.daemon.v1.SecretStoreService service.
+type SecretStoreServiceClient interface {
+	Unlock(context.Context, *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error)
+	Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error)
+	Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error)
+	Set(context.Context, *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error)
+	Delete(context.Context, *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error)
+	List(context.Context, *connect.Request[apiv1.SecretListRequest]) (*connect.Response[apiv1.SecretListResponse], error)
+}
+
+// NewSecretStoreServiceClient constructs a client for the toolbox.daemon.v1.SecretStoreService
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewSecretStoreServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) SecretStoreServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	secretStoreServiceMethods := apiv1.File_daemon_apiv1_daemon_proto.Services().ByName("SecretStoreService").Methods()
+	return &secretStoreServiceClient{
+		unlock: connect.NewClient[apiv1.SecretUnlockRequest, apiv1.SecretUnlockResponse](
+			httpClient,
+			baseURL+SecretStoreServiceUnlockProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Unlock")),
+			connect.WithClientOptions(opts...),
+		),
+		lock: connect.NewClient[apiv1.SecretLockRequest, apiv1.SecretLockResponse](
+			httpClient,
+			baseURL+SecretStoreServiceLockProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Lock")),
+			connect.WithClientOptions(opts...),
+		),
+		get: connect.NewClient[apiv1.SecretGetRequest, apiv1.SecretGetResponse](
+			httpClient,
+			baseURL+SecretStoreServiceGetProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Get")),
+			connect.WithClientOptions(opts...),
+		),
+		set: connect.NewClient[apiv1.SecretSetRequest, apiv1.SecretSetResponse](
+			httpClient,
+			baseURL+SecretStoreServiceSetProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Set")),
+			connect.WithClientOptions(opts...),
+		),
+		delete: connect.NewClient[apiv1.SecretDeleteRequest, apiv1.SecretDeleteResponse](
+			httpClient,
+			baseURL+SecretStoreServiceDeleteProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Delete")),
+			connect.WithClientOptions(opts...),
+		),
+		list: connect.NewClient[apiv1.SecretListRequest, apiv1.SecretListResponse](
+			httpClient,
+			baseURL+SecretStoreServiceListProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("List")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// secretStoreServiceClient implements SecretStoreServiceClient.
+type secretStoreServiceClient struct {
+	unlock *connect.Client[apiv1.SecretUnlockRequest, apiv1.SecretUnlockResponse]
+	lock   *connect.Client[apiv1.SecretLockRequest, apiv1.SecretLockResponse]
+	get    *connect.Client[apiv1.SecretGetRequest, apiv1.SecretGetResponse]
+	set    *connect.Client[apiv1.SecretSetRequest, apiv1.SecretSetResponse]
+	delete *connect.Client[apiv1.SecretDeleteRequest, apiv1.SecretDeleteResponse]
+	list   *connect.Client[apiv1.SecretListRequest, apiv1.SecretListResponse]
+}
+
+// Unlock calls toolbox.daemon.v1.SecretStoreService.Unlock.
+func (c *secretStoreServiceClient) Unlock(ctx context.Context, req *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error) {
+	return c.unlock.CallUnary(ctx, req)
+}
+
+// Lock calls toolbox.daemon.v1.SecretStoreService.Lock.
+func (c *secretStoreServiceClient) Lock(ctx context.Context, req *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error) {
+	return c.lock.CallUnary(ctx, req)
+}
+
+// Get calls toolbox.daemon.v1.SecretStoreService.Get.
+func (c *secretStoreServiceClient) Get(ctx context.Context, req *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error) {
+	return c.get.CallUnary(ctx, req)
+}
+
+// Set calls toolbox.daemon.v1.SecretStoreService.Set.
+func (c *secretStoreServiceClient) Set(ctx context.Context, req *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error) {
+	return c.set.CallUnary(ctx, req)
+}
+
+// Delete calls toolbox.daemon.v1.SecretStoreService.Delete.
+func (c *secretStoreServiceClient) Delete(ctx context.Context, req *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error) {
+	return c.delete.CallUnary(ctx, req)
+}
+
+// List calls toolbox.daemon.v1.SecretStoreService.List.
+func (c *secretStoreServiceClient) List(ctx context.Context, req *connect.Request[apiv1.SecretListRequest]) (*connect.Response[apiv1.SecretListResponse], error) {
+	return c.list.CallUnary(ctx, req)
+}
+
+// SecretStoreServiceHandler is an implementation of the toolbox.daemon.v1.SecretStoreService
+// service.
+type SecretStoreServiceHandler interface {
+	Unlock(context.Context, *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error)
+	Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error)
+	Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error)
+	Set(context.Context, *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error)
+	Delete(context.Context, *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error)
+	List(context.Context, *connect.Request[apiv1.SecretListRequest]) (*connect.Response[apiv1.SecretListResponse], error)
+}
+
+// NewSecretStoreServiceHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewSecretStoreServiceHandler(svc SecretStoreServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	secretStoreServiceMethods := apiv1.File_daemon_apiv1_daemon_proto.Services().ByName("SecretStoreService").Methods()
+	secretStoreServiceUnlockHandler := connect.NewUnaryHandler(
+		SecretStoreServiceUnlockProcedure,
+		svc.Unlock,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Unlock")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceLockHandler := connect.NewUnaryHandler(
+		SecretStoreServiceLockProcedure,
+		svc.Lock,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Lock")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceGetHandler := connect.NewUnaryHandler(
+		SecretStoreServiceGetProcedure,
+		svc.Get,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Get")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceSetHandler := connect.NewUnaryHandler(
+		SecretStoreServiceSetProcedure,
+		svc.Set,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Set")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceDeleteHandler := connect.NewUnaryHandler(
+		SecretStoreServiceDeleteProcedure,
+		svc.Delete,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Delete")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceListHandler := connect.NewUnaryHandler(
+		SecretStoreServiceListProcedure,
+		svc.List,
+		connect.WithSchema(secretStoreServiceMethods.ByName("List")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/toolbox.daemon.v1.SecretStoreService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case SecretStoreServiceUnlockProcedure:
+			secretStoreServiceUnlockHandler.ServeHTTP(w, r)
+		case SecretStoreServiceLockProcedure:
+			secretStoreServiceLockHandler.ServeHTTP(w, r)
+		case SecretStoreServiceGetProcedure:
+			secretStoreServiceGetHandler.ServeHTTP(w, r)
+		case SecretStoreServiceSetProcedure:
+			secretStoreServiceSetHandler.ServeHTTP(w, r)
+		case SecretStoreServiceDeleteProcedure:
+			secretStoreServiceDeleteHandler.ServeHTTP(w, r)
+		case SecretStoreServiceListProcedure:
+			secretStoreServiceListHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedSecretStoreServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedSecretStoreServiceHandler struct{}
+
+func (UnimplementedSecretStoreServiceHandler) Unlock(context.Context, *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Unlock is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Lock is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Get is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) Set(context.Context, *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Set is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) Delete(context.Context, *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Delete is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) List(context.Context, *connect.Request[apiv1.SecretListRequest]) (*connect.Response[apiv1.SecretListResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.List is not implemented"))
 }

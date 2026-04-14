@@ -2,11 +2,13 @@ package invoke_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
+	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -45,6 +47,42 @@ func TestRunVisibleToolWithoutExecutableErrors(t *testing.T) {
 	}
 }
 
+func TestRunUnavailableToolReturnsTypedError(t *testing.T) {
+	pkg := tooldef.Package{
+		Module:  tooldef.ModulePath("example.com/locked"),
+		Name:    "locked",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+	}
+
+	prepared, err := toolset.PrepareTools(context.Background(), []assembler.LoadedTool{
+		{
+			Name:        "locked.noop",
+			Description: "Locked tool",
+			PackageMeta: &pkg,
+		},
+	}, toolset.Config{
+		CredentialPolicySource: invokeErrPolicySource{
+			pkg.Module: secrets.ErrLocked,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+
+	_, err = invoke.Run(prepared, "locked.noop", nil)
+	if err == nil {
+		t.Fatal("Run() error = nil, want unavailable error")
+	}
+
+	var unavailable *toolset.ToolUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("Run() error = %v, want ToolUnavailableError", err)
+	}
+	if unavailable.Reason != toolset.ToolUnavailableReasonSecretStoreLocked {
+		t.Fatalf("Reason = %q, want %q", unavailable.Reason, toolset.ToolUnavailableReasonSecretStoreLocked)
+	}
+}
+
 func TestRunContextExecutesBuiltInTools(t *testing.T) {
 	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{{
 		Name: "builtin.echo",
@@ -66,4 +104,13 @@ func TestRunContextExecutesBuiltInTools(t *testing.T) {
 	if got != "done" {
 		t.Fatalf("RunContext() = %q, want %q", got, "done")
 	}
+}
+
+type invokeErrPolicySource map[tooldef.ModulePath]error
+
+func (s invokeErrPolicySource) PackageCredentialPolicy(_ context.Context, pkg tooldef.Package) (toolset.PackageCredentialPolicy, error) {
+	if err, ok := s[pkg.Module]; ok {
+		return toolset.PackageCredentialPolicy{}, err
+	}
+	return toolset.PackageCredentialPolicy{}, nil
 }

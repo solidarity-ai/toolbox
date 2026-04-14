@@ -57,6 +57,14 @@ func Launch() error {
 	return daemonplatform.LaunchServer()
 }
 
+func StopAll() ([]int, error) {
+	return daemonplatform.StopAllRunningServers(nil)
+}
+
+func StopAllWithProgress(logf func(string, ...any)) ([]int, error) {
+	return daemonplatform.StopAllRunningServers(logf)
+}
+
 func IsProcessAlive(pid int) bool {
 	return daemonplatform.IsProcessAlive(pid)
 }

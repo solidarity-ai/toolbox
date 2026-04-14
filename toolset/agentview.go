@@ -1,6 +1,8 @@
 package toolset
 
 import (
+	"strings"
+
 	"github.com/microsoft/typescript-go/toolbox"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
@@ -13,14 +15,16 @@ type AgentView struct {
 
 // AgentTool is a single tool visible to the agent.
 type AgentTool struct {
-	Name          string
-	Description   string
-	ParamsSchema  map[string]any
-	Sig           *toolbox.FuncSignature
-	hiddenParams  map[string]bool
-	boundLiterals map[string]any // param name -> constant value for non-hidden bindings
-	Effect        tooldef.Effect
-	Idempotent    *bool
+	Name               string
+	Description        string
+	ParamsSchema       map[string]any
+	Sig                *toolbox.FuncSignature
+	hiddenParams       map[string]bool
+	boundLiterals      map[string]any // param name -> constant value for non-hidden bindings
+	Effect             tooldef.Effect
+	Idempotent         *bool
+	UnavailableReason  ToolUnavailableReason
+	UnavailableMessage string
 }
 
 // HiddenParams returns the set of hidden param names for this tool.
@@ -64,13 +68,15 @@ func (r PreparedToolset) AgentView() AgentView {
 	tools := make([]AgentTool, 0, len(r.tools))
 	for _, rt := range r.tools {
 		at := AgentTool{
-			Name:          rt.Name,
-			Description:   rt.Description,
-			Sig:           rt.Sig,
-			hiddenParams:  rt.HiddenParams(),
-			boundLiterals: rt.boundLiterals(),
-			Effect:        rt.Effect,
-			Idempotent:    rt.Idempotent,
+			Name:               rt.Name,
+			Description:        agentToolDescription(rt),
+			Sig:                rt.Sig,
+			hiddenParams:       rt.HiddenParams(),
+			boundLiterals:      rt.boundLiterals(),
+			Effect:             rt.Effect,
+			Idempotent:         rt.Idempotent,
+			UnavailableReason:  rt.UnavailableReason(),
+			UnavailableMessage: rt.UnavailableMessage(),
 		}
 
 		// Inject account selection params into the Sig when available.
@@ -92,4 +98,25 @@ func (r PreparedToolset) AgentView() AgentView {
 		tools = append(tools, at)
 	}
 	return AgentView{Tools: tools}
+}
+
+func agentToolDescription(tool PreparedTool) string {
+	description := strings.TrimSpace(tool.Description)
+	if !tool.Unavailable() {
+		return description
+	}
+
+	note := "Currently unavailable"
+	if reason := strings.TrimSpace(tool.UnavailableMessage()); reason != "" {
+		note += " because " + reason
+	}
+	note += "."
+
+	if description == "" {
+		return note
+	}
+	if strings.HasSuffix(description, ".") || strings.HasSuffix(description, "!") || strings.HasSuffix(description, "?") {
+		return description + " " + note
+	}
+	return description + ". " + note
 }

@@ -1,40 +1,90 @@
 package secrets_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
 	"github.com/solidarity-ai/toolbox/secrets"
 )
 
-func writeIdentityFile(t *testing.T, dir string) (identityPath string) {
+const testUnlockKey = "test-secret-key"
+
+func setTestScryptEnv(t *testing.T) {
 	t.Helper()
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+}
+
+func writeIdentityFile(t *testing.T, dir string) (identityPath string, recipient age.Recipient) {
+	t.Helper()
+	setTestScryptEnv(t)
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "keys.txt")
-	if err := os.WriteFile(path, []byte(identity.String()+"\n"), 0600); err != nil {
+	content := []byte(identity.String() + "\n")
+	if err := os.WriteFile(path, content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return path, identity.Recipient()
 }
 
-func newTestStore(t *testing.T) (*secrets.LocalSecretStore, string) {
+func newTestStore(t *testing.T) (*secrets.LocalSecretStore, string, string) {
 	t.Helper()
+	setTestScryptEnv(t)
 	dir := t.TempDir()
-	identityPath := writeIdentityFile(t, dir)
+	identityPath := filepath.Join(dir, "keys.txt")
 	storePath := filepath.Join(dir, "secrets")
-	store := secrets.NewLocalSecretStore(storePath, identityPath)
-	return store, storePath
+	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+	return store, storePath, identityPath + ".age"
+}
+
+func writeLegacyStoreFile(t *testing.T, storePath string, recipient age.Recipient, data map[string][]byte) {
+	t.Helper()
+	plaintext, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(storePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(storePath), ".legacy-store-*.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	encWriter, err := age.Encrypt(tmpFile, recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := encWriter.Write(plaintext); err != nil {
+		t.Fatal(err)
+	}
+	if err := encWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmpPath, storePath); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLocalSecretStore_GetSetDelete(t *testing.T) {
 	ctx := context.Background()
-	store, _ := newTestStore(t)
+	store, _, _ := newTestStore(t)
 
 	// Get nonexistent key returns ErrNotFound.
 	_, err := store.Get(ctx, "foo")
@@ -83,7 +133,7 @@ func TestLocalSecretStore_GetSetDelete(t *testing.T) {
 
 func TestLocalSecretStore_List(t *testing.T) {
 	ctx := context.Background()
-	store, _ := newTestStore(t)
+	store, _, _ := newTestStore(t)
 
 	// Empty store.
 	keys, err := store.List(ctx, "")
@@ -145,18 +195,19 @@ func TestLocalSecretStore_List(t *testing.T) {
 
 func TestLocalSecretStore_Persistence(t *testing.T) {
 	ctx := context.Background()
+	setTestScryptEnv(t)
 	dir := t.TempDir()
-	identityPath := writeIdentityFile(t, dir)
+	identityPath := filepath.Join(dir, "keys.txt")
 	storePath := filepath.Join(dir, "secrets")
 
 	// Write with first store instance.
-	store1 := secrets.NewLocalSecretStore(storePath, identityPath)
+	store1 := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
 	if err := store1.Set(ctx, "persistent", []byte("value")); err != nil {
 		t.Fatal(err)
 	}
 
 	// Read with a new store instance — verifies the data was flushed and can be decrypted.
-	store2 := secrets.NewLocalSecretStore(storePath, identityPath)
+	store2 := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
 	val, err := store2.Get(ctx, "persistent")
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +219,7 @@ func TestLocalSecretStore_Persistence(t *testing.T) {
 
 func TestLocalSecretStore_InvalidKey(t *testing.T) {
 	ctx := context.Background()
-	store, _ := newTestStore(t)
+	store, _, _ := newTestStore(t)
 
 	if _, err := store.Get(ctx, ""); err != secrets.ErrInvalidKey {
 		t.Fatalf("expected ErrInvalidKey, got %v", err)
@@ -181,21 +232,20 @@ func TestLocalSecretStore_InvalidKey(t *testing.T) {
 	}
 }
 
-func TestLocalSecretStore_BadIdentityPath(t *testing.T) {
+func TestLocalSecretStore_LockedWithoutKey(t *testing.T) {
 	ctx := context.Background()
-	store := secrets.NewLocalSecretStore(
-		filepath.Join(t.TempDir(), "secrets"),
-		filepath.Join(t.TempDir(), "nonexistent-keys.txt"),
-	)
+	setTestScryptEnv(t)
+	dir := t.TempDir()
+	store := secrets.NewLocalSecretStore(filepath.Join(dir, "secrets"), filepath.Join(dir, "keys.txt"))
 	_, err := store.Get(ctx, "key")
-	if err == nil {
-		t.Fatal("expected error for missing identity file")
+	if err != secrets.ErrLocked {
+		t.Fatalf("expected ErrLocked, got %v", err)
 	}
 }
 
 func TestLocalSecretStore_StoreFilePermissions(t *testing.T) {
 	ctx := context.Background()
-	store, storePath := newTestStore(t)
+	store, storePath, _ := newTestStore(t)
 
 	if err := store.Set(ctx, "key", []byte("val")); err != nil {
 		t.Fatal(err)
@@ -213,7 +263,7 @@ func TestLocalSecretStore_StoreFilePermissions(t *testing.T) {
 
 func TestLocalSecretStore_GetReturnsCopy(t *testing.T) {
 	ctx := context.Background()
-	store, _ := newTestStore(t)
+	store, _, _ := newTestStore(t)
 
 	if err := store.Set(ctx, "key", []byte("original")); err != nil {
 		t.Fatal(err)
@@ -234,5 +284,49 @@ func TestLocalSecretStore_GetReturnsCopy(t *testing.T) {
 	}
 	if string(val2) != "original" {
 		t.Fatalf("store internal data was mutated: got %q", string(val2))
+	}
+}
+
+func TestLocalSecretStore_CreatesWrappedIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, _, wrappedIdentityPath := newTestStore(t)
+
+	if err := store.Set(ctx, "key", []byte("value")); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(wrappedIdentityPath)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", wrappedIdentityPath, err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("wrapped identity permissions = %04o, want 0600", perm)
+	}
+
+	wrappedData, err := os.ReadFile(wrappedIdentityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(wrappedData, []byte("AGE-SECRET-KEY-")) {
+		t.Fatal("wrapped identity file contains plaintext secret key material")
+	}
+}
+
+func TestLocalSecretStore_ExistingStoreWithoutWrappedIdentityFails(t *testing.T) {
+	ctx := context.Background()
+	setTestScryptEnv(t)
+	dir := t.TempDir()
+	identityPath, recipient := writeIdentityFile(t, dir)
+	storePath := filepath.Join(dir, "secrets")
+
+	writeLegacyStoreFile(t, storePath, recipient, map[string][]byte{
+		"legacy/token": []byte("value"),
+	})
+
+	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+	if _, err := store.Get(ctx, "legacy/token"); err == nil {
+		t.Fatal("Get(legacy/token) error = nil, want missing wrapped identity error")
+	} else if !strings.Contains(err.Error(), "opening wrapped identity file") {
+		t.Fatalf("Get(legacy/token) error = %v, want wrapped identity error", err)
 	}
 }

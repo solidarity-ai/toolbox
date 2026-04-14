@@ -18,10 +18,11 @@ const sessionServiceBaseURL = "http://toolbox-daemon"
 var ErrUnsupportedPlatform = daemonplatform.ErrUnsupportedPlatform
 
 type Client struct {
-	mu         sync.Mutex
-	socketPath string
-	httpClient *http.Client
-	service    daemonv1connect.SessionServiceClient
+	mu                 sync.Mutex
+	socketPath         string
+	httpClient         *http.Client
+	sessionService     daemonv1connect.SessionServiceClient
+	secretStoreService daemonv1connect.SecretStoreServiceClient
 }
 
 type PingResult struct {
@@ -31,6 +32,7 @@ type PingResult struct {
 
 type SessionDelegate interface {
 	toolsetctl.PreparedToolConsumer
+	SetSecretEpochHandler(func())
 	Close() error
 }
 
@@ -42,6 +44,10 @@ type sessionDelegate struct {
 }
 
 type noopSessionDelegate struct{}
+
+type SecretStore struct {
+	unlockKey string
+}
 
 func OpenSessionDelegate(mode, cwd string, stderr io.Writer) (SessionDelegate, error) {
 	reg, err := OpenSessionRegistration(daemonserver.SessionState{
@@ -61,6 +67,10 @@ func OpenSessionDelegate(mode, cwd string, stderr io.Writer) (SessionDelegate, e
 
 func NewNoopSessionDelegate() SessionDelegate {
 	return noopSessionDelegate{}
+}
+
+func NewSecretStore(unlockKey string) *SecretStore {
+	return &SecretStore{unlockKey: unlockKey}
 }
 
 func (d *sessionDelegate) SetPreparedTools(prepared toolset.PreparedToolset) {
@@ -83,6 +93,15 @@ func (d *sessionDelegate) Close() error {
 	return d.reg.Close()
 }
 
+func (d *sessionDelegate) SetSecretEpochHandler(fn func()) {
+	if d == nil || d.reg == nil {
+		return
+	}
+	d.reg.SetSecretEpochHandler(fn)
+}
+
 func (noopSessionDelegate) SetPreparedTools(toolset.PreparedToolset) {}
+
+func (noopSessionDelegate) SetSecretEpochHandler(func()) {}
 
 func (noopSessionDelegate) Close() error { return nil }

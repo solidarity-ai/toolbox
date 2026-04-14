@@ -15,7 +15,16 @@ import (
 	"github.com/solidarity-ai/toolbox/toolsetctl"
 )
 
-func runMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
+type sdkBridgeServer interface {
+	ReloadFileBackedToolsets(context.Context) error
+	ServeStdio(context.Context, io.Reader, io.Writer) error
+}
+
+var newSDKBridgeServer = func(opts sdkbridge.Options) sdkBridgeServer {
+	return sdkbridge.New(opts)
+}
+
+func runMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -29,16 +38,21 @@ func runMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	managed := mcpserver.NewManagedNamed(mcpServerNameForToolsetPath(cmd.Toolset))
 	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
-	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, consumer); err != nil {
+	backend, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, opts, consumer)
+	if err != nil {
 		return err
 	}
+	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		_, err := backend.Reload(context.Background())
+		return err
+	})
 
 	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
 
-func runCodemodeMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error {
+func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -57,9 +71,14 @@ func runCodemodeMCP(cmd mcpCmd, stdin io.Reader, stdout, stderr io.Writer) error
 	defer managed.Close()
 
 	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
-	if _, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, consumer); err != nil {
+	backend, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, opts, consumer)
+	if err != nil {
 		return err
 	}
+	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		_, err := backend.Reload(context.Background())
+		return err
+	})
 
 	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
@@ -81,7 +100,7 @@ func mcpServerNameForToolsetPath(path string) string {
 	return name
 }
 
-func runSDKBridgeServeStdio(stdin io.Reader, stdout, stderr io.Writer) error {
+func runSDKBridgeServeStdio(opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -96,14 +115,17 @@ func runSDKBridgeServeStdio(stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	repo := newCredentialRepository()
+	repo := newCredentialRepository(opts)
 
-	bridge := sdkbridge.New(sdkbridge.Options{
+	bridge := newSDKBridgeServer(sdkbridge.Options{
 		Resolver:               resolver,
 		CredentialPolicySource: repo,
 		CredentialRepository:   repo,
 		SearchClientFactory:    func() (toolsetctl.SearchClient, error) { return newToolRegistrySearchClient() },
 		PreparedToolsConsumer:  sessionDelegate,
+	})
+	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		return bridge.ReloadFileBackedToolsets(context.Background())
 	})
 	return bridge.ServeStdio(context.Background(), stdin, stdout)
 }

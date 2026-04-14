@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"sync"
 
 	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -29,4 +31,44 @@ func (c combinedPreparedToolConsumer) SetPreparedTools(prepared toolset.Prepared
 		}
 		consumer.SetPreparedTools(prepared)
 	}
+}
+
+func bindSecretEpochReload(delegate daemon.SessionDelegate, stderr io.Writer, reload func() error) {
+	if delegate == nil || reload == nil {
+		return
+	}
+
+	var (
+		mu      sync.Mutex
+		running bool
+		pending bool
+	)
+
+	delegate.SetSecretEpochHandler(func() {
+		mu.Lock()
+		if running {
+			pending = true
+			mu.Unlock()
+			return
+		}
+		running = true
+		mu.Unlock()
+
+		go func() {
+			for {
+				if err := reload(); err != nil && stderr != nil {
+					_, _ = fmt.Fprintf(stderr, "toolbox daemon reload error: %v\n", err)
+				}
+
+				mu.Lock()
+				if !pending {
+					running = false
+					mu.Unlock()
+					return
+				}
+				pending = false
+				mu.Unlock()
+			}
+		}()
+	})
 }

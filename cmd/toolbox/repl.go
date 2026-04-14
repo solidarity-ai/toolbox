@@ -12,7 +12,7 @@ import (
 	"github.com/solidarity-ai/toolbox/codemodesession"
 )
 
-func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
+func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
@@ -39,9 +39,14 @@ func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	defer session.Close()
 	consumer := combinedPreparedToolConsumer{session, sessionDelegate}
-	if _, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, consumer); err != nil {
+	backend, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, opts, consumer)
+	if err != nil {
 		return err
 	}
+	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		_, err := backend.Reload(context.Background())
+		return err
+	})
 
 	fmt.Fprintln(stdout, "toolbox repl started")
 	fmt.Fprintf(stdout, "session=%s sqlite=%s resumed=%t language=ts\n", session.ID(), sqlitePath, session.Resumed())
@@ -67,7 +72,7 @@ func runRepl(cmd replCmd, stdin io.Reader, stdout, stderr io.Writer) error {
 		case line == ":exit":
 			fmt.Fprintln(stdout, "bye")
 			return nil
-		case line == ":help":
+		case line == ":help", line == ":instructions":
 			fmt.Fprintln(stdout, session.Instructions())
 		case line == ":submit":
 			src, ok := readReplMultiline(scanner, stdout)

@@ -14,6 +14,8 @@ func (r *SessionRegistration) Update(daemonserver.SessionState) error {
 	return ErrUnsupportedPlatform
 }
 
+func (r *SessionRegistration) SetSecretEpochHandler(func()) {}
+
 func (r *SessionRegistration) Close() error {
 	return ErrUnsupportedPlatform
 }

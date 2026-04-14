@@ -3,6 +3,7 @@ package toolset
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -20,6 +21,26 @@ type PreparedTool struct {
 	injector           *transport.CredentialInjector
 	allowlist          *transport.HostAllowlist
 	context            map[string]any
+	unavailableReason  ToolUnavailableReason
+}
+
+type ToolUnavailableReason string
+
+const ToolUnavailableReasonSecretStoreLocked ToolUnavailableReason = "secret_store_locked"
+
+type ToolUnavailableError struct {
+	ToolName string
+	Reason   ToolUnavailableReason
+}
+
+func (e *ToolUnavailableError) Error() string {
+	if e == nil {
+		return "tool is unavailable"
+	}
+	if reason := strings.TrimSpace(toolUnavailableReasonMessage(e.Reason)); reason != "" {
+		return fmt.Sprintf("tool %s is unavailable because %s", e.ToolName, reason)
+	}
+	return fmt.Sprintf("tool %s is unavailable", e.ToolName)
 }
 
 func (t PreparedTool) HiddenParams() map[string]bool { return t.hiddenParams }
@@ -32,7 +53,28 @@ func (t PreparedTool) Allowlist() *transport.HostAllowlist { return t.allowlist 
 
 func (t PreparedTool) MaxFetchResponseBytes() *int64 { return t.LoadedTool.MaxFetchResponseBytes }
 
+func (t PreparedTool) Unavailable() bool { return t.unavailableReason != "" }
+
+func (t PreparedTool) UnavailableReason() ToolUnavailableReason { return t.unavailableReason }
+
+func (t PreparedTool) UnavailableMessage() string {
+	return toolUnavailableReasonMessage(t.unavailableReason)
+}
+
+func (t PreparedTool) UnavailableError() error {
+	if !t.Unavailable() {
+		return nil
+	}
+	return &ToolUnavailableError{
+		ToolName: t.Name,
+		Reason:   t.unavailableReason,
+	}
+}
+
 func (t PreparedTool) ValidateCall(agentParams map[string]any) (map[string]any, error) {
+	if err := t.UnavailableError(); err != nil {
+		return nil, err
+	}
 	if len(t.bindings) == 0 {
 		return agentParams, nil
 	}
@@ -153,6 +195,20 @@ func buildPreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBi
 	return prepared, nil
 }
 
+func buildUnavailablePreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBinding, hidden map[string]bool, context map[string]any, reason ToolUnavailableReason) (PreparedTool, error) {
+	stripped := tool
+	stripped.BuiltIn = nil
+	stripped.TS = nil
+	stripped.TSWasm = nil
+
+	prepared, err := buildPreparedTool(stripped, bindings, hidden, context, PackageCredentialPolicy{})
+	if err != nil {
+		return PreparedTool{}, err
+	}
+	prepared.unavailableReason = reason
+	return prepared, nil
+}
+
 func effectiveAllowlist(pkg *tooldef.Package, override *transport.HostAllowlist) *transport.HostAllowlist {
 	if override != nil {
 		return override
@@ -169,4 +225,13 @@ func credentialNames(creds []tooldef.PackageCredential) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+func toolUnavailableReasonMessage(reason ToolUnavailableReason) string {
+	switch reason {
+	case ToolUnavailableReasonSecretStoreLocked:
+		return "the toolbox secret store is locked"
+	default:
+		return ""
+	}
 }

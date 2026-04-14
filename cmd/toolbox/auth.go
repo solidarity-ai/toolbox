@@ -27,7 +27,7 @@ var openBrowser = func(url string) {
 	_ = exec.Command("open", url).Start()
 }
 
-func runAuth(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func runAuth(args []string, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Parse flags.
 	check := false
 	deleteCredential := false
@@ -118,8 +118,7 @@ func runAuth(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return fmt.Errorf("auth: loading package from %s: %w", dir, err)
 	}
 
-	store := secrets.NewLocalSecretStore("", "")
-	repo := credentialrepo.New(store)
+	repo := newCredentialRepository(opts)
 
 	if renameFrom != "" {
 		return renameAccountWithRepo(loaded, repo, credential, renameFrom, renameTo, stdout)

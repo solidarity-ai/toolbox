@@ -31,9 +31,58 @@ message ClientSnapshot {
 
 message StateUpdate {
   repeated ClientSnapshot clients = 1;
+  string secret_epoch = 2;
 }
+
+message SecretGetRequest {
+  string key = 1;
+}
+
+message SecretGetResponse {
+  bytes value = 1;
+}
+
+message SecretSetRequest {
+  string key = 1;
+  bytes value = 2;
+}
+
+message SecretSetResponse {}
+
+message SecretDeleteRequest {
+  string key = 1;
+}
+
+message SecretDeleteResponse {}
+
+message SecretListRequest {
+  string prefix = 1;
+}
+
+message SecretListResponse {
+  repeated string keys = 1;
+}
+
+message SecretUnlockRequest {
+  string unlock_key = 1;
+}
+
+message SecretUnlockResponse {}
+
+message SecretLockRequest {}
+
+message SecretLockResponse {}
 
 service SessionService {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc SyncState(stream SessionState) returns (stream StateUpdate);
+}
+
+service SecretStoreService {
+  rpc Unlock(SecretUnlockRequest) returns (SecretUnlockResponse);
+  rpc Lock(SecretLockRequest) returns (SecretLockResponse);
+  rpc Get(SecretGetRequest) returns (SecretGetResponse);
+  rpc Set(SecretSetRequest) returns (SecretSetResponse);
+  rpc Delete(SecretDeleteRequest) returns (SecretDeleteResponse);
+  rpc List(SecretListRequest) returns (SecretListResponse);
 }

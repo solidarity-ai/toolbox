@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,10 @@ type SessionRegistration struct {
 
 	mu    sync.RWMutex
 	state daemonserver.SessionState
+
+	secretEpoch              string
+	pendingSecretEpochChange bool
+	onSecretEpochChange      func()
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -87,6 +92,25 @@ func (r *SessionRegistration) Close() error {
 	return nil
 }
 
+func (r *SessionRegistration) SetSecretEpochHandler(fn func()) {
+	if r == nil {
+		return
+	}
+
+	var callback func()
+	r.mu.Lock()
+	r.onSecretEpochChange = fn
+	if fn != nil && r.pendingSecretEpochChange {
+		r.pendingSecretEpochChange = false
+		callback = fn
+	}
+	r.mu.Unlock()
+
+	if callback != nil {
+		callback()
+	}
+}
+
 func (r *SessionRegistration) heartbeat() {
 	defer r.wg.Done()
 
@@ -116,7 +140,12 @@ func (r *SessionRegistration) receiveLoop() {
 				continue
 			}
 		}
-		if _, err := stream.Receive(); err != nil {
+		update, err := stream.Receive()
+		if err == nil {
+			r.handleStateUpdate(update)
+			continue
+		}
+		if err != nil {
 			r.clearStream(stream)
 			if errors.Is(err, context.Canceled) {
 				return
@@ -127,6 +156,36 @@ func (r *SessionRegistration) receiveLoop() {
 			default:
 			}
 		}
+	}
+}
+
+func (r *SessionRegistration) handleStateUpdate(update *daemonv1.StateUpdate) {
+	if r == nil || update == nil {
+		return
+	}
+
+	epoch := strings.TrimSpace(update.GetSecretEpoch())
+	if epoch == "" {
+		return
+	}
+
+	var callback func()
+	r.mu.Lock()
+	switch {
+	case r.secretEpoch == "":
+		r.secretEpoch = epoch
+	case r.secretEpoch != epoch:
+		r.secretEpoch = epoch
+		if r.onSecretEpochChange != nil {
+			callback = r.onSecretEpochChange
+		} else {
+			r.pendingSecretEpochChange = true
+		}
+	}
+	r.mu.Unlock()
+
+	if callback != nil {
+		callback()
 	}
 }
 

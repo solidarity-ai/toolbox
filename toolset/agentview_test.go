@@ -2,9 +2,12 @@ package toolset_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -148,6 +151,47 @@ func TestAgentViewEffectAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestAgentViewKeepsUnavailableToolsVisible(t *testing.T) {
+	t.Parallel()
+
+	prepared := calcToolset(t, toolset.Config{
+		CredentialPolicySource: lockedModulePolicySource{
+			tooldef.ModulePath("fixtures.local/calc"): secrets.ErrLocked,
+		},
+	})
+	view := prepared.AgentView()
+
+	addTool := findAgentTool(t, view, "calc.add")
+	if addTool.UnavailableReason != toolset.ToolUnavailableReasonSecretStoreLocked {
+		t.Fatalf("UnavailableReason = %q, want %q", addTool.UnavailableReason, toolset.ToolUnavailableReasonSecretStoreLocked)
+	}
+	if addTool.ParamsSchema == nil {
+		t.Fatal("expected ParamsSchema for unavailable calc.add")
+	}
+	if !strings.Contains(addTool.Description, "Currently unavailable because the toolbox secret store is locked.") {
+		t.Fatalf("Description = %q, want unavailable note", addTool.Description)
+	}
+	props, ok := addTool.ParamsSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in ParamsSchema")
+	}
+	if _, ok := props["a"]; !ok {
+		t.Fatal("expected param 'a' in ParamsSchema")
+	}
+	if _, ok := props["b"]; !ok {
+		t.Fatal("expected param 'b' in ParamsSchema")
+	}
+
+	preparedTool, ok := prepared.Tool("calc.add")
+	if !ok {
+		t.Fatal("expected prepared calc.add")
+	}
+	var unavailable *toolset.ToolUnavailableError
+	if _, err := preparedTool.ValidateCall(map[string]any{"a": 1, "b": 2}); !errors.As(err, &unavailable) {
+		t.Fatalf("ValidateCall() error = %v, want ToolUnavailableError", err)
+	}
+}
+
 func calcToolset(t testing.TB, cfg toolset.Config) toolset.PreparedToolset {
 	t.Helper()
 	prepared, err := calcPrepare(t, cfg)
@@ -194,6 +238,15 @@ func findAgentTool(t testing.TB, view toolset.AgentView, name string) toolset.Ag
 	}
 	t.Fatalf("tool %q not found in AgentView", name)
 	return toolset.AgentTool{}
+}
+
+type lockedModulePolicySource map[tooldef.ModulePath]error
+
+func (s lockedModulePolicySource) PackageCredentialPolicy(_ context.Context, pkg tooldef.Package) (toolset.PackageCredentialPolicy, error) {
+	if err, ok := s[pkg.Module]; ok {
+		return toolset.PackageCredentialPolicy{}, err
+	}
+	return toolset.PackageCredentialPolicy{}, nil
 }
 
 func TestAgentViewResourceBindingHidesParam(t *testing.T) {

@@ -2,10 +2,14 @@ package toolset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/secrets"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // AccountParam describes an auto-generated {cred}_account parameter for
@@ -22,6 +26,17 @@ type PreparedToolset struct {
 	tools          []PreparedTool
 	byName         map[string]int
 	fetchTransport http.RoundTripper
+	omitted        []OmittedPackage
+}
+
+type OmittedPackageReason string
+
+const OmittedPackageReasonSecretStoreLocked OmittedPackageReason = OmittedPackageReason(ToolUnavailableReasonSecretStoreLocked)
+
+type OmittedPackage struct {
+	Name   string
+	Module tooldef.ModulePath
+	Reason OmittedPackageReason
 }
 
 // FetchTransport returns the optional http.RoundTripper configured via
@@ -44,10 +59,12 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		return PreparedToolset{}, fmt.Errorf("create CEL env: %w", err)
 	}
 
-	out := make([]PreparedTool, len(tools))
+	out := make([]PreparedTool, 0, len(tools))
 	byName := make(map[string]int, len(tools))
 	policies := make(map[string]PackageCredentialPolicy)
-	for i, tool := range tools {
+	unavailableModules := make(map[string]ToolUnavailableReason)
+	var omitted []OmittedPackage
+	for _, tool := range tools {
 		// Start with explicit per-tool bindings
 		bindings := make(map[string]Binding)
 		if tb, ok := toolBindings[tool.Name]; ok {
@@ -88,30 +105,58 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		}
 
 		policy := PackageCredentialPolicy{}
+		unavailableReason := ToolUnavailableReason("")
 		if tool.PackageMeta != nil {
-			if cached, ok := policies[tool.PackageMeta.Module.String()]; ok {
+			moduleKey := tool.PackageMeta.Module.String()
+			if cached, ok := policies[moduleKey]; ok {
 				policy = cached
+			} else if cachedReason, ok := unavailableModules[moduleKey]; ok {
+				unavailableReason = cachedReason
 			} else {
 				policy, err = packagePolicyForTool(ctx, cfg, tool)
 				if err != nil {
-					return PreparedToolset{}, fmt.Errorf("tool %q: load package credential policy: %w", tool.Name, err)
+					if errors.Is(err, secrets.ErrLocked) {
+						unavailableReason = ToolUnavailableReasonSecretStoreLocked
+						unavailableModules[moduleKey] = unavailableReason
+						omitted = append(omitted, OmittedPackage{
+							Name:   omittedPackageName(tool),
+							Module: tool.PackageMeta.Module,
+							Reason: OmittedPackageReasonSecretStoreLocked,
+						})
+					} else {
+						return PreparedToolset{}, fmt.Errorf("tool %q: load package credential policy: %w", tool.Name, err)
+					}
+				} else {
+					policies[moduleKey] = policy
 				}
-				policies[tool.PackageMeta.Module.String()] = policy
 			}
 		}
 
-		prepared, err := buildPreparedTool(tool, compiled, hidden, cfg.EnvContext, policy)
+		var prepared PreparedTool
+		if unavailableReason != "" {
+			prepared, err = buildUnavailablePreparedTool(tool, compiled, hidden, cfg.EnvContext, unavailableReason)
+		} else {
+			prepared, err = buildPreparedTool(tool, compiled, hidden, cfg.EnvContext, policy)
+		}
 		if err != nil {
 			return PreparedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
-		out[i] = prepared
-		byName[tool.Name] = i
+		byName[tool.Name] = len(out)
+		out = append(out, prepared)
 	}
+
+	sort.Slice(omitted, func(i, j int) bool {
+		if omitted[i].Name != omitted[j].Name {
+			return omitted[i].Name < omitted[j].Name
+		}
+		return omitted[i].Module.String() < omitted[j].Module.String()
+	})
 
 	return PreparedToolset{
 		tools:          out,
 		byName:         byName,
 		fetchTransport: cfg.FetchTransport,
+		omitted:        omitted,
 	}, nil
 }
 
@@ -145,6 +190,12 @@ func (r PreparedToolset) Tool(name string) (PreparedTool, bool) {
 	return PreparedTool{}, false
 }
 
+func (r PreparedToolset) OmittedPackages() []OmittedPackage {
+	out := make([]OmittedPackage, len(r.omitted))
+	copy(out, r.omitted)
+	return out
+}
+
 // FilterTools returns a prepared toolset containing only tools that match keep.
 // The filtered toolset preserves prepared tool metadata such as bindings.
 func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedToolset {
@@ -164,5 +215,21 @@ func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedTools
 		tools:          out,
 		byName:         byName,
 		fetchTransport: r.fetchTransport,
+		omitted:        r.OmittedPackages(),
 	}
+}
+
+func omittedPackageName(tool assembler.LoadedTool) string {
+	if tool.PackageMeta != nil {
+		if name := tool.PackageMeta.Name; name != "" {
+			return name
+		}
+		if module := tool.PackageMeta.Module.String(); module != "" {
+			return module
+		}
+	}
+	if tool.Name != "" {
+		return tool.Name
+	}
+	return "<unknown>"
 }

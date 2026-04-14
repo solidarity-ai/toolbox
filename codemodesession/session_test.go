@@ -8,6 +8,8 @@ import (
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
+	"github.com/solidarity-ai/toolbox/daemon"
+	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -64,6 +66,31 @@ func TestPackageMetadataExposesUseWhenHint(t *testing.T) {
 
 	out := session.Submit(ctx, `$pkgMetadata["hacker_news"]?.useWhenHint?.includes("Hacker News posts and comments.")`)
 	assertContains(t, out, "=> true")
+}
+
+func TestInstructionsIncludeUnlockNoteForLockedPackages(t *testing.T) {
+	t.Setenv(daemon.BindAddressEnv, "localhost:7113")
+
+	prepared, err := toolset.PrepareTools(context.Background(), []assembler.LoadedTool{
+		newPreparedTool("locked.listThreads", "gmail"),
+	}, toolset.Config{
+		CredentialPolicySource: lockedPolicySource{},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+
+	session, err := codemodesession.OpenMemory(context.Background(), t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	instructions := session.Instructions()
+	assertContains(t, instructions, "Some tools are unavailable because the toolbox secret store is locked: gmail.")
+	assertContains(t, instructions, "Unlock Toolbox at http://localhost:7113/ and reload to restore them.")
 }
 
 func TestSubmitCanCallPreparedToolPackages(t *testing.T) {
@@ -498,6 +525,12 @@ func newPreparedToolWithUseWhenHint(name, packageName, useWhenHint string) assem
 			UseWhenHint: useWhenHint,
 		},
 	}
+}
+
+type lockedPolicySource struct{}
+
+func (lockedPolicySource) PackageCredentialPolicy(context.Context, tooldef.Package) (toolset.PackageCredentialPolicy, error) {
+	return toolset.PackageCredentialPolicy{}, secrets.ErrLocked
 }
 
 func assertContains(t testing.TB, got, want string) {

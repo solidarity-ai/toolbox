@@ -11,7 +11,7 @@ import (
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
 
-func loadPreparedToolset(ctx context.Context, toolsetPath, effects string) (toolset.PreparedToolset, error) {
+func loadPreparedToolset(ctx context.Context, toolsetPath, effects string, opts secretStoreOptions) (toolset.PreparedToolset, error) {
 	resolver, err := newResolver()
 	if err != nil {
 		return toolset.PreparedToolset{}, err
@@ -23,7 +23,7 @@ func loadPreparedToolset(ctx context.Context, toolsetPath, effects string) (tool
 	}
 
 	prepared, err := ts.Prepare(ctx, resolver, toolset.Config{
-		CredentialPolicySource: newCredentialPolicySource(),
+		CredentialPolicySource: newCredentialPolicySource(opts),
 	})
 	if err != nil {
 		return toolset.PreparedToolset{}, err
@@ -31,7 +31,7 @@ func loadPreparedToolset(ctx context.Context, toolsetPath, effects string) (tool
 	return filterPreparedToolsetByEffects(prepared, effects)
 }
 
-func newFileToolsetBackend(ctx context.Context, toolsetPath, effects string, consumer toolsetctl.PreparedToolConsumer) (toolsetctl.ToolsetBackend, error) {
+func newFileToolsetBackend(ctx context.Context, toolsetPath, effects string, opts secretStoreOptions, consumer toolsetctl.PreparedToolConsumer) (*toolsetctl.FileBackend, error) {
 	resolver, err := newResolver()
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func newFileToolsetBackend(ctx context.Context, toolsetPath, effects string, con
 		return nil, err
 	}
 
-	repo := newCredentialRepository()
+	repo := newCredentialRepository(opts)
 	return toolsetctl.NewFileBackend(ctx, toolsetctl.FileBackendOptions{
 		ToolsetPath:          toolsetPath,
 		Resolver:             resolver,

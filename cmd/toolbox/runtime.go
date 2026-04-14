@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/solidarity-ai/toolbox/credentialrepo"
+	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -20,12 +24,28 @@ const (
 	defaultToolRegistryTimeout = 10 * time.Second
 )
 
-func newCredentialPolicySource() toolset.PackageCredentialPolicySource {
-	return newCredentialRepository()
+type secretStoreOptions struct {
+	NoDaemon  bool
+	SecretKey string
 }
 
-func newCredentialRepository() *credentialrepo.Repository {
-	return credentialrepo.New(secrets.NewLocalSecretStore("", ""))
+func newCredentialPolicySource(opts secretStoreOptions) toolset.PackageCredentialPolicySource {
+	return newCredentialRepository(opts)
+}
+
+func newCredentialRepository(opts secretStoreOptions) *credentialrepo.Repository {
+	return credentialrepo.New(newSecretStore(opts))
+}
+
+func newSecretStore(opts secretStoreOptions) secrets.SecretStore {
+	local := secrets.NewLocalSecretStoreWithKey("", "", opts.SecretKey)
+	if opts.NoDaemon {
+		return local
+	}
+	return &daemonPreferredSecretStore{
+		primary:  daemon.NewSecretStore(opts.SecretKey),
+		fallback: local,
+	}
 }
 
 func newResolver() (*registry.Resolver, error) {
@@ -121,4 +141,72 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		clone.Header.Set("Authorization", "token "+t.token)
 	}
 	return t.base.RoundTrip(clone)
+}
+
+type daemonPreferredSecretStore struct {
+	primary  secrets.SecretStore
+	fallback secrets.SecretStore
+
+	mu          sync.RWMutex
+	useFallback bool
+}
+
+func (s *daemonPreferredSecretStore) Get(ctx context.Context, key string) ([]byte, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.Get(ctx, key)
+	}
+	value, err := s.primary.Get(ctx, key)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Get(ctx, key)
+	}
+	return value, err
+}
+
+func (s *daemonPreferredSecretStore) Set(ctx context.Context, key string, value []byte) error {
+	if s.shouldUseFallback() {
+		return s.fallback.Set(ctx, key, value)
+	}
+	err := s.primary.Set(ctx, key, value)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Set(ctx, key, value)
+	}
+	return err
+}
+
+func (s *daemonPreferredSecretStore) Delete(ctx context.Context, key string) error {
+	if s.shouldUseFallback() {
+		return s.fallback.Delete(ctx, key)
+	}
+	err := s.primary.Delete(ctx, key)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Delete(ctx, key)
+	}
+	return err
+}
+
+func (s *daemonPreferredSecretStore) List(ctx context.Context, prefix string) ([]string, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.List(ctx, prefix)
+	}
+	keys, err := s.primary.List(ctx, prefix)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.List(ctx, prefix)
+	}
+	return keys, err
+}
+
+func (s *daemonPreferredSecretStore) shouldUseFallback() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.useFallback
+}
+
+func (s *daemonPreferredSecretStore) enableFallback() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.useFallback = true
 }

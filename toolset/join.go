@@ -14,6 +14,7 @@ func JoinPreparedToolsets(sets ...PreparedToolset) (PreparedToolset, error) {
 		if out.fetchTransport == nil && set.fetchTransport != nil {
 			out.fetchTransport = set.fetchTransport
 		}
+		out.omitted = append(out.omitted, set.omitted...)
 		for _, tool := range set.tools {
 			if _, exists := out.byName[tool.Name]; exists {
 				return PreparedToolset{}, fmt.Errorf("duplicate prepared tool %q", tool.Name)

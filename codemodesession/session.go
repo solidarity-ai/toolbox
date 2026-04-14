@@ -19,6 +19,7 @@ import (
 	storemem "github.com/mackross/repljs/store/mem"
 	replsqlite "github.com/mackross/repljs/store/sqlite"
 	"github.com/solidarity-ai/toolbox/codemodesdks"
+	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -265,6 +266,11 @@ func (s *Session) Instructions() string {
 	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, "")
+	if lockedPackages := lockedOmittedPackageNames(prepared); len(lockedPackages) > 0 {
+		fmt.Fprintf(&b, "Some tools are unavailable because the toolbox secret store is locked: %s.\n", strings.Join(lockedPackages, ", "))
+		fmt.Fprintf(&b, "Unlock Toolbox at %s/ and reload to restore them.\n", daemon.BaseURL())
+		fmt.Fprintln(&b, "")
+	}
 	fmt.Fprintln(&b, "Note:")
 	fmt.Fprintln(&b, "`console.log(inspect(<last expression>))` is automatically added if console.log is NOT in the source.")
 	fmt.Fprintln(&b, "")
@@ -399,6 +405,18 @@ func pkgMetadataObject(rows []toolSummaryRow) map[string]map[string]any {
 		out[row.Name] = meta
 	}
 	return out
+}
+
+func lockedOmittedPackageNames(prepared toolset.PreparedToolset) []string {
+	var names []string
+	for _, omitted := range prepared.OmittedPackages() {
+		if omitted.Reason != toolset.OmittedPackageReasonSecretStoreLocked {
+			continue
+		}
+		names = append(names, omitted.Name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Submit evaluates a TypeScript cell and returns the shared REPL-formatted

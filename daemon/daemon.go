@@ -6,9 +6,11 @@ import (
 	"net"
 
 	daemonclient "github.com/solidarity-ai/toolbox/daemon/internal/client"
+	daemonprocessctl "github.com/solidarity-ai/toolbox/daemon/internal/processctl"
 	daemonpaths "github.com/solidarity-ai/toolbox/daemon/internal/processctl/paths"
 	daemonserver "github.com/solidarity-ai/toolbox/daemon/internal/server"
 	daemontransport "github.com/solidarity-ai/toolbox/daemon/internal/transport"
+	"github.com/solidarity-ai/toolbox/secrets"
 )
 
 var ErrUnsupportedPlatform = daemonclient.ErrUnsupportedPlatform
@@ -23,6 +25,8 @@ type ClientSnapshot = daemonserver.ClientSnapshot
 type Registry = daemonserver.Registry
 type Server = daemonserver.Server
 type SessionService = daemonserver.SessionService
+type SecretStore = daemonclient.SecretStore
+type SecretStoreService = daemonserver.SecretStoreService
 
 func IsUnsupportedPlatform(err error) bool {
 	return errors.Is(err, ErrUnsupportedPlatform)
@@ -52,12 +56,24 @@ func EnsureConnection() (*Client, error) {
 	return daemonclient.EnsureConnection()
 }
 
+func StopAll() ([]int, error) {
+	return daemonprocessctl.StopAll()
+}
+
+func StopAllWithProgress(logf func(string, ...any)) ([]int, error) {
+	return daemonprocessctl.StopAllWithProgress(logf)
+}
+
 func OpenSessionRegistration(state SessionState) (*SessionRegistration, error) {
 	return daemonclient.OpenSessionRegistration(state)
 }
 
 func OpenSessionDelegate(mode, cwd string, stderr io.Writer) (SessionDelegate, error) {
 	return daemonclient.OpenSessionDelegate(mode, cwd, stderr)
+}
+
+func NewSecretStore(unlockKey string) *SecretStore {
+	return daemonclient.NewSecretStore(unlockKey)
 }
 
 func NewNoopSessionDelegate() SessionDelegate {
@@ -72,12 +88,20 @@ func NewSessionService(registry *Registry) *SessionService {
 	return daemonserver.NewSessionService(registry)
 }
 
+func NewSecretStoreService(store secrets.ManagedSecretStore) *SecretStoreService {
+	return daemonserver.NewSecretStoreService(store)
+}
+
 func NewServer(listener net.Listener) *Server {
 	return daemonserver.NewServer(listener)
 }
 
 func NewServerWithRegistry(listener net.Listener, registry *Registry) *Server {
 	return daemonserver.NewServerWithRegistry(listener, registry)
+}
+
+func NewServerWithRegistryAndSecretStore(listener net.Listener, registry *Registry, store secrets.ManagedSecretStore) *Server {
+	return daemonserver.NewServerWithRegistryAndSecretStore(listener, registry, store)
 }
 
 func NewVerifiedListener(listener net.Listener) net.Listener {

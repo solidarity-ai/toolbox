@@ -265,6 +265,7 @@ func (x *ClientSnapshot) GetLastSyncAt() *timestamppb.Timestamp {
 type StateUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Clients       []*ClientSnapshot      `protobuf:"bytes,1,rep,name=clients,proto3" json:"clients,omitempty"`
+	SecretEpoch   string                 `protobuf:"bytes,2,opt,name=secret_epoch,json=secretEpoch,proto3" json:"secret_epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,6 +307,509 @@ func (x *StateUpdate) GetClients() []*ClientSnapshot {
 	return nil
 }
 
+func (x *StateUpdate) GetSecretEpoch() string {
+	if x != nil {
+		return x.SecretEpoch
+	}
+	return ""
+}
+
+type SecretGetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretGetRequest) Reset() {
+	*x = SecretGetRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretGetRequest) ProtoMessage() {}
+
+func (x *SecretGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretGetRequest.ProtoReflect.Descriptor instead.
+func (*SecretGetRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SecretGetRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type SecretGetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         []byte                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretGetResponse) Reset() {
+	*x = SecretGetResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretGetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretGetResponse) ProtoMessage() {}
+
+func (x *SecretGetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretGetResponse.ProtoReflect.Descriptor instead.
+func (*SecretGetResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SecretGetResponse) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type SecretSetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value         []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretSetRequest) Reset() {
+	*x = SecretSetRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretSetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretSetRequest) ProtoMessage() {}
+
+func (x *SecretSetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretSetRequest.ProtoReflect.Descriptor instead.
+func (*SecretSetRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SecretSetRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *SecretSetRequest) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type SecretSetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretSetResponse) Reset() {
+	*x = SecretSetResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretSetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretSetResponse) ProtoMessage() {}
+
+func (x *SecretSetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretSetResponse.ProtoReflect.Descriptor instead.
+func (*SecretSetResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{8}
+}
+
+type SecretDeleteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretDeleteRequest) Reset() {
+	*x = SecretDeleteRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretDeleteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretDeleteRequest) ProtoMessage() {}
+
+func (x *SecretDeleteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretDeleteRequest.ProtoReflect.Descriptor instead.
+func (*SecretDeleteRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SecretDeleteRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type SecretDeleteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretDeleteResponse) Reset() {
+	*x = SecretDeleteResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretDeleteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretDeleteResponse) ProtoMessage() {}
+
+func (x *SecretDeleteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretDeleteResponse.ProtoReflect.Descriptor instead.
+func (*SecretDeleteResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{10}
+}
+
+type SecretListRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Prefix        string                 `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretListRequest) Reset() {
+	*x = SecretListRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretListRequest) ProtoMessage() {}
+
+func (x *SecretListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretListRequest.ProtoReflect.Descriptor instead.
+func (*SecretListRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SecretListRequest) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+type SecretListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keys          []string               `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretListResponse) Reset() {
+	*x = SecretListResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretListResponse) ProtoMessage() {}
+
+func (x *SecretListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretListResponse.ProtoReflect.Descriptor instead.
+func (*SecretListResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SecretListResponse) GetKeys() []string {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+type SecretUnlockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UnlockKey     string                 `protobuf:"bytes,1,opt,name=unlock_key,json=unlockKey,proto3" json:"unlock_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretUnlockRequest) Reset() {
+	*x = SecretUnlockRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretUnlockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretUnlockRequest) ProtoMessage() {}
+
+func (x *SecretUnlockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretUnlockRequest.ProtoReflect.Descriptor instead.
+func (*SecretUnlockRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SecretUnlockRequest) GetUnlockKey() string {
+	if x != nil {
+		return x.UnlockKey
+	}
+	return ""
+}
+
+type SecretUnlockResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretUnlockResponse) Reset() {
+	*x = SecretUnlockResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretUnlockResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretUnlockResponse) ProtoMessage() {}
+
+func (x *SecretUnlockResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretUnlockResponse.ProtoReflect.Descriptor instead.
+func (*SecretUnlockResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{14}
+}
+
+type SecretLockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretLockRequest) Reset() {
+	*x = SecretLockRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretLockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretLockRequest) ProtoMessage() {}
+
+func (x *SecretLockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretLockRequest.ProtoReflect.Descriptor instead.
+func (*SecretLockRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{15}
+}
+
+type SecretLockResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretLockResponse) Reset() {
+	*x = SecretLockResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretLockResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretLockResponse) ProtoMessage() {}
+
+func (x *SecretLockResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretLockResponse.ProtoReflect.Descriptor instead.
+func (*SecretLockResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{16}
+}
+
 var File_daemon_apiv1_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_apiv1_daemon_proto_rawDesc = "" +
@@ -329,12 +833,41 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\x0eprepared_tools\x18\x04 \x03(\tR\rpreparedTools\x12=\n" +
 	"\fconnected_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vconnectedAt\x12<\n" +
 	"\flast_sync_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"lastSyncAt\"J\n" +
+	"lastSyncAt\"m\n" +
 	"\vStateUpdate\x12;\n" +
-	"\aclients\x18\x01 \x03(\v2!.toolbox.daemon.v1.ClientSnapshotR\aclients2\xab\x01\n" +
+	"\aclients\x18\x01 \x03(\v2!.toolbox.daemon.v1.ClientSnapshotR\aclients\x12!\n" +
+	"\fsecret_epoch\x18\x02 \x01(\tR\vsecretEpoch\"$\n" +
+	"\x10SecretGetRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\")\n" +
+	"\x11SecretGetResponse\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\fR\x05value\":\n" +
+	"\x10SecretSetRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\x13\n" +
+	"\x11SecretSetResponse\"'\n" +
+	"\x13SecretDeleteRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\x16\n" +
+	"\x14SecretDeleteResponse\"+\n" +
+	"\x11SecretListRequest\x12\x16\n" +
+	"\x06prefix\x18\x01 \x01(\tR\x06prefix\"(\n" +
+	"\x12SecretListResponse\x12\x12\n" +
+	"\x04keys\x18\x01 \x03(\tR\x04keys\"4\n" +
+	"\x13SecretUnlockRequest\x12\x1d\n" +
+	"\n" +
+	"unlock_key\x18\x01 \x01(\tR\tunlockKey\"\x16\n" +
+	"\x14SecretUnlockResponse\"\x13\n" +
+	"\x11SecretLockRequest\"\x14\n" +
+	"\x12SecretLockResponse2\xab\x01\n" +
 	"\x0eSessionService\x12G\n" +
 	"\x04Ping\x12\x1e.toolbox.daemon.v1.PingRequest\x1a\x1f.toolbox.daemon.v1.PingResponse\x12P\n" +
-	"\tSyncState\x12\x1f.toolbox.daemon.v1.SessionState\x1a\x1e.toolbox.daemon.v1.StateUpdate(\x010\x01B8Z6github.com/solidarity-ai/toolbox/daemon/apiv1;daemonv1b\x06proto3"
+	"\tSyncState\x12\x1f.toolbox.daemon.v1.SessionState\x1a\x1e.toolbox.daemon.v1.StateUpdate(\x010\x012\x98\x04\n" +
+	"\x12SecretStoreService\x12Y\n" +
+	"\x06Unlock\x12&.toolbox.daemon.v1.SecretUnlockRequest\x1a'.toolbox.daemon.v1.SecretUnlockResponse\x12S\n" +
+	"\x04Lock\x12$.toolbox.daemon.v1.SecretLockRequest\x1a%.toolbox.daemon.v1.SecretLockResponse\x12P\n" +
+	"\x03Get\x12#.toolbox.daemon.v1.SecretGetRequest\x1a$.toolbox.daemon.v1.SecretGetResponse\x12P\n" +
+	"\x03Set\x12#.toolbox.daemon.v1.SecretSetRequest\x1a$.toolbox.daemon.v1.SecretSetResponse\x12Y\n" +
+	"\x06Delete\x12&.toolbox.daemon.v1.SecretDeleteRequest\x1a'.toolbox.daemon.v1.SecretDeleteResponse\x12S\n" +
+	"\x04List\x12$.toolbox.daemon.v1.SecretListRequest\x1a%.toolbox.daemon.v1.SecretListResponseB8Z6github.com/solidarity-ai/toolbox/daemon/apiv1;daemonv1b\x06proto3"
 
 var (
 	file_daemon_apiv1_daemon_proto_rawDescOnce sync.Once
@@ -348,28 +881,52 @@ func file_daemon_apiv1_daemon_proto_rawDescGZIP() []byte {
 	return file_daemon_apiv1_daemon_proto_rawDescData
 }
 
-var file_daemon_apiv1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_daemon_apiv1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_daemon_apiv1_daemon_proto_goTypes = []any{
 	(*PingRequest)(nil),           // 0: toolbox.daemon.v1.PingRequest
 	(*PingResponse)(nil),          // 1: toolbox.daemon.v1.PingResponse
 	(*SessionState)(nil),          // 2: toolbox.daemon.v1.SessionState
 	(*ClientSnapshot)(nil),        // 3: toolbox.daemon.v1.ClientSnapshot
 	(*StateUpdate)(nil),           // 4: toolbox.daemon.v1.StateUpdate
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*SecretGetRequest)(nil),      // 5: toolbox.daemon.v1.SecretGetRequest
+	(*SecretGetResponse)(nil),     // 6: toolbox.daemon.v1.SecretGetResponse
+	(*SecretSetRequest)(nil),      // 7: toolbox.daemon.v1.SecretSetRequest
+	(*SecretSetResponse)(nil),     // 8: toolbox.daemon.v1.SecretSetResponse
+	(*SecretDeleteRequest)(nil),   // 9: toolbox.daemon.v1.SecretDeleteRequest
+	(*SecretDeleteResponse)(nil),  // 10: toolbox.daemon.v1.SecretDeleteResponse
+	(*SecretListRequest)(nil),     // 11: toolbox.daemon.v1.SecretListRequest
+	(*SecretListResponse)(nil),    // 12: toolbox.daemon.v1.SecretListResponse
+	(*SecretUnlockRequest)(nil),   // 13: toolbox.daemon.v1.SecretUnlockRequest
+	(*SecretUnlockResponse)(nil),  // 14: toolbox.daemon.v1.SecretUnlockResponse
+	(*SecretLockRequest)(nil),     // 15: toolbox.daemon.v1.SecretLockRequest
+	(*SecretLockResponse)(nil),    // 16: toolbox.daemon.v1.SecretLockResponse
+	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
 }
 var file_daemon_apiv1_daemon_proto_depIdxs = []int32{
-	5, // 0: toolbox.daemon.v1.ClientSnapshot.connected_at:type_name -> google.protobuf.Timestamp
-	5, // 1: toolbox.daemon.v1.ClientSnapshot.last_sync_at:type_name -> google.protobuf.Timestamp
-	3, // 2: toolbox.daemon.v1.StateUpdate.clients:type_name -> toolbox.daemon.v1.ClientSnapshot
-	0, // 3: toolbox.daemon.v1.SessionService.Ping:input_type -> toolbox.daemon.v1.PingRequest
-	2, // 4: toolbox.daemon.v1.SessionService.SyncState:input_type -> toolbox.daemon.v1.SessionState
-	1, // 5: toolbox.daemon.v1.SessionService.Ping:output_type -> toolbox.daemon.v1.PingResponse
-	4, // 6: toolbox.daemon.v1.SessionService.SyncState:output_type -> toolbox.daemon.v1.StateUpdate
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	17, // 0: toolbox.daemon.v1.ClientSnapshot.connected_at:type_name -> google.protobuf.Timestamp
+	17, // 1: toolbox.daemon.v1.ClientSnapshot.last_sync_at:type_name -> google.protobuf.Timestamp
+	3,  // 2: toolbox.daemon.v1.StateUpdate.clients:type_name -> toolbox.daemon.v1.ClientSnapshot
+	0,  // 3: toolbox.daemon.v1.SessionService.Ping:input_type -> toolbox.daemon.v1.PingRequest
+	2,  // 4: toolbox.daemon.v1.SessionService.SyncState:input_type -> toolbox.daemon.v1.SessionState
+	13, // 5: toolbox.daemon.v1.SecretStoreService.Unlock:input_type -> toolbox.daemon.v1.SecretUnlockRequest
+	15, // 6: toolbox.daemon.v1.SecretStoreService.Lock:input_type -> toolbox.daemon.v1.SecretLockRequest
+	5,  // 7: toolbox.daemon.v1.SecretStoreService.Get:input_type -> toolbox.daemon.v1.SecretGetRequest
+	7,  // 8: toolbox.daemon.v1.SecretStoreService.Set:input_type -> toolbox.daemon.v1.SecretSetRequest
+	9,  // 9: toolbox.daemon.v1.SecretStoreService.Delete:input_type -> toolbox.daemon.v1.SecretDeleteRequest
+	11, // 10: toolbox.daemon.v1.SecretStoreService.List:input_type -> toolbox.daemon.v1.SecretListRequest
+	1,  // 11: toolbox.daemon.v1.SessionService.Ping:output_type -> toolbox.daemon.v1.PingResponse
+	4,  // 12: toolbox.daemon.v1.SessionService.SyncState:output_type -> toolbox.daemon.v1.StateUpdate
+	14, // 13: toolbox.daemon.v1.SecretStoreService.Unlock:output_type -> toolbox.daemon.v1.SecretUnlockResponse
+	16, // 14: toolbox.daemon.v1.SecretStoreService.Lock:output_type -> toolbox.daemon.v1.SecretLockResponse
+	6,  // 15: toolbox.daemon.v1.SecretStoreService.Get:output_type -> toolbox.daemon.v1.SecretGetResponse
+	8,  // 16: toolbox.daemon.v1.SecretStoreService.Set:output_type -> toolbox.daemon.v1.SecretSetResponse
+	10, // 17: toolbox.daemon.v1.SecretStoreService.Delete:output_type -> toolbox.daemon.v1.SecretDeleteResponse
+	12, // 18: toolbox.daemon.v1.SecretStoreService.List:output_type -> toolbox.daemon.v1.SecretListResponse
+	11, // [11:19] is the sub-list for method output_type
+	3,  // [3:11] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_daemon_apiv1_daemon_proto_init() }
@@ -383,9 +940,9 @@ func file_daemon_apiv1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_apiv1_daemon_proto_rawDesc), len(file_daemon_apiv1_daemon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   17,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_daemon_apiv1_daemon_proto_goTypes,
 		DependencyIndexes: file_daemon_apiv1_daemon_proto_depIdxs,

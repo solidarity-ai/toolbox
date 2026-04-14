@@ -2,17 +2,174 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/solidarity-ai/toolbox/daemon"
 )
+
+type stubDaemonHTTPControl struct {
+	mu        sync.Mutex
+	locked    bool
+	unlockKey string
+	unlockErr error
+	lockErr   error
+	statusErr error
+	snapshots []daemon.ClientSnapshot
+}
+
+func (s *stubDaemonHTTPControl) Clients() []daemon.ClientSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]daemon.ClientSnapshot(nil), s.snapshots...)
+}
+
+func (s *stubDaemonHTTPControl) UnlockSecretStore(_ context.Context, unlockKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unlockErr != nil {
+		return s.unlockErr
+	}
+	s.unlockKey = unlockKey
+	s.locked = false
+	return nil
+}
+
+func (s *stubDaemonHTTPControl) LockSecretStore(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lockErr != nil {
+		return s.lockErr
+	}
+	s.locked = true
+	return nil
+}
+
+func (s *stubDaemonHTTPControl) SecretStoreLocked(context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.statusErr != nil {
+		return false, s.statusErr
+	}
+	return s.locked, nil
+}
+
+func TestMaybeAutoOpenDaemonBrowserLocked(t *testing.T) {
+	prevEnabled := daemonBrowserAutoOpenEnabled
+	prevOpen := daemonOpenBrowser
+	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	defer func() {
+		daemonBrowserAutoOpenEnabled = prevEnabled
+		daemonOpenBrowser = prevOpen
+	}()
+
+	opened := make(chan string, 1)
+	daemonOpenBrowser = func(url string) error {
+		opened <- url
+		return nil
+	}
+
+	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
+
+	select {
+	case got := <-opened:
+		if got != "http://127.0.0.1:7113/" {
+			t.Fatalf("opened url = %q, want %q", got, "http://127.0.0.1:7113/")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon browser was not opened")
+	}
+}
+
+func TestDefaultDaemonBrowserAutoOpenEnabledIsFalseInTests(t *testing.T) {
+	if defaultDaemonBrowserAutoOpenEnabled() {
+		t.Fatal("defaultDaemonBrowserAutoOpenEnabled() = true in tests, want false")
+	}
+}
+
+func TestMaybeAutoOpenDaemonBrowserSkipsWhenDisabled(t *testing.T) {
+	prevEnabled := daemonBrowserAutoOpenEnabled
+	prevOpen := daemonOpenBrowser
+	daemonBrowserAutoOpenEnabled = func() bool { return false }
+	defer func() {
+		daemonBrowserAutoOpenEnabled = prevEnabled
+		daemonOpenBrowser = prevOpen
+	}()
+
+	called := make(chan struct{}, 1)
+	daemonOpenBrowser = func(string) error {
+		called <- struct{}{}
+		return nil
+	}
+
+	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
+
+	select {
+	case <-called:
+		t.Fatal("daemon browser opened even though auto-open was disabled")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestMaybeAutoOpenDaemonBrowserSkipsWhenUnlocked(t *testing.T) {
+	prevEnabled := daemonBrowserAutoOpenEnabled
+	prevOpen := daemonOpenBrowser
+	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	defer func() {
+		daemonBrowserAutoOpenEnabled = prevEnabled
+		daemonOpenBrowser = prevOpen
+	}()
+
+	called := make(chan struct{}, 1)
+	daemonOpenBrowser = func(string) error {
+		called <- struct{}{}
+		return nil
+	}
+
+	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: false}, "127.0.0.1:7113")
+
+	select {
+	case <-called:
+		t.Fatal("daemon browser opened even though secret store was unlocked")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestMaybeAutoOpenDaemonBrowserLogsFailureWithoutReturningError(t *testing.T) {
+	prevEnabled := daemonBrowserAutoOpenEnabled
+	prevOpen := daemonOpenBrowser
+	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	defer func() {
+		daemonBrowserAutoOpenEnabled = prevEnabled
+		daemonOpenBrowser = prevOpen
+	}()
+
+	var stderr bytes.Buffer
+	daemonOpenBrowser = func(string) error {
+		return errors.New("boom")
+	}
+
+	maybeAutoOpenDaemonBrowser(&stderr, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(stderr.String(), "toolbox daemon browser launch error: boom") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("stderr = %q, want browser launch error", stderr.String())
+}
 
 func TestDaemonBindAddress(t *testing.T) {
 	t.Setenv(daemonBindAddressEnv, "")
@@ -74,6 +231,89 @@ func TestStartDaemonDebugServerServesPingAndEcho(t *testing.T) {
 	}
 }
 
+func TestStartDaemonDebugServerServesIndex(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, &stubDaemonHTTPControl{locked: true})
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/): %v", err)
+	}
+	page := string(body)
+	if !strings.Contains(page, `<strong id="status">locked</strong>`) {
+		t.Fatalf("index missing locked status: %q", page)
+	}
+	if !strings.Contains(page, `<form id="unlock-form">`) {
+		t.Fatalf("index missing unlock form: %q", page)
+	}
+	if !strings.Contains(page, `/secret-store/unlock`) {
+		t.Fatalf("index missing unlock endpoint: %q", page)
+	}
+	if !strings.Contains(page, `'Content-Type': 'application/json'`) {
+		t.Fatalf("index missing JSON submit: %q", page)
+	}
+	if strings.Contains(page, `<form id="lock-form">`) {
+		t.Fatalf("index unexpectedly rendered lock form while locked: %q", page)
+	}
+}
+
+func TestStartDaemonDebugServerServesUnlockedIndex(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, &stubDaemonHTTPControl{locked: false})
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/): %v", err)
+	}
+	page := string(body)
+	if !strings.Contains(page, `<strong id="status">unlocked</strong>`) {
+		t.Fatalf("index missing unlocked status: %q", page)
+	}
+	if !strings.Contains(page, `<form id="lock-form">`) {
+		t.Fatalf("index missing lock form: %q", page)
+	}
+	if !strings.Contains(page, `/secret-store/lock`) {
+		t.Fatalf("index missing lock endpoint: %q", page)
+	}
+	if strings.Contains(page, `<form id="unlock-form">`) {
+		t.Fatalf("index unexpectedly rendered unlock form while unlocked: %q", page)
+	}
+	if strings.Contains(page, `type="password"`) {
+		t.Fatalf("index unexpectedly rendered password input while unlocked: %q", page)
+	}
+}
+
 func TestStartDaemonDebugServerServesClients(t *testing.T) {
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
@@ -83,10 +323,9 @@ func TestStartDaemonDebugServerServesClients(t *testing.T) {
 		WorkingDir:    "/tmp/work",
 		PreparedTools: []string{"example.com/pkg@v1.2.3/calc.add"},
 	}}
+	control := &stubDaemonHTTPControl{snapshots: want}
 
-	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, func() []daemon.ClientSnapshot {
-		return want
-	})
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
 	if err != nil {
 		t.Fatalf("startDaemonDebugServer(): %v", err)
 	}
@@ -114,6 +353,117 @@ func TestStartDaemonDebugServerServesClients(t *testing.T) {
 	}
 	if len(got[0].PreparedTools) != 1 || got[0].PreparedTools[0] != want[0].PreparedTools[0] {
 		t.Fatalf("/clients[0].PreparedTools = %#v, want %#v", got[0].PreparedTools, want[0].PreparedTools)
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreEndpoints(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: true}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	assertStatus := func(path string, wantLocked bool) {
+		t.Helper()
+		resp, err := http.Get("http://" + addr + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
+		}
+		var payload secretStoreStatusResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode(%s): %v", path, err)
+		}
+		if payload.Locked != wantLocked {
+			t.Fatalf("%s locked = %t, want %t", path, payload.Locked, wantLocked)
+		}
+	}
+
+	assertStatus("/secret-store/status", true)
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader(`{"unlock_key":"hunter2"}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /secret-store/unlock status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var unlockPayload secretStoreStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&unlockPayload); err != nil {
+		t.Fatalf("Decode(/secret-store/unlock): %v", err)
+	}
+	if unlockPayload.Locked {
+		t.Fatal("/secret-store/unlock reported locked=true, want false")
+	}
+	if control.unlockKey != "hunter2" {
+		t.Fatalf("unlock key = %q, want hunter2", control.unlockKey)
+	}
+
+	assertStatus("/secret-store/status", false)
+
+	lockReq, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/lock", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/lock): %v", err)
+	}
+	lockResp, err := http.DefaultClient.Do(lockReq)
+	if err != nil {
+		t.Fatalf("POST /secret-store/lock: %v", err)
+	}
+	defer lockResp.Body.Close()
+	if lockResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/lock status = %d, want 200", lockResp.StatusCode)
+	}
+	var lockPayload secretStoreStatusResponse
+	if err := json.NewDecoder(lockResp.Body).Decode(&lockPayload); err != nil {
+		t.Fatalf("Decode(/secret-store/lock): %v", err)
+	}
+	if !lockPayload.Locked {
+		t.Fatal("/secret-store/lock reported locked=false, want true")
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreUnlockRequiresJSON(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, &stubDaemonHTTPControl{locked: true})
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader(`{"unlock_key":"hunter2"}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("POST /secret-store/unlock status = %d, want 415", resp.StatusCode)
 	}
 }
 
@@ -258,5 +608,117 @@ func TestStartDaemonDebugServerExplicitBusyAddressFails(t *testing.T) {
 	t.Setenv(daemonBindAddressEnv, listener.Addr().String())
 	if _, _, err := startDaemonDebugServer(io.Discard, nil, nil); err == nil {
 		t.Fatal("startDaemonDebugServer() error = nil, want busy-address error")
+	}
+}
+
+func TestRunDaemonServeDoesNotTouchSocketWhenHTTPBindFails(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "tbx-daemon-")
+	if err != nil {
+		t.Fatalf("MkdirTemp(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	t.Setenv("TOOLBOX_DAEMON_DIR", dir)
+
+	socketPath, err := daemon.SocketPath()
+	if err != nil {
+		t.Fatalf("SocketPath(): %v", err)
+	}
+	socketListener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen(%q): %v", socketPath, err)
+	}
+	defer socketListener.Close()
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatalf("Chmod(%q): %v", socketPath, err)
+	}
+
+	httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(http): %v", err)
+	}
+	defer httpListener.Close()
+	t.Setenv(daemonBindAddressEnv, httpListener.Addr().String())
+
+	err = runDaemonServe(io.Discard)
+	if err == nil {
+		t.Fatal("runDaemonServe() error = nil, want busy-address error")
+	}
+	if !strings.Contains(err.Error(), "listen on daemon debug address") {
+		t.Fatalf("runDaemonServe() error = %v, want debug-listener bind failure", err)
+	}
+
+	info, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("Lstat(%q): %v", socketPath, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("%s mode = %v, want socket", socketPath, info.Mode())
+	}
+}
+
+func TestRunDaemonStopReportsNoRunningDaemons(t *testing.T) {
+	prev := daemonStopAll
+	daemonStopAll = func(func(string, ...any)) ([]int, error) {
+		return nil, nil
+	}
+	defer func() {
+		daemonStopAll = prev
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if err := runDaemonStop(&stdout, &stderr); err != nil {
+		t.Fatalf("runDaemonStop() error: %v", err)
+	}
+	if got := stdout.String(); got != "no running toolbox daemons\n" {
+		t.Fatalf("stdout = %q, want %q", got, "no running toolbox daemons\n")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunDaemonStopReportsStoppedPIDs(t *testing.T) {
+	prev := daemonStopAll
+	daemonStopAll = func(func(string, ...any)) ([]int, error) {
+		return []int{12, 34}, nil
+	}
+	defer func() {
+		daemonStopAll = prev
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if err := runDaemonStop(&stdout, &stderr); err != nil {
+		t.Fatalf("runDaemonStop() error: %v", err)
+	}
+	if got := stdout.String(); got != "stopped toolbox daemons: 12 34\n" {
+		t.Fatalf("stdout = %q, want %q", got, "stopped toolbox daemons: 12 34\n")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunDaemonStopWritesProgressToStderr(t *testing.T) {
+	prev := daemonStopAll
+	daemonStopAll = func(logf func(string, ...any)) ([]int, error) {
+		logf("sent SIGTERM to toolbox daemons: %s; waiting up to %s before SIGKILL", "12 34", "15s")
+		logf("toolbox daemons still running after %s: %s; sending SIGKILL", "15s", "34")
+		return []int{12, 34}, nil
+	}
+	defer func() {
+		daemonStopAll = prev
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if err := runDaemonStop(&stdout, &stderr); err != nil {
+		t.Fatalf("runDaemonStop() error: %v", err)
+	}
+	if got := stdout.String(); got != "stopped toolbox daemons: 12 34\n" {
+		t.Fatalf("stdout = %q, want %q", got, "stopped toolbox daemons: 12 34\n")
+	}
+	if got := stderr.String(); got != "sent SIGTERM to toolbox daemons: 12 34; waiting up to 15s before SIGKILL\ntoolbox daemons still running after 15s: 34; sending SIGKILL\n" {
+		t.Fatalf("stderr = %q", got)
 	}
 }

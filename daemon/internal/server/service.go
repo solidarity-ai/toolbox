@@ -16,14 +16,30 @@ import (
 type SessionService struct {
 	daemonv1connect.UnimplementedSessionServiceHandler
 
-	registry *Registry
+	registry    *Registry
+	secretEpoch *SecretEpoch
+	notifier    *stateNotifier
 }
 
 func NewSessionService(registry *Registry) *SessionService {
+	return newSessionService(registry, NewSecretEpoch(), newStateNotifier())
+}
+
+func newSessionService(registry *Registry, secretEpoch *SecretEpoch, notifier *stateNotifier) *SessionService {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	return &SessionService{registry: registry}
+	if secretEpoch == nil {
+		secretEpoch = NewSecretEpoch()
+	}
+	if notifier == nil {
+		notifier = newStateNotifier()
+	}
+	return &SessionService{
+		registry:    registry,
+		secretEpoch: secretEpoch,
+		notifier:    notifier,
+	}
 }
 
 func (s *SessionService) Handler(opts ...connect.HandlerOption) (string, http.Handler) {
@@ -45,34 +61,68 @@ func (s *SessionService) Ping(context.Context, *connect.Request[daemonv1.PingReq
 }
 
 func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream[daemonv1.SessionState, daemonv1.StateUpdate]) error {
-	var clientID uint64
-	defer func() {
-		if clientID != 0 {
-			s.registry.RemoveClient(clientID)
+	subID, updates := s.notifier.Subscribe()
+	defer s.notifier.Unsubscribe(subID)
+
+	if err := stream.Send(s.currentStateUpdate()); err != nil {
+		return err
+	}
+
+	recvErrCh := make(chan error, 1)
+	go func() {
+		var clientID uint64
+		defer func() {
+			if clientID != 0 {
+				s.registry.RemoveClient(clientID)
+				s.notifier.Notify()
+			}
+		}()
+
+		for {
+			msg, err := stream.Receive()
+			if err != nil {
+				switch {
+				case errors.Is(err, io.EOF), errors.Is(err, context.Canceled):
+					recvErrCh <- nil
+				default:
+					recvErrCh <- err
+				}
+				return
+			}
+			if clientID == 0 {
+				clientID = s.registry.AddClient(int(msg.GetPid()))
+			}
+			s.registry.UpdateClient(clientID, SessionState{
+				Mode:          msg.GetMode(),
+				WorkingDir:    msg.GetWorkingDir(),
+				PreparedTools: append([]string(nil), msg.GetPreparedTools()...),
+			})
+			s.notifier.Notify()
 		}
 	}()
 
 	for {
-		msg, err := stream.Receive()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+		select {
+		case err := <-recvErrCh:
+			return err
+		case _, ok := <-updates:
+			if !ok {
 				return nil
 			}
-			return err
+			if err := stream.Send(s.currentStateUpdate()); err != nil {
+				return err
+			}
 		}
-		if clientID == 0 {
-			clientID = s.registry.AddClient(int(msg.GetPid()))
-		}
-		s.registry.UpdateClient(clientID, SessionState{
-			Mode:          msg.GetMode(),
-			WorkingDir:    msg.GetWorkingDir(),
-			PreparedTools: append([]string(nil), msg.GetPreparedTools()...),
-		})
-		if err := stream.Send(&daemonv1.StateUpdate{
-			Clients: clientSnapshotsToProto(s.registry.Clients()),
-		}); err != nil {
-			return err
-		}
+	}
+}
+
+func (s *SessionService) currentStateUpdate() *daemonv1.StateUpdate {
+	if s == nil {
+		return &daemonv1.StateUpdate{}
+	}
+	return &daemonv1.StateUpdate{
+		Clients:     clientSnapshotsToProto(s.registry.Clients()),
+		SecretEpoch: s.secretEpoch.Current(),
 	}
 }
 

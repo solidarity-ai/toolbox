@@ -68,40 +68,53 @@ func runDaemonServe(stderr io.Writer) error {
 		return fmt.Errorf("create daemon dir: %w", err)
 	}
 
-	debugListener, err := listenDaemonDebugListener()
+	bindAddress, explicitDebugBind := daemonBindAddress()
+	debugListener, err := net.Listen("tcp", bindAddress)
 	if err != nil {
-		return err
+		if explicitDebugBind {
+			return fmt.Errorf("listen on daemon debug address %s: %w", bindAddress, err)
+		}
+		if stderr != nil {
+			_, _ = fmt.Fprintf(stderr, "toolbox daemon debug server disabled: listen on daemon debug address %s: %v\n", bindAddress, err)
+		}
+	}
+	closeDebugListener := func() {
+		if debugListener == nil {
+			return
+		}
+		_ = debugListener.Close()
+		debugListener = nil
 	}
 
 	socketPath, err := daemon.SocketPath()
 	if err != nil {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return err
 	}
 	pidPath, err := daemon.PIDPath()
 	if err != nil {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return err
 	}
 
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return fmt.Errorf("remove stale daemon socket: %w", err)
 	}
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return fmt.Errorf("listen on daemon socket: %w", err)
 	}
 	defer listener.Close()
 
 	if err := os.Chmod(socketPath, 0o600); err != nil {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return fmt.Errorf("chmod daemon socket: %w", err)
 	}
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
-		_ = debugListener.Close()
+		closeDebugListener()
 		return fmt.Errorf("write daemon pid: %w", err)
 	}
 
@@ -125,11 +138,13 @@ func runDaemonServe(stderr io.Writer) error {
 		})
 	}
 	var debugAddr string
-	closeDebugServer, debugAddr, err = serveDaemonDebugServer(debugListener, stderr, shutdown, udsServer)
-	if err != nil {
-		return err
+	if debugListener != nil {
+		closeDebugServer, debugAddr, err = serveDaemonDebugServer(debugListener, stderr, shutdown, udsServer)
+		if err != nil {
+			return err
+		}
+		debugListener = nil
 	}
-	debugListener = nil
 	maybeAutoOpenDaemonBrowser(stderr, udsServer, debugAddr)
 
 	defer func() {

@@ -34,10 +34,23 @@ func (c *client) call(t *testing.T, req Request) Response {
 	return resp
 }
 
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "tbx-vfs-")
+	if err != nil {
+		t.Fatalf("MkdirTemp(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return filepath.Join(dir, "vfs.sock")
+}
+
 func startTestServer(t *testing.T) (string, *MemFS) {
 	t.Helper()
 	memFS := NewMemFS()
-	sockPath := filepath.Join(t.TempDir(), "vfs.sock")
+	sockPath := testSocketPath(t)
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)

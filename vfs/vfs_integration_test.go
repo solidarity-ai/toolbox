@@ -12,6 +12,19 @@ import (
 	"github.com/solidarity-ai/toolbox/vfs"
 )
 
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "tbx-vfs-it-")
+	if err != nil {
+		t.Fatalf("MkdirTemp(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return filepath.Join(dir, "vfs.sock")
+}
+
 // TestWASMGuestFileRoundTrip runs a real WASI guest binary that reads
 // /work/input.txt from the VFS proxy and writes /work/output.txt back through
 // it. Verifies both the guest stdout and the written file from the Go side.
@@ -27,7 +40,7 @@ func TestWASMGuestFileRoundTrip(t *testing.T) {
 		t.Fatalf("pre-populate: %v", err)
 	}
 
-	sockPath := filepath.Join(t.TempDir(), "vfs.sock")
+	sockPath := testSocketPath(t)
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)

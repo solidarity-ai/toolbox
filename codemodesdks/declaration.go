@@ -380,15 +380,21 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 	literals := tool.BoundLiterals()
 	modeLabel := effectLabel(tool.Effect, tool.Idempotent)
 
+	visibleParams := make([]toolbox.FuncParam, 0)
+	if tool.Sig != nil {
+		for _, p := range tool.Sig.Params() {
+			if !hidden[p.Name()] {
+				visibleParams = append(visibleParams, p)
+			}
+		}
+	}
+
 	var multiLineParams []struct {
 		name string
 		desc string
 	}
-	if tool.Sig != nil {
-		for _, p := range tool.Sig.Params() {
-			if hidden[p.Name()] {
-				continue
-			}
+	for _, p := range visibleParams {
+		if tool.Sig != nil {
 			desc := p.Description()
 			if desc != "" && strings.Contains(desc, "\n") {
 				multiLineParams = append(multiLineParams, struct {
@@ -409,11 +415,8 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 
 	useMultiLine := len(multiLineParams) > 0
 	var paramParts []string
-	if tool.Sig != nil {
-		for _, p := range tool.Sig.Params() {
-			if hidden[p.Name()] {
-				continue
-			}
+	for i, p := range visibleParams {
+		if tool.Sig != nil {
 			var tsType string
 			if litVal, ok := literals[p.Name()]; ok {
 				tsType = literalToTS(litVal)
@@ -424,14 +427,10 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 			} else {
 				tsType = p.Type().ToTS()
 			}
-			name := p.Name()
-			if p.Optional() {
-				name += "?"
-			}
-			desc := p.Description()
+			name, tsType := renderFunctionParam(p, tsType, visibleParams[i+1:])
 			if useMultiLine {
 				paramParts = append(paramParts, name+": "+tsType)
-			} else if desc != "" && !strings.Contains(desc, "\n") {
+			} else if desc := p.Description(); desc != "" && !strings.Contains(desc, "\n") {
 				paramParts = append(paramParts, fmt.Sprintf("/** %s */ %s: %s", desc, name, tsType))
 			} else {
 				paramParts = append(paramParts, fmt.Sprintf("%s: %s", name, tsType))
@@ -468,14 +467,6 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 
 	if useMultiLine && len(paramParts) > 0 {
 		fmt.Fprintf(b, "%sfunction %s(\n", indent, method)
-		visibleParams := make([]toolbox.FuncParam, 0)
-		if tool.Sig != nil {
-			for _, p := range tool.Sig.Params() {
-				if !hidden[p.Name()] {
-					visibleParams = append(visibleParams, p)
-				}
-			}
-		}
 		for i, part := range paramParts {
 			if i < len(visibleParams) {
 				if desc := visibleParams[i].Description(); desc != "" {
@@ -495,6 +486,34 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 	}
 
 	fmt.Fprintf(b, "%sfunction %s(%s): %s;%s\n", indent, method, strings.Join(paramParts, ", "), returnType, modeTrail)
+}
+
+func renderFunctionParam(p toolbox.FuncParam, tsType string, later []toolbox.FuncParam) (name string, renderedType string) {
+	name = p.Name()
+	renderedType = tsType
+	if !p.Optional() {
+		return name, renderedType
+	}
+	if hasRequiredParam(later) {
+		return name, ensureUndefinedUnion(renderedType)
+	}
+	return name + "?", renderedType
+}
+
+func hasRequiredParam(params []toolbox.FuncParam) bool {
+	for _, p := range params {
+		if !p.Optional() {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureUndefinedUnion(tsType string) string {
+	if strings.Contains(tsType, "undefined") {
+		return tsType
+	}
+	return tsType + " | undefined"
 }
 
 func wrapNamespacePath(segments []string, body string) string {
@@ -741,10 +760,8 @@ func collectSplitDeclarations(tools []toolset.AgentTool) (paramLines, returnLine
 		if pt := tool.ParamsType(); pt != nil {
 			sources = append(sources, pt)
 		}
-		if tool.Sig != nil {
-			if rt := tool.Sig.Return(); rt != nil {
-				sources = append(sources, rt)
-			}
+		if rt := toolDeclarationReturnSource(tool); rt != nil {
+			sources = append(sources, rt)
 		}
 		for _, src := range sources {
 			for name, dt := range src.DefinitionTypes() {
@@ -779,13 +796,11 @@ func collectSplitDeclarations(tools []toolset.AgentTool) (paramLines, returnLine
 			}
 		}
 		// Return declarations → returnLines
-		if tool.Sig != nil {
-			if rt := tool.Sig.Return(); rt != nil {
-				if decls := rt.Declarations(); decls != "" {
-					for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
-						if line != "" {
-							addLine(line, &returnLines)
-						}
+		if rt := toolDeclarationReturnSource(tool); rt != nil {
+			if decls := rt.Declarations(); decls != "" {
+				for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
+					if line != "" {
+						addLine(line, &returnLines)
 					}
 				}
 			}
@@ -806,10 +821,8 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 		if pt := tool.ParamsType(); pt != nil {
 			sources = append(sources, pt)
 		}
-		if tool.Sig != nil {
-			if rt := tool.Sig.Return(); rt != nil {
-				sources = append(sources, rt)
-			}
+		if rt := toolDeclarationReturnSource(tool); rt != nil {
+			sources = append(sources, rt)
 		}
 		for _, src := range sources {
 			for name, dt := range src.DefinitionTypes() {
@@ -828,8 +841,8 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 		if pt := tool.ParamsType(); pt != nil {
 			sources = append(sources, pt)
 		}
-		if shouldEmitReturnDeclarations(tool, returnTypes) && tool.Sig != nil {
-			if rt := tool.Sig.Return(); rt != nil {
+		if shouldEmitReturnDeclarations(tool, returnTypes) {
+			if rt := toolDeclarationReturnSource(tool); rt != nil {
 				sources = append(sources, rt)
 			}
 		}
@@ -983,6 +996,20 @@ func shouldEmitReturnDeclarations(tool toolset.AgentTool, returnTypes map[string
 		return ok && info.mode == "named" && info.typeName == refName
 	}
 	return true
+}
+
+func toolDeclarationReturnSource(tool toolset.AgentTool) *toolbox.TSType {
+	if tool.Sig == nil {
+		return nil
+	}
+	rt := tool.Sig.Return()
+	if rt == nil {
+		return nil
+	}
+	if unwrapped := rt.UnwrapPromise(); unwrapped != nil {
+		return unwrapped
+	}
+	return rt
 }
 
 func preferredSharedReturnTypeName(key string, paramDefNames map[string]string, refNames map[string]map[string]int, fallbackNames map[string]string) string {

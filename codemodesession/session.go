@@ -260,6 +260,7 @@ func (s *Session) Instructions() string {
 	fmt.Fprintln(&b, "	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (use var or leave global).")
 	fmt.Fprintln(&b, "  - For long cells use unique variable names")
 	fmt.Fprintln(&b, "  - For small cells use it'ss easier to use $last / $val(cell_index) to reuse prior results.")
+	fmt.Fprintln(&b, "  - Cells ending with console.log, return undefined — end with the variable if you need to reference it later.")
 	fmt.Fprintln(&b, "- There are no imports")
 	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, "===")

@@ -2,12 +2,16 @@ package codemodesession_test
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
@@ -66,6 +70,44 @@ func TestPackageMetadataExposesUseWhenHint(t *testing.T) {
 
 	out := session.Submit(ctx, `$pkgMetadata["hacker_news"]?.useWhenHint?.includes("Hacker News posts and comments.")`)
 	assertContains(t, out, "=> true")
+}
+
+func TestSubmitPackageMetadataWorksWithInjectedAccountParamAfterOptionalInput(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/mail", "mail", map[string]string{
+		"tools/list.ts": `export default async function tool(input?: {
+  query?: string;
+}): Promise<{ ok: boolean }> {
+  return { ok: true };
+}
+`,
+	})
+
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+			CredentialPolicySource: credentialrepo.StaticPolicySource{
+				tooldef.ModulePath("example.com/mail"): {
+					CredentialAccounts: map[string][]string{
+						"workspace": {"a@example.com", "b@example.com"},
+					},
+				},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	out := session.Submit(ctx, `$pkgMetadata`)
+	assertContains(t, out, "mail")
+	assertNotContains(t, out, "failure: typecheck failed")
+	assertNotContains(t, out, "A required parameter cannot follow an optional parameter")
+
+	countOut := session.Submit(ctx, `$pkgMetadata["mail"]?.toolCount`)
+	assertContains(t, countOut, "=> 1")
+	assertNotContains(t, countOut, "failure: typecheck failed")
+	assertNotContains(t, countOut, "A required parameter cannot follow an optional parameter")
 }
 
 func TestInstructionsIncludeUnlockNoteForLockedPackages(t *testing.T) {
@@ -526,6 +568,35 @@ func newPreparedToolWithUseWhenHint(name, packageName, useWhenHint string) assem
 			UseWhenHint: useWhenHint,
 		},
 	}
+}
+
+func writeSessionPackage(t testing.TB, dir, module, name string, files map[string]string) string {
+	t.Helper()
+
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		fullPath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(fullPath), err)
+		}
+		if err := os.WriteFile(fullPath, []byte(files[path]), 0o644); err != nil {
+			t.Fatalf("write %s: %v", fullPath, err)
+		}
+	}
+
+	entries := make([]string, 0, len(paths))
+	for _, path := range paths {
+		entries = append(entries, fmt.Sprintf(`{ "entry_ts": %q }`, path))
+	}
+	manifest := fmt.Sprintf("{\n  \"module\": %q,\n  \"name\": %q,\n  \"runtime\": \"typescript-sandbox\",\n  \"tools\": [\n    %s\n  ]\n}\n", module, name, strings.Join(entries, ",\n    "))
+	if err := os.WriteFile(filepath.Join(dir, "toolbox.devpkg.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return dir
 }
 
 type lockedPolicySource struct{}

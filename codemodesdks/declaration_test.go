@@ -11,8 +11,10 @@ import (
 
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/codemodesdks"
+	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -194,6 +196,92 @@ export default async function tool(): Promise<Ticket> {
 	if !strings.Contains(got, "interface Ticket {") && !strings.Contains(got, "type Ticket = {") {
 		t.Fatalf("expected shared Ticket declaration:\n%s", got)
 	}
+}
+
+func TestDeclarationSource_AsyncInlineReturnKeepsNamedDefinitions(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/google-workspace", "googleWorkspace", map[string]string{
+		"tools/calendar.list.ts": `interface EventSummary {
+  eventId: string;
+  title: string | null;
+}
+
+export default async function tool(): Promise<{
+  nextPageToken: string | null;
+  events: EventSummary[];
+}> {
+  return {
+    nextPageToken: null,
+    events: [{ eventId: "evt_1", title: "Staff meeting" }],
+  };
+}
+`,
+		"tools/gmail.read.ts": `interface Attachment {
+  filename: string;
+  mimeType: string;
+}
+
+export default async function tool(): Promise<{
+  attachments: Attachment[];
+}> {
+  return {
+    attachments: [{ filename: "brief.pdf", mimeType: "application/pdf" }],
+  };
+}
+`,
+	})
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	got := codemodesdks.DeclarationSource(prepared)
+
+	if !strings.Contains(got, "type EventSummary =") && !strings.Contains(got, "interface EventSummary {") {
+		t.Fatalf("expected EventSummary declaration to be retained:\n%s", got)
+	}
+	if !strings.Contains(got, "type Attachment =") && !strings.Contains(got, "interface Attachment {") {
+		t.Fatalf("expected Attachment declaration to be retained:\n%s", got)
+	}
+
+	typecheckDeclarations(t, got, `const title = googleWorkspace.calendar.list().events[0].title;
+const mimeType = googleWorkspace.gmail.read().attachments[0].mimeType;
+void title;
+void mimeType;
+export {};
+`)
+}
+
+func TestDeclarationSource_OptionalParamBeforeInjectedAccountParamTypechecks(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/mail", "mail", map[string]string{
+		"tools/list.ts": `export default async function tool(input?: {
+  query?: string;
+}): Promise<{ ok: boolean }> {
+  return { ok: true };
+}
+`,
+	})
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		CredentialPolicySource: credentialrepo.StaticPolicySource{
+			tooldef.ModulePath("example.com/mail"): {
+				CredentialAccounts: map[string][]string{
+					"workspace": {"a@example.com", "b@example.com"},
+				},
+			},
+		},
+	})
+	got := codemodesdks.DeclarationSource(prepared)
+
+	if !strings.Contains(got, `function list(input: { query?: string } | undefined,`) {
+		t.Fatalf("expected optional input to render as an explicit undefined union:\n%s", got)
+	}
+	if !strings.Contains(got, `workspace_account: "a@example.com" | "b@example.com"`) {
+		t.Fatalf("expected injected account union in rendered signature:\n%s", got)
+	}
+
+	typecheckDeclarations(t, got, `const ok = mail.list(undefined, "a@example.com").ok;
+const ok2 = mail.list({ query: "hello" }, "b@example.com").ok;
+void ok;
+void ok2;
+export {};
+`)
 }
 
 func writePackage(t testing.TB, dir, module, name string, files map[string]string) string {

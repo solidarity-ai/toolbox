@@ -45,9 +45,10 @@ type AgentUnsafeConfig struct {
 
 // ToolsetFile is the minimal declarative *.toolset.json format.
 type ToolsetFile struct {
-	Packages map[string]string `json:"packages"`
-	Tools    []ToolEntry       `json:"tools"`
-	Agent    *AgentConfig      `json:"agent,omitempty"`
+	Packages      map[string]string `json:"packages"`
+	ToolApprovals map[string]bool   `json:"tool_approvals,omitempty"`
+	Tools         []ToolEntry       `json:"tools"`
+	Agent         *AgentConfig      `json:"agent,omitempty"`
 
 	parsedPackages map[tooldef.ModulePath]tooldef.Version
 	filename       string
@@ -374,6 +375,35 @@ func (f *ToolsetFile) encodeStable() ([]byte, error) {
 		buf.WriteString("},\n")
 	}
 
+	if len(f.ToolApprovals) > 0 {
+		approvalKeys := make([]string, 0, len(f.ToolApprovals))
+		for key := range f.ToolApprovals {
+			approvalKeys = append(approvalKeys, key)
+		}
+		sort.Strings(approvalKeys)
+
+		buf.WriteString("  \"tool_approvals\": {\n")
+		for i, key := range approvalKeys {
+			keyJSON, err := json.Marshal(key)
+			if err != nil {
+				return nil, fmt.Errorf("marshal tool approval key %q: %w", key, err)
+			}
+			valueJSON, err := json.Marshal(f.ToolApprovals[key])
+			if err != nil {
+				return nil, fmt.Errorf("marshal tool approval value %q: %w", key, err)
+			}
+			buf.WriteString("    ")
+			buf.Write(keyJSON)
+			buf.WriteString(": ")
+			buf.Write(valueJSON)
+			if i < len(approvalKeys)-1 {
+				buf.WriteString(",")
+			}
+			buf.WriteString("\n")
+		}
+		buf.WriteString("  },\n")
+	}
+
 	buf.WriteString("  \"tools\": [")
 	if len(f.Tools) > 0 {
 		buf.WriteString("\n")
@@ -513,6 +543,12 @@ func (f *ToolsetFile) Prepare(ctx context.Context, resolver *registry.Resolver, 
 	if len(cfgs) > 0 {
 		cfg = cfgs[0]
 	}
+	if f != nil && len(f.ToolApprovals) > 0 {
+		cfg.ToolApprovals = cloneToolApprovals(cfg.ToolApprovals)
+		for key, value := range f.ToolApprovals {
+			cfg.ToolApprovals[key] = value
+		}
+	}
 	return f.prepareWithConfig(ctx, resolver, cfg)
 }
 
@@ -643,4 +679,15 @@ func validateUniqueLoadedPackageNames(loadedPkgs assembler.LoadedPackages) error
 		seen[name] = module
 	}
 	return nil
+}
+
+func cloneToolApprovals(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return make(map[string]bool)
+	}
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

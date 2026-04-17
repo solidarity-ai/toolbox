@@ -11,6 +11,12 @@
         "minLength": 1
       }
     },
+    "tool_approvals": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
     "agent": {
       "type": "object",
       "additionalProperties": false,

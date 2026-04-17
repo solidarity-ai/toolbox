@@ -96,7 +96,7 @@ func TestBridgeServeStdioPreservesLifecycleRequestOrder(t *testing.T) {
 				"toolset_id": composed.ToolsetID,
 				"tool_name":  CodeModeToolName,
 				"params": map[string]any{
-					codemodesession.TypeScriptCellSourceParam: "calc.calc.add(2, 3)",
+					codemodesession.TypeScriptCellSourceParam: "await calc.calc.add(2, 3)",
 				},
 			},
 		})),
@@ -503,7 +503,7 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 		ToolsetID: composed.ToolsetID,
 		ToolName:  CodeModeToolName,
 		Params: map[string]any{
-			codemodesession.TypeScriptCellSourceParam: `calc.calc.add(4, 5)`,
+			codemodesession.TypeScriptCellSourceParam: `await calc.calc.add(4, 5)`,
 		},
 	}))
 	if err != nil {

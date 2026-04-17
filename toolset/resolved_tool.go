@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"sort"
 	"strings"
 
 	"github.com/solidarity-ai/toolbox/assembler"
@@ -26,6 +28,7 @@ type PreparedTool struct {
 	allowlist          *transport.HostAllowlist
 	context            map[string]any
 	unavailableReason  ToolUnavailableReason
+	NeedsApproval      bool
 	jsonCallable       bool
 	jsonCallWhyNot     string
 }
@@ -84,6 +87,36 @@ func (t PreparedTool) JSONCallable() bool { return t.jsonCallable }
 
 // JSONCallWhyNot explains why JSONCallable is false.
 func (t PreparedTool) JSONCallWhyNot() string { return t.jsonCallWhyNot }
+
+// ToolCallReturnsTask reports whether notebook callers should receive a
+// ToolCallTask<T> instead of a ToolCallPromise<T>.
+func (t PreparedTool) ToolCallReturnsTask() bool { return t.NeedsApproval }
+
+// ToolApprovalPackageName returns the package segment used in tool_approvals keys.
+func (t PreparedTool) ToolApprovalPackageName() string {
+	if t.PackageMeta != nil {
+		switch {
+		case strings.TrimSpace(t.PackageMeta.Name) != "":
+			return strings.TrimSpace(t.PackageMeta.Name)
+		case strings.TrimSpace(t.PackageMeta.Module.String()) != "":
+			return strings.TrimSpace(t.PackageMeta.Module.String())
+		}
+	}
+	return ""
+}
+
+// ToolApprovalKey returns the fully-qualified tool_approvals key.
+func (t PreparedTool) ToolApprovalKey() string {
+	packageName := t.ToolApprovalPackageName()
+	toolName := strings.TrimSpace(t.Name)
+	if packageName == "" {
+		return toolName
+	}
+	if toolName != "" {
+		return packageName + "." + toolName
+	}
+	return packageName
+}
 
 // FileSystem returns the filesystem containing the tool's files.
 func (t PreparedTool) FileSystem() fs.FS {
@@ -165,6 +198,85 @@ func (t PreparedTool) CacheKey() string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// ApprovalFingerprint returns a stable identifier for the reviewed prepared
+// execution surface of this tool, including bindings and credential policy.
+func (t PreparedTool) ApprovalFingerprint() string {
+	payload := struct {
+		Name               string                    `json:"name"`
+		CacheKey           string                    `json:"cache_key"`
+		NeedsApproval      bool                      `json:"needs_approval"`
+		UnavailableReason  ToolUnavailableReason     `json:"unavailable_reason,omitempty"`
+		HiddenParams       map[string]bool           `json:"hidden_params,omitempty"`
+		Bindings           map[string]Binding        `json:"bindings,omitempty"`
+		AccountParams      []AccountParam            `json:"account_params,omitempty"`
+		CredentialAccounts map[string][]string       `json:"credential_accounts,omitempty"`
+		AllowlistPatterns  []string                  `json:"allowlist_patterns,omitempty"`
+		InjectorRules      []transport.InjectionRule `json:"injector_rules,omitempty"`
+		Context            map[string]any            `json:"context,omitempty"`
+	}{
+		Name:              t.Name,
+		CacheKey:          t.CacheKey(),
+		NeedsApproval:     t.NeedsApproval,
+		UnavailableReason: t.unavailableReason,
+		Context:           cloneApprovalContext(t.context),
+	}
+
+	if len(t.hiddenParams) > 0 {
+		payload.HiddenParams = make(map[string]bool, len(t.hiddenParams))
+		for name, hidden := range t.hiddenParams {
+			payload.HiddenParams[name] = hidden
+		}
+	}
+
+	if len(t.bindings) > 0 {
+		payload.Bindings = make(map[string]Binding, len(t.bindings))
+		for name, binding := range t.bindings {
+			payload.Bindings[name] = binding.Binding
+		}
+	}
+
+	if len(t.accountParams) > 0 {
+		payload.AccountParams = append([]AccountParam(nil), t.accountParams...)
+		sort.Slice(payload.AccountParams, func(i, j int) bool {
+			return payload.AccountParams[i].ParamName < payload.AccountParams[j].ParamName
+		})
+	}
+
+	if len(t.credentialAccounts) > 0 {
+		payload.CredentialAccounts = make(map[string][]string, len(t.credentialAccounts))
+		for credName, accounts := range t.credentialAccounts {
+			sorted := append([]string(nil), accounts...)
+			sort.Strings(sorted)
+			payload.CredentialAccounts[credName] = sorted
+		}
+	}
+
+	if patterns := t.allowlist.Patterns(); len(patterns) > 0 {
+		payload.AllowlistPatterns = append([]string(nil), patterns...)
+		sort.Strings(payload.AllowlistPatterns)
+	}
+
+	if rules := t.injector.Rules(); len(rules) > 0 {
+		for i := range rules {
+			if len(rules[i].Hosts) > 0 {
+				rules[i].Hosts = append([]string(nil), rules[i].Hosts...)
+				sort.Strings(rules[i].Hosts)
+			}
+		}
+		sort.Slice(rules, func(i, j int) bool {
+			return approvalInjectionRuleSortKey(rules[i]) < approvalInjectionRuleSortKey(rules[j])
+		})
+		payload.InjectorRules = rules
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return t.CacheKey()
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func (t PreparedTool) ValidateCall(agentParams map[string]any) (map[string]any, error) {
@@ -337,4 +449,36 @@ func toolUnavailableReasonMessage(reason ToolUnavailableReason) string {
 	default:
 		return ""
 	}
+}
+
+func cloneApprovalContext(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(context))
+	for key, value := range context {
+		out[key] = value
+	}
+	return out
+}
+
+func approvalInjectionRuleSortKey(rule transport.InjectionRule) string {
+	providerAuthURL := ""
+	providerTokenURL := ""
+	if rule.Provider != nil {
+		providerAuthURL = rule.Provider.AuthURL
+		providerTokenURL = rule.Provider.TokenURL
+	}
+	return strings.Join([]string{
+		strings.Join(rule.Hosts, ","),
+		rule.PathPrefix,
+		rule.ModuleName,
+		rule.CredentialName,
+		rule.SecretPrefix,
+		string(rule.Type),
+		string(rule.Method),
+		rule.HeaderName,
+		providerAuthURL,
+		providerTokenURL,
+	}, "\x00")
 }

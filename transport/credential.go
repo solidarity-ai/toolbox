@@ -162,6 +162,25 @@ type CredentialInjector struct {
 	sf                      *singleflight.Group
 }
 
+// Rules returns a copy of the configured injection rules.
+func (ci *CredentialInjector) Rules() []InjectionRule {
+	if ci == nil || len(ci.rules) == 0 {
+		return nil
+	}
+	out := make([]InjectionRule, len(ci.rules))
+	for i, rule := range ci.rules {
+		out[i] = rule
+		if len(rule.Hosts) > 0 {
+			out[i].Hosts = append([]string(nil), rule.Hosts...)
+		}
+		if rule.Provider != nil {
+			provider := *rule.Provider
+			out[i].Provider = &provider
+		}
+	}
+	return out
+}
+
 // CredentialInjectorOption configures a CredentialInjector.
 type CredentialInjectorOption func(*CredentialInjector)
 

@@ -141,8 +141,13 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		if err != nil {
 			return PreparedToolset{}, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
+		prepared.NeedsApproval = toolNeedsApproval(cfg.ToolApprovals, prepared)
 		byName[tool.Name] = len(out)
 		out = append(out, prepared)
+	}
+
+	if err := validateToolApprovals(cfg.ToolApprovals, out); err != nil {
+		return PreparedToolset{}, err
 	}
 
 	sort.Slice(omitted, func(i, j int) bool {
@@ -197,6 +202,15 @@ func (r PreparedToolset) OmittedPackages() []OmittedPackage {
 	return out
 }
 
+func (r PreparedToolset) HasApprovalTools() bool {
+	for _, tool := range r.tools {
+		if tool.NeedsApproval {
+			return true
+		}
+	}
+	return false
+}
+
 // FilterTools returns a prepared toolset containing only tools that match keep.
 // The filtered toolset preserves prepared tool metadata such as bindings.
 func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedToolset {
@@ -233,4 +247,35 @@ func omittedPackageName(tool assembler.LoadedTool) string {
 		return tool.Name
 	}
 	return "<unknown>"
+}
+
+func toolNeedsApproval(approvals map[string]bool, tool PreparedTool) bool {
+	if len(approvals) == 0 {
+		return false
+	}
+	return approvals[tool.ToolApprovalKey()]
+}
+
+func validateToolApprovals(approvals map[string]bool, tools []PreparedTool) error {
+	if len(approvals) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		known[tool.ToolApprovalKey()] = struct{}{}
+	}
+
+	keys := make([]string, 0, len(approvals))
+	for key := range approvals {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if _, ok := known[key]; ok {
+			continue
+		}
+		return fmt.Errorf("tool approval %q does not match any prepared tool; use the package-name.tool path from the toolset file", key)
+	}
+	return nil
 }

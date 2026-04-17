@@ -26,19 +26,62 @@ func sortedTools(view toolset.AgentView) []toolset.AgentTool {
 // agent-visible tools as concat-safe ambient package namespaces.
 func DeclarationSource(prepared toolset.PreparedToolset) string {
 	var b strings.Builder
+	b.WriteString(toolCallDeclarationsDTS())
 
 	groups := groupedPackageNames(prepared)
 	for i, packageName := range groups {
-		if i > 0 {
+		if i > 0 || b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
 		pkgPrepared := prepared.FilterTools(func(tool toolset.PreparedTool) bool {
 			return preparedToolPackageName(tool) == packageName
 		})
-		b.WriteString(packageDeclarationSource(packageName, sortedTools(pkgPrepared.AgentView())))
+		b.WriteString(packageDeclarationSource(pkgPrepared, packageName, sortedTools(pkgPrepared.AgentView())))
 	}
 
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func toolCallDeclarationsDTS() string {
+	return strings.TrimSpace(`
+type ToolCallTask<T = unknown> = {
+  toolCallId: string;
+};
+
+type ToolCallPromise<T> = Promise<T> & {
+  task: ToolCallTask<T>;
+};
+
+type ToolCallView<T = unknown> =
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "started";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "needsApproval";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "success";
+      params?: unknown;
+      result: T;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "failed";
+      params?: unknown;
+      error: unknown;
+    };
+
+declare function $tool_call<T>(ref: ToolCallPromise<T> | ToolCallTask<T>): ToolCallView<T>;
+`)
 }
 
 type returnTypeInfo struct {
@@ -91,7 +134,7 @@ func preparedToolPackageName(tool toolset.PreparedTool) string {
 	return sanitizeIdentifierSegment(name)
 }
 
-func packageDeclarationSource(packageName string, tools []toolset.AgentTool) string {
+func packageDeclarationSource(prepared toolset.PreparedToolset, packageName string, tools []toolset.AgentTool) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -302,7 +345,7 @@ func packageDeclarationSource(packageName string, tools []toolset.AgentTool) str
 	tree := buildNamespaceTree(tools)
 
 	var body strings.Builder
-	renderNamespaceNode(&body, "", tree, returnTypes, paramTypeOverrides)
+	renderNamespaceNode(&body, "", tree, prepared, returnTypes, paramTypeOverrides)
 	hasTypes := len(inputDeclLines) > 0 || len(refLines) > 0 || len(interfaceBlocks) > 0
 	if hasTypes {
 		if body.Len() > 0 {
@@ -349,13 +392,13 @@ func buildNamespaceTree(tools []toolset.AgentTool) *declNamespaceNode {
 	return root
 }
 
-func renderNamespaceNode(b *strings.Builder, indent string, node *declNamespaceNode, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+func renderNamespaceNode(b *strings.Builder, indent string, node *declNamespaceNode, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
 	if node == nil {
 		return
 	}
 	for _, tool := range node.funcs {
 		method := sanitizeIdentifierSegment(lastSegment(tool.Name))
-		writeToolDeclaration(b, indent, method, tool, returnTypes, paramTypeOverrides)
+		writeToolDeclaration(b, indent, method, tool, prepared, returnTypes, paramTypeOverrides)
 	}
 	if len(node.funcs) > 0 && len(node.children) > 0 {
 		b.WriteString("\n")
@@ -370,12 +413,12 @@ func renderNamespaceNode(b *strings.Builder, indent string, node *declNamespaceN
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(b, "%snamespace %s {\n", indent, sanitizeIdentifierSegment(name))
-		renderNamespaceNode(b, indent+"  ", node.children[name], returnTypes, paramTypeOverrides)
+		renderNamespaceNode(b, indent+"  ", node.children[name], prepared, returnTypes, paramTypeOverrides)
 		fmt.Fprintf(b, "%s}\n", indent)
 	}
 }
 
-func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolset.AgentTool, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolset.AgentTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
 	hidden := tool.HiddenParams()
 	literals := tool.BoundLiterals()
 	modeLabel := effectLabel(tool.Effect, tool.Idempotent)
@@ -459,6 +502,9 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 			}
 		}
 	}
+	if preparedTool, ok := prepared.Tool(tool.Name); ok {
+		returnType = toolCallReturnType(preparedTool, returnType)
+	}
 
 	modeTrail := ""
 	if modeLabel != "" {
@@ -514,6 +560,16 @@ func ensureUndefinedUnion(tsType string) string {
 		return tsType
 	}
 	return tsType + " | undefined"
+}
+
+func toolCallReturnType(tool toolset.PreparedTool, inner string) string {
+	if strings.TrimSpace(inner) == "" {
+		inner = "string"
+	}
+	if tool.ToolCallReturnsTask() {
+		return "ToolCallTask<" + inner + ">"
+	}
+	return "ToolCallPromise<" + inner + ">"
 }
 
 func wrapNamespacePath(segments []string, body string) string {

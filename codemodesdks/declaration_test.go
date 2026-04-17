@@ -36,6 +36,51 @@ func TestDeclarationSource_UsesPackageNamespaces(t *testing.T) {
 	}
 }
 
+func TestDeclarationSource_DeclaresToolCallHelpers(t *testing.T) {
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{})
+
+	got := codemodesdks.DeclarationSource(prepared)
+	if !strings.Contains(got, "type ToolCallTask<T = unknown>") {
+		t.Fatalf("missing ToolCallTask declaration:\n%s", got)
+	}
+	if !strings.Contains(got, "type ToolCallPromise<T> = Promise<T> & {") {
+		t.Fatalf("missing ToolCallPromise declaration:\n%s", got)
+	}
+	if !strings.Contains(got, "declare function $tool_call<T>(ref: ToolCallPromise<T> | ToolCallTask<T>)") {
+		t.Fatalf("missing $tool_call declaration:\n%s", got)
+	}
+}
+
+func TestDeclarationSource_UsesToolCallPromiseAndTaskReturnTypes(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `interface Issue {
+  id: string;
+  title: string;
+}
+
+export default async function tool(id: string): Promise<Issue> {
+  return { id, title: "Example" };
+}
+`,
+	})
+
+	promisePrepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	promiseDecls := codemodesdks.DeclarationSource(promisePrepared)
+	if !strings.Contains(promiseDecls, `function get(id: string): ToolCallPromise<{ id: string; title: string }>;`) {
+		t.Fatalf("expected ToolCallPromise return type:\n%s", promiseDecls)
+	}
+
+	taskPrepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+	taskDecls := codemodesdks.DeclarationSource(taskPrepared)
+	if !strings.Contains(taskDecls, `function get(id: string): ToolCallTask<{ id: string; title: string }>;`) {
+		t.Fatalf("expected ToolCallTask return type:\n%s", taskDecls)
+	}
+}
+
 func TestDeclarationSource_UsesNestedPackageNamespaces(t *testing.T) {
 	dir := writePackage(t, t.TempDir(), "example.com/gws-gmail", "gws.gmail", map[string]string{
 		"tools/reply.ts": `/**
@@ -156,10 +201,10 @@ export default async function tool(id: string): Promise<Issue> {
 	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
 	got := codemodesdks.DeclarationSource(prepared)
 
-	if !strings.Contains(got, `function get(id: string): { id: string; title: string };`) {
+	if !strings.Contains(got, `function get(id: string): ToolCallPromise<{ id: string; title: string }>;`) {
 		t.Fatalf("expected single-use named async return to inline:\n%s", got)
 	}
-	if strings.Contains(got, `function get(id: string): Issue;`) {
+	if strings.Contains(got, `function get(id: string): ToolCallPromise<Issue>;`) {
 		t.Fatalf("unexpected top-level ref for single-use named async return:\n%s", got)
 	}
 }
@@ -187,7 +232,7 @@ export default async function tool(): Promise<Ticket> {
 	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
 	got := codemodesdks.DeclarationSource(prepared)
 
-	if !strings.Contains(got, `function create(): Ticket;`) || !strings.Contains(got, `function get(id: string): Ticket;`) {
+	if !strings.Contains(got, `function create(): ToolCallPromise<Ticket>;`) || !strings.Contains(got, `function get(id: string): ToolCallPromise<Ticket>;`) {
 		t.Fatalf("expected shared async return to use shared Ticket name:\n%s", got)
 	}
 	if strings.Contains(got, "CreateResult") || strings.Contains(got, "GetResult") {
@@ -240,8 +285,8 @@ export default async function tool(): Promise<{
 		t.Fatalf("expected Attachment declaration to be retained:\n%s", got)
 	}
 
-	typecheckDeclarations(t, got, `const title = googleWorkspace.calendar.list().events[0].title;
-const mimeType = googleWorkspace.gmail.read().attachments[0].mimeType;
+	typecheckDeclarations(t, got, `const title = (await googleWorkspace.calendar.list()).events[0].title;
+const mimeType = (await googleWorkspace.gmail.read()).attachments[0].mimeType;
 void title;
 void mimeType;
 export {};
@@ -276,8 +321,8 @@ func TestDeclarationSource_OptionalParamBeforeInjectedAccountParamTypechecks(t *
 		t.Fatalf("expected injected account union in rendered signature:\n%s", got)
 	}
 
-	typecheckDeclarations(t, got, `const ok = mail.list(undefined, "a@example.com").ok;
-const ok2 = mail.list({ query: "hello" }, "b@example.com").ok;
+	typecheckDeclarations(t, got, `const ok = (await mail.list(undefined, "a@example.com")).ok;
+const ok2 = (await mail.list({ query: "hello" }, "b@example.com")).ok;
 void ok;
 void ok2;
 export {};

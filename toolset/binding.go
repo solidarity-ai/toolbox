@@ -39,6 +39,7 @@ type PackageCredentialPolicySource interface {
 type Config struct {
 	Tools                  []BoundTool        // Explicitly bound tools
 	ResourceBindings       map[string]Binding // Resource-level bindings by canonical name
+	ToolApprovals          map[string]bool    // Notebook-visible tool name -> requires approval/task return
 	EnvContext             map[string]any     // Flat key-value environment context from harness
 	CredentialPolicySource PackageCredentialPolicySource
 	FetchTransport         http.RoundTripper // optional; used by tests to intercept fetch calls

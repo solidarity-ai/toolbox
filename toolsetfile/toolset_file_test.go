@@ -232,6 +232,28 @@ func TestToolsetFileLoad(t *testing.T) {
 		}
 	})
 
+	t.Run("ToolApprovalsLoad", func(t *testing.T) {
+		filename := writeToolsetJSON(t, map[string]any{
+			"packages": map[string]string{
+				"example.com/acme/calc": "v1.2.3",
+			},
+			"tool_approvals": map[string]bool{
+				"calc.add": true,
+			},
+			"tools": []map[string]string{
+				{"tool": "example.com/acme/calc@v1.2.3/calc.add"},
+			},
+		})
+
+		got, err := Load(filename)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if !reflect.DeepEqual(got.ToolApprovals, map[string]bool{"calc.add": true}) {
+			t.Fatalf("ToolApprovals = %#v, want %#v", got.ToolApprovals, map[string]bool{"calc.add": true})
+		}
+	})
+
 	t.Run("SchemaRejectsUnknownAgentField", func(t *testing.T) {
 		filename := writeToolsetJSON(t, map[string]any{
 			"packages": map[string]string{
@@ -406,6 +428,46 @@ func TestToolsetFileWrite(t *testing.T) {
 			t.Fatalf("written toolset = %q, want %q", string(got), want)
 		}
 	})
+
+	t.Run("WritesToolApprovalsInStableOrder", func(t *testing.T) {
+		file, err := Parse([]byte(`{
+  "packages": {
+    "example.com/acme/calc": "v1.2.3"
+  },
+  "tool_approvals": {
+    "calc.z": true,
+    "calc.a": true
+  },
+  "tools": []
+}`))
+		if err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+
+		filename := filepath.Join(t.TempDir(), "toolbox.toolset.json")
+		if err := file.Write(filename); err != nil {
+			t.Fatalf("Write(%q): %v", filename, err)
+		}
+
+		got, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", filename, err)
+		}
+
+		want := "{\n" +
+			"  \"packages\": {\n" +
+			"    \"example.com/acme/calc\": \"v1.2.3\"\n" +
+			"  },\n" +
+			"  \"tool_approvals\": {\n" +
+			"    \"calc.a\": true,\n" +
+			"    \"calc.z\": true\n" +
+			"  },\n" +
+			"  \"tools\": []\n" +
+			"}\n"
+		if string(got) != want {
+			t.Fatalf("written toolset = %q, want %q", string(got), want)
+		}
+	})
 }
 
 func TestToolsetFilePrepare(t *testing.T) {
@@ -462,6 +524,41 @@ func TestToolsetFilePrepare(t *testing.T) {
 		}
 		if !reflect.DeepEqual(toolEntryStrings(file.Tools), beforeTools) {
 			t.Fatalf("declared tools changed after Prepare error: got %#v, want %#v", toolEntryStrings(file.Tools), beforeTools)
+		}
+	})
+
+	t.Run("ToolApprovalsFlowIntoPreparedTools", func(t *testing.T) {
+		calcDir, err := filepath.Abs(filepath.Join("..", "testutil", "fixtures", "toolbox.pkgs", "calc"))
+		if err != nil {
+			t.Fatalf("filepath.Abs(calc fixture): %v", err)
+		}
+		file := mustLoadToolsetFileNamed(t, "support-agent.toolset.json", map[string]any{
+			"packages": map[string]string{
+				"fixtures.local/calc": "v0.0.0",
+			},
+			"tool_approvals": map[string]bool{
+				"calc.calc.add": true,
+			},
+			"tools": []map[string]string{
+				{"tool": "fixtures.local/calc@v0.0.0/calc.add"},
+			},
+		})
+		writeToolsetLocalJSON(t, file.LocalFilename(), map[string]any{
+			"replace": map[string]string{
+				"fixtures.local/calc": calcDir,
+			},
+		})
+
+		got, err := file.Prepare(ctx, registry.NewResolver(newTempCache(t), &recordingSource{err: fmt.Errorf("unexpected fetch for local replacement test")}))
+		if err != nil {
+			t.Fatalf("Prepare() error: %v", err)
+		}
+		tool, ok := got.Tool("calc.add")
+		if !ok {
+			t.Fatal("prepared.Tool(calc.add) = false, want true")
+		}
+		if !tool.NeedsApproval {
+			t.Fatal("NeedsApproval = false, want true")
 		}
 	})
 

@@ -165,6 +165,98 @@ func TestPreparedTool_PackageCredentialPolicy(t *testing.T) {
 	})
 }
 
+func TestPreparedTool_NeedsApprovalFromToolApprovalKey(t *testing.T) {
+	t.Parallel()
+
+	tools := []assembler.LoadedTool{{
+		Name: "get",
+		PackageMeta: &tooldef.Package{
+			Module: tooldef.ModulePath("example.com/issues"),
+			Name:   "issues",
+		},
+	}}
+
+	prepared, err := PrepareTools(context.Background(), tools, Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+
+	tool, ok := prepared.Tool("get")
+	if !ok {
+		t.Fatal("prepared.Tool(get) = false, want true")
+	}
+	if !tool.NeedsApproval {
+		t.Fatal("NeedsApproval = false, want true")
+	}
+	if !tool.ToolCallReturnsTask() {
+		t.Fatal("ToolCallReturnsTask() = false, want true")
+	}
+	if got := tool.ToolApprovalKey(); got != "issues.get" {
+		t.Fatalf("ToolApprovalKey() = %q, want %q", got, "issues.get")
+	}
+}
+
+func TestPreparedTool_NeedsApprovalUsesRawDashedPackageName(t *testing.T) {
+	t.Parallel()
+
+	tools := []assembler.LoadedTool{{
+		Name: "get",
+		PackageMeta: &tooldef.Package{
+			Module: tooldef.ModulePath("example.com/github-issues"),
+			Name:   "github-issues",
+		},
+	}}
+
+	prepared, err := PrepareTools(context.Background(), tools, Config{
+		ToolApprovals: map[string]bool{
+			"github-issues.get": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+
+	tool, ok := prepared.Tool("get")
+	if !ok {
+		t.Fatal("prepared.Tool(get) = false, want true")
+	}
+	if !tool.NeedsApproval {
+		t.Fatal("NeedsApproval = false, want true")
+	}
+	if got := tool.ToolApprovalPackageName(); got != "github-issues" {
+		t.Fatalf("ToolApprovalPackageName() = %q, want %q", got, "github-issues")
+	}
+	if got := tool.ToolApprovalKey(); got != "github-issues.get" {
+		t.Fatalf("ToolApprovalKey() = %q, want %q", got, "github-issues.get")
+	}
+}
+
+func TestPrepareTools_RejectsUnknownToolApproval(t *testing.T) {
+	t.Parallel()
+
+	_, err := PrepareTools(context.Background(), []assembler.LoadedTool{{
+		Name: "get",
+		PackageMeta: &tooldef.Package{
+			Module: tooldef.ModulePath("example.com/issues"),
+			Name:   "issues",
+		},
+	}}, Config{
+		ToolApprovals: map[string]bool{
+			"issues.missing": true,
+		},
+	})
+	if err == nil {
+		t.Fatal("PrepareTools() error = nil, want unknown tool approval error")
+	}
+	if !strings.Contains(err.Error(), "issues.missing") {
+		t.Fatalf("error = %v, want tool approval key", err)
+	}
+}
+
 type staticPolicySource map[tooldef.ModulePath]PackageCredentialPolicy
 
 func (s staticPolicySource) PackageCredentialPolicy(_ context.Context, pkg tooldef.Package) (PackageCredentialPolicy, error) {

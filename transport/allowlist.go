@@ -22,3 +22,11 @@ func (a *HostAllowlist) Allows(host string) bool {
 	}
 	return false
 }
+
+// Patterns returns a copy of the configured host patterns.
+func (a *HostAllowlist) Patterns() []string {
+	if a == nil || len(a.patterns) == 0 {
+		return nil
+	}
+	return append([]string(nil), a.patterns...)
+}

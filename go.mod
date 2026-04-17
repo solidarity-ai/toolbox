@@ -65,4 +65,6 @@ require (
 
 replace github.com/fastschema/qjs => github.com/mackross/qjs v0.0.7-0.20260409233706-931ab4cd91ce
 
+replace github.com/mackross/repljs => ./third_party/repljs
+
 replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260414161116-99aced908a7c

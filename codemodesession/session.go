@@ -27,9 +27,10 @@ import (
 const manifestID = "toolbox-codemode-session-ts-v1"
 
 const (
-	SuperToolName             = "super_tool"
-	TypeScriptCellSourceParam = "typescript_cell_source"
-	TimeoutSecsParam          = "timeout_secs"
+	SuperToolName               = "super_tool"
+	AwaitSuperToolApprovalsName = "await_super_tool_approvals"
+	TypeScriptCellSourceParam   = "typescript_cell_source"
+	TimeoutSecsParam            = "timeout_secs"
 )
 
 var DefaultSubmitTimeout = 30 * time.Second
@@ -73,16 +74,20 @@ type SessionConfig struct {
 // Session is the shared TypeScript submit boundary used by the CLI repl and
 // codemode MCP surface.
 type Session struct {
-	mu          sync.Mutex
-	session     repl.Session
-	storeCloser storeCloser
-	id          repl.SessionID
-	resumed     bool
-	prepared    *preparedState
-	applied     toolset.PreparedToolset
-	submitting  atomic.Bool
-	preparedSeq atomic.Uint64
-	appliedSeq  uint64
+	mu             sync.Mutex
+	session        repl.Session
+	store          repl.Store
+	storeCloser    storeCloser
+	id             repl.SessionID
+	resumed        bool
+	prepared       *preparedState
+	applied        toolset.PreparedToolset
+	toolCalls      toolCallJournal
+	approvals      approvalStore
+	approvalAwaits *approvalAwaitDelegate
+	submitting     atomic.Bool
+	preparedSeq    atomic.Uint64
+	appliedSeq     uint64
 }
 
 // OpenSQLite opens or resumes a persistent TypeScript session backed by SQLite.
@@ -102,10 +107,16 @@ func OpenSQLite(ctx context.Context, sqlitePath, currentDir string, cfgs ...Sess
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
+	toolCalls := newSQLiteToolCallJournal(st, sqlitePath)
+	approvals, err := newSQLiteApprovalStore(st.DB())
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("open approval store: %w", err)
+	}
 
 	cfg := firstConfig(cfgs)
 	prepared := newPreparedState(cfg.PreparedTools)
-	deps := sessionDeps(currentDir, st, prepared.Get)
+	deps := sessionDeps(currentDir, st, prepared.Get, toolCalls, approvals)
 	sess, resumed, err := openOrStartSQLiteSession(ctx, st, deps)
 	if err != nil {
 		_ = st.Close()
@@ -117,32 +128,42 @@ func OpenSQLite(ctx context.Context, sqlitePath, currentDir string, cfgs ...Sess
 		return nil, fmt.Errorf("apply prepared tools: %w", err)
 	}
 	return &Session{
-		session:     sess,
-		storeCloser: st,
-		id:          sess.ID(),
-		resumed:     resumed,
-		prepared:    prepared,
-		applied:     prepared.Get(),
+		session:        sess,
+		store:          st,
+		storeCloser:    st,
+		id:             sess.ID(),
+		resumed:        resumed,
+		prepared:       prepared,
+		applied:        prepared.Get(),
+		toolCalls:      toolCalls,
+		approvals:      approvals,
+		approvalAwaits: newApprovalAwaitDelegate(),
 	}, nil
 }
 
 // OpenMemory opens a new in-memory TypeScript session.
 func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (*Session, error) {
 	st := storemem.New()
+	toolCalls := newMemoryToolCallJournal(st)
+	approvals := newMemoryApprovalStore()
 	cfg := firstConfig(cfgs)
 	prepared := newPreparedState(cfg.PreparedTools)
 	sess, err := repl.New().StartSession(ctx, repl.SessionConfig{
 		Manifest: repl.Manifest{ID: manifestID},
-	}, sessionDeps(currentDir, st, prepared.Get))
+	}, sessionDeps(currentDir, st, prepared.Get, toolCalls, approvals))
 	if err != nil {
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
 	return &Session{
-		session:  sess,
-		id:       sess.ID(),
-		prepared: prepared,
-		applied:  prepared.Get(),
+		session:        sess,
+		store:          st,
+		id:             sess.ID(),
+		prepared:       prepared,
+		applied:        prepared.Get(),
+		toolCalls:      toolCalls,
+		approvals:      approvals,
+		approvalAwaits: newApprovalAwaitDelegate(),
 	}, nil
 }
 
@@ -153,11 +174,11 @@ func firstConfig(cfgs []SessionConfig) SessionConfig {
 	return cfgs[0]
 }
 
-func sessionDeps(currentDir string, st repl.Store, prepared func() toolset.PreparedToolset) repl.SessionDeps {
+func sessionDeps(currentDir string, st repl.Store, prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore) repl.SessionDeps {
 	return repl.SessionDeps{
 		Store:             st,
 		RuntimeMode:       repl.RuntimeModePersistent,
-		VMDelegate:        newRuntimeDelegate(prepared),
+		VMDelegate:        newRuntimeDelegate(prepared, toolCalls, approvals),
 		TypeScriptFactory: repl.NewTypeScriptFactory(),
 		TypeScriptEnvProvider: func(_ context.Context, _ repl.TypeScriptEnvContext) (repl.TypeScriptEnv, error) {
 			return typeScriptEnv(currentDir, prepared()), nil
@@ -394,6 +415,44 @@ func checkerEpochTS(prepared toolset.PreparedToolset, pkgMetadataPrelude string)
 
 func packageDeclarationsDTS() string {
 	return strings.TrimSpace(`
+type ToolCallTask<T = unknown> = {
+  toolCallId: string;
+};
+
+type ToolCallPromise<T> = Promise<T> & {
+  task: ToolCallTask<T>;
+};
+
+type ToolCallView<T = unknown> =
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "started";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "needsApproval";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "success";
+      params?: unknown;
+      result: T;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "failed";
+      params?: unknown;
+      error: unknown;
+    };
+
+declare function $tool_call<T>(ref: ToolCallPromise<T> | ToolCallTask<T>): ToolCallView<T>;
+
 declare const $pkgMetadata: Record<string, {
   toolCount: number;
   // present when the package needs extra guidance
@@ -439,12 +498,15 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.session == nil {
+		s.mu.Unlock()
 		return formatSubmitError(repl.SubmitResult{}, errors.New("session closed"))
 	}
+	s.cancelApprovalAwaitLocked()
 	s.submitting.Store(true)
-	defer s.submitting.Store(false)
+	if s.approvals != nil {
+		s.approvals.BeginSubmit(s.id)
+	}
 
 	submitCtx, cancel := withSubmitTimeout(ctx)
 	defer cancel()
@@ -455,9 +517,83 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 	})
 	s.applyPendingPreparedToolsLocked()
 	if err != nil {
+		if s.approvals != nil {
+			s.approvals.AbortSubmit(s.id)
+		}
+		s.submitting.Store(false)
+		s.mu.Unlock()
 		return formatSubmitError(res, err)
 	}
+	if s.approvals != nil {
+		_ = s.approvals.CommitSubmit(s.id, res.Cell)
+	}
+	s.submitting.Store(false)
+	s.mu.Unlock()
 	return formatSubmitResult(ctx, s.session, res)
+}
+
+func (s *Session) PendingApprovals(ctx context.Context) ([]PendingApproval, error) {
+	if s == nil || s.approvals == nil {
+		return nil, nil
+	}
+	return s.approvals.PendingApprovals(ctx, s.id)
+}
+
+func (s *Session) ApplyApprovals(ctx context.Context, decisions []ApprovalDecision) error {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.session == nil {
+		return errors.New("session closed")
+	}
+	if s.approvals == nil {
+		return fmt.Errorf("approvals are unavailable")
+	}
+	results, err := s.approvals.ApplyDecisions(ctx, s.id, decisions, s.prepared.Get(), s.store, s.toolCalls)
+	if err != nil {
+		return err
+	}
+	if len(results) > 0 {
+		s.publishApprovalAwaitLocked(approvalAwaitResultFromBatch(results, s.pendingApprovalCountLocked(ctx)))
+	}
+	return nil
+}
+
+func (s *Session) cancelApprovalAwaitLocked() {
+	remaining := s.pendingApprovalCountLocked(context.Background())
+	if remaining == 0 {
+		return
+	}
+	s.publishApprovalAwaitLocked(ApprovalAwaitResult{
+		Status:    ApprovalAwaitStatusCancelled,
+		Remaining: remaining,
+		Message:   "approval wait cancelled by new super_tool submit.",
+	})
+}
+
+func (s *Session) publishApprovalAwaitLocked(result ApprovalAwaitResult) {
+	if s == nil || s.approvalAwaits == nil {
+		return
+	}
+	s.approvalAwaits.Publish(result)
+}
+
+func (s *Session) pendingApprovalCountLocked(ctx context.Context) int {
+	approvals, err := s.pendingApprovalsLocked(ctx)
+	if err != nil {
+		return 0
+	}
+	return len(approvals)
+}
+
+func (s *Session) pendingApprovalsLocked(ctx context.Context) ([]PendingApproval, error) {
+	if s == nil || s.approvals == nil {
+		return nil, nil
+	}
+	return s.approvals.PendingApprovals(ctx, s.id)
 }
 
 func withSubmitTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

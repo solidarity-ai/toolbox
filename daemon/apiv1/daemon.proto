@@ -18,6 +18,22 @@ message SessionState {
   string mode = 2;
   string working_dir = 3;
   repeated string prepared_tools = 4;
+  repeated PendingApprovalSnapshot pending_approvals = 5;
+}
+
+message PendingApprovalSnapshot {
+  string tool_call_id = 1;
+  string tool_name = 2;
+  string params_inspect = 3;
+  string effect_id = 4;
+  string status = 5;
+  string error = 6;
+}
+
+message ApprovalDecision {
+  string action = 1;
+  string tool_call_id = 2;
+  string message = 3;
 }
 
 message ClientSnapshot {
@@ -27,11 +43,13 @@ message ClientSnapshot {
   repeated string prepared_tools = 4;
   google.protobuf.Timestamp connected_at = 5;
   google.protobuf.Timestamp last_sync_at = 6;
+  repeated PendingApprovalSnapshot pending_approvals = 7;
 }
 
 message StateUpdate {
   repeated ClientSnapshot clients = 1;
   string secret_epoch = 2;
+  repeated ApprovalDecision approval_decisions = 3;
 }
 
 message SecretGetRequest {

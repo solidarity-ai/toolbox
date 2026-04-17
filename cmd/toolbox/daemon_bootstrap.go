@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
 
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetctl"
@@ -71,4 +73,84 @@ func bindSecretEpochReload(delegate daemon.SessionDelegate, stderr io.Writer, re
 			}
 		}()
 	})
+}
+
+type pendingApprovalProvider interface {
+	PendingApprovals(context.Context) ([]codemodesession.PendingApproval, error)
+}
+
+type approvalActionExecutor interface {
+	ApplyApprovals(context.Context, []codemodesession.ApprovalDecision) error
+}
+
+func syncPendingApprovals(ctx context.Context, provider pendingApprovalProvider, delegate daemon.SessionDelegate, stderr io.Writer) error {
+	if provider == nil || delegate == nil {
+		return nil
+	}
+	approvals, err := provider.PendingApprovals(ctx)
+	if err != nil {
+		if stderr != nil {
+			_, _ = fmt.Fprintf(stderr, "toolbox daemon approval sync error: %v\n", err)
+		}
+		return err
+	}
+	delegate.SetPendingApprovals(toDaemonApprovals(approvals))
+	return nil
+}
+
+func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, executor approvalActionExecutor, refresh func() error) {
+	if delegate == nil || executor == nil {
+		return
+	}
+	delegate.SetApprovalHandler(func(decision daemon.ApprovalDecision) {
+		go func() {
+			approved := false
+			switch decision.Action {
+			case daemon.ApprovalActionApprove:
+				approved = true
+			case daemon.ApprovalActionReject:
+			default:
+				err := fmt.Errorf("unknown approval action %q", decision.Action)
+				if stderr != nil {
+					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
+				}
+				return
+			}
+			err := executor.ApplyApprovals(context.Background(), []codemodesession.ApprovalDecision{{
+				ToolCallID: decision.ToolCallID,
+				Approved:   approved,
+				Reason:     decision.Message,
+			}})
+			if err != nil {
+				if stderr != nil {
+					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
+				}
+				return
+			}
+			if refresh != nil {
+				if err := refresh(); err != nil && stderr != nil {
+					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval sync error: %v\n", err)
+				}
+			}
+		}()
+	})
+}
+
+func toDaemonApprovals(approvals []codemodesession.PendingApproval) []daemon.PendingApprovalSnapshot {
+	if len(approvals) == 0 {
+		return nil
+	}
+	out := make([]daemon.PendingApprovalSnapshot, 0, len(approvals))
+	for _, approval := range approvals {
+		next := daemon.PendingApprovalSnapshot{
+			ToolCallID:    approval.ToolCallID,
+			ToolName:      approval.ToolName,
+			ParamsInspect: approval.ParamsInspect,
+			EffectID:      approval.EffectID,
+			Status:        approval.Status,
+			Error:         approval.Error,
+		}
+		out = append(out, next)
+	}
+	return out
 }

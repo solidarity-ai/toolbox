@@ -38,6 +38,10 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 		return err
 	}
 	defer session.Close()
+	bindApprovalExecution(sessionDelegate, stderr, session, func() error {
+		return syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
+	})
+	_ = syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 	consumer := combinedPreparedToolConsumer{session, sessionDelegate}
 	backend, err := newFileToolsetBackend(ctx, cmd.Toolset, cmd.Effects, opts, consumer)
 	if err != nil {
@@ -74,6 +78,14 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 			return nil
 		case line == ":help", line == ":instructions":
 			fmt.Fprintln(stdout, session.Instructions())
+		case line == ":await_approvals":
+			result, err := session.AwaitNextApproval(ctx)
+			if err != nil {
+				fmt.Fprintf(stdout, "await approvals error: %v\n", err)
+			} else {
+				fmt.Fprintln(stdout, result.Text())
+			}
+			_ = syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 		case line == ":submit":
 			src, ok := readReplMultiline(scanner, stdout)
 			if !ok {
@@ -81,10 +93,12 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 				continue
 			}
 			_, _ = io.WriteString(stdout, session.Submit(ctx, src))
+			_ = syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 		case strings.HasPrefix(line, ":"):
 			fmt.Fprintf(stdout, "unknown command: %s\n", line)
 		default:
 			_, _ = io.WriteString(stdout, session.Submit(ctx, line))
+			_ = syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 		}
 	}
 }

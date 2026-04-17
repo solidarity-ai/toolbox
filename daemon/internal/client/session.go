@@ -30,6 +30,9 @@ type SessionRegistration struct {
 	secretEpoch              string
 	pendingSecretEpochChange bool
 	onSecretEpochChange      func()
+	onApproval               func(daemonserver.ApprovalDecision)
+	pendingApprovals         []daemonserver.ApprovalDecision
+	seenApprovals            map[string]struct{}
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -111,6 +114,27 @@ func (r *SessionRegistration) SetSecretEpochHandler(fn func()) {
 	}
 }
 
+func (r *SessionRegistration) SetApprovalHandler(fn func(daemonserver.ApprovalDecision)) {
+	if r == nil {
+		return
+	}
+
+	var pending []daemonserver.ApprovalDecision
+	r.mu.Lock()
+	r.onApproval = fn
+	if fn != nil && len(r.pendingApprovals) > 0 {
+		pending = append([]daemonserver.ApprovalDecision(nil), r.pendingApprovals...)
+		r.pendingApprovals = nil
+	}
+	r.mu.Unlock()
+
+	if fn != nil {
+		for _, decision := range pending {
+			fn(decision)
+		}
+	}
+}
+
 func (r *SessionRegistration) heartbeat() {
 	defer r.wg.Done()
 
@@ -165,28 +189,28 @@ func (r *SessionRegistration) handleStateUpdate(update *daemonv1.StateUpdate) {
 	}
 
 	epoch := strings.TrimSpace(update.GetSecretEpoch())
-	if epoch == "" {
-		return
-	}
-
 	var callback func()
-	r.mu.Lock()
-	switch {
-	case r.secretEpoch == "":
-		r.secretEpoch = epoch
-	case r.secretEpoch != epoch:
-		r.secretEpoch = epoch
-		if r.onSecretEpochChange != nil {
-			callback = r.onSecretEpochChange
-		} else {
-			r.pendingSecretEpochChange = true
+	if epoch != "" {
+		r.mu.Lock()
+		switch {
+		case r.secretEpoch == "":
+			r.secretEpoch = epoch
+		case r.secretEpoch != epoch:
+			r.secretEpoch = epoch
+			if r.onSecretEpochChange != nil {
+				callback = r.onSecretEpochChange
+			} else {
+				r.pendingSecretEpochChange = true
+			}
 		}
+		r.mu.Unlock()
 	}
-	r.mu.Unlock()
 
 	if callback != nil {
 		callback()
 	}
+
+	r.handleApprovalDecisions(update.GetApprovalDecisions())
 }
 
 func (r *SessionRegistration) currentState() daemonserver.SessionState {
@@ -226,6 +250,7 @@ func (r *SessionRegistration) sync(state daemonserver.SessionState) error {
 func cloneSessionState(state daemonserver.SessionState) daemonserver.SessionState {
 	cloned := state
 	cloned.PreparedTools = append([]string(nil), state.PreparedTools...)
+	cloned.PendingApprovals = clonePendingApprovals(state.PendingApprovals)
 	return cloned
 }
 
@@ -264,9 +289,88 @@ func (r *SessionRegistration) clearStream(stream *connect.BidiStreamForClient[da
 
 func sessionStateToProto(state daemonserver.SessionState) *daemonv1.SessionState {
 	return &daemonv1.SessionState{
-		Pid:           int32(os.Getpid()),
-		Mode:          state.Mode,
-		WorkingDir:    state.WorkingDir,
-		PreparedTools: append([]string(nil), state.PreparedTools...),
+		Pid:              int32(os.Getpid()),
+		Mode:             state.Mode,
+		WorkingDir:       state.WorkingDir,
+		PreparedTools:    append([]string(nil), state.PreparedTools...),
+		PendingApprovals: pendingApprovalsToProto(state.PendingApprovals),
 	}
+}
+
+func (r *SessionRegistration) handleApprovalDecisions(decisions []*daemonv1.ApprovalDecision) {
+	if r == nil || len(decisions) == 0 {
+		return
+	}
+
+	var pending []daemonserver.ApprovalDecision
+	var callback func(daemonserver.ApprovalDecision)
+	r.mu.Lock()
+	if r.seenApprovals == nil {
+		r.seenApprovals = make(map[string]struct{})
+	}
+	for _, decision := range decisions {
+		next := daemonserver.ApprovalDecision{
+			Action:     strings.TrimSpace(decision.GetAction()),
+			ToolCallID: strings.TrimSpace(decision.GetToolCallId()),
+			Message:    decision.GetMessage(),
+		}
+		key := approvalDecisionKey(next)
+		if key == "" {
+			continue
+		}
+		if _, seen := r.seenApprovals[key]; seen {
+			continue
+		}
+		r.seenApprovals[key] = struct{}{}
+		if r.onApproval != nil {
+			pending = append(pending, next)
+		} else {
+			r.pendingApprovals = append(r.pendingApprovals, next)
+		}
+	}
+	callback = r.onApproval
+	r.mu.Unlock()
+
+	if callback != nil {
+		for _, decision := range pending {
+			callback(decision)
+		}
+	}
+}
+
+func clonePendingApprovals(approvals []daemonserver.PendingApprovalSnapshot) []daemonserver.PendingApprovalSnapshot {
+	if len(approvals) == 0 {
+		return nil
+	}
+	out := make([]daemonserver.PendingApprovalSnapshot, len(approvals))
+	copy(out, approvals)
+	return out
+}
+
+func pendingApprovalsToProto(approvals []daemonserver.PendingApprovalSnapshot) []*daemonv1.PendingApprovalSnapshot {
+	if len(approvals) == 0 {
+		return nil
+	}
+	out := make([]*daemonv1.PendingApprovalSnapshot, 0, len(approvals))
+	for _, approval := range approvals {
+		next := &daemonv1.PendingApprovalSnapshot{
+			ToolCallId:    approval.ToolCallID,
+			ToolName:      approval.ToolName,
+			ParamsInspect: approval.ParamsInspect,
+			EffectId:      approval.EffectID,
+			Status:        approval.Status,
+			Error:         approval.Error,
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func approvalDecisionKey(decision daemonserver.ApprovalDecision) string {
+	action := strings.TrimSpace(decision.Action)
+	toolCallID := strings.TrimSpace(decision.ToolCallID)
+	if action == "" || toolCallID == "" {
+		return ""
+	}
+	return action + "\n" + toolCallID + "\n" + decision.Message
 }

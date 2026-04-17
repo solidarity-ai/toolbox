@@ -2,7 +2,10 @@ package codemodemcp_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +30,20 @@ func TestMCPServerListsSuperTool(t *testing.T) {
 	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// Notebook Output")
 	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "$pkgMetadata")
 	assertToolPropertyDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TimeoutSecsParam, "Maximum seconds to allow this cell to run")
+}
+
+func TestMCPServerListsAwaitSuperToolApprovalsOnlyWhenApprovalsArePossible(t *testing.T) {
+	h := mcptest.NewHarness(t, codemodemcp.New())
+	assertSliceNotContains(t, h.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
+
+	dir := writeApprovalPackage(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+	withApprovals := mcptest.NewHarness(t, codemodemcp.New(codemodesession.SessionConfig{PreparedTools: prepared}))
+	assertSliceContains(t, withApprovals.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
 }
 
 func TestMCPServerCallsSuperTool(t *testing.T) {
@@ -110,13 +127,195 @@ func TestManagedMCPServerUpdatesSuperToolAtRuntime(t *testing.T) {
 	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "calc")
 
 	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
-		"typescript_cell_source": "calc.calc.add(2, 3)",
+		"typescript_cell_source": "await calc.calc.add(2, 3)",
 	})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
 	}
 	text := resultText(t, result)
 	assertTextContains(t, text, "=> 5")
+}
+
+func TestManagedMCPServerUpdatesAwaitToolAtRuntime(t *testing.T) {
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	h := mcptest.NewHarness(t, managed.Server())
+	assertSliceNotContains(t, h.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
+
+	dir := writeApprovalPackage(t)
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	}))
+	assertSliceContains(t, h.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
+
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), toolset.Config{}))
+	assertSliceNotContains(t, h.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
+}
+
+func TestManagedMCPServerAwaitSuperToolApprovalsReturnsNoOutstandingWhenIdle(t *testing.T) {
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	dir := writeApprovalPackage(t)
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	}))
+
+	h := mcptest.NewHarness(t, managed.Server())
+	result := h.CallTool(codemodemcp.ToolAwaitSuperToolApprovals, nil)
+	if result.IsError {
+		t.Fatalf("expected non-error result")
+	}
+	assertTextContains(t, resultText(t, result), "(no outstanding approvals).")
+}
+
+func TestManagedMCPServerAwaitSuperToolApprovalsReturnsResolutionAndRemaining(t *testing.T) {
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	dir := writeApprovalPackage(t)
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	}))
+
+	h := mcptest.NewHarness(t, managed.Server())
+	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TypeScriptCellSourceParam: `var tasks = [issues.get("I-1"), issues.get("I-2")];
+tasks.map((task) => $tool_call(task).status)`,
+	})
+	if result.IsError {
+		t.Fatalf("super_tool expected non-error result")
+	}
+
+	approvals, err := managed.PendingApprovals(context.Background())
+	if err != nil {
+		t.Fatalf("PendingApprovals(): %v", err)
+	}
+	if len(approvals) != 2 {
+		t.Fatalf("PendingApprovals() = %#v, want two calls", approvals)
+	}
+
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	waitCh := make(chan callResult, 1)
+	go func() {
+		res, err := h.Client.CallTool(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Name: codemodemcp.ToolAwaitSuperToolApprovals},
+		})
+		waitCh <- callResult{result: res, err: err}
+	}()
+
+	select {
+	case got := <-waitCh:
+		t.Fatalf("await returned early: %#v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := managed.ApplyApprovals(context.Background(), []codemodesession.ApprovalDecision{{
+		ToolCallID: approvals[0].ToolCallID,
+		Approved:   true,
+	}}); err != nil {
+		t.Fatalf("ApplyApprovals(): %v", err)
+	}
+
+	select {
+	case got := <-waitCh:
+		if got.err != nil {
+			t.Fatalf("await call error: %v", got.err)
+		}
+		text := resultText(t, got.result)
+		assertTextContains(t, text, "approved")
+		assertTextContains(t, text, approvals[0].ToolCallID)
+		assertTextContains(t, text, "1 still waiting, await again when ready.")
+	case <-time.After(2 * time.Second):
+		t.Fatal("await did not return after approval")
+	}
+}
+
+func TestManagedMCPServerAwaitSuperToolApprovalsCancelledByLaterSuperTool(t *testing.T) {
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	dir := writeApprovalPackage(t)
+	managed.SetPreparedTools(tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	}))
+
+	h := mcptest.NewHarness(t, managed.Server())
+	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TypeScriptCellSourceParam: `issues.get("I-1")`,
+	})
+	if result.IsError {
+		t.Fatalf("super_tool expected non-error result")
+	}
+
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	waitCh := make(chan callResult, 1)
+	go func() {
+		res, err := h.Client.CallTool(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Name: codemodemcp.ToolAwaitSuperToolApprovals},
+		})
+		waitCh <- callResult{result: res, err: err}
+	}()
+
+	select {
+	case got := <-waitCh:
+		t.Fatalf("await returned early: %#v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = h.Client.CallTool(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Name: codemodemcp.ToolSuperTool,
+				Arguments: map[string]any{
+					codemodesession.TypeScriptCellSourceParam: `"next"`,
+				},
+			},
+		})
+	}()
+
+	select {
+	case got := <-waitCh:
+		if got.err != nil {
+			t.Fatalf("await call error: %v", got.err)
+		}
+		text := resultText(t, got.result)
+		assertTextContains(t, text, "cancelled")
+		assertTextContains(t, text, "1 still waiting, await again when ready.")
+	case <-time.After(2 * time.Second):
+		t.Fatal("await did not return after submit cancellation")
+	}
+	wg.Wait()
 }
 
 func resultText(t testing.TB, result *mcp.CallToolResult) string {
@@ -139,6 +338,45 @@ func assertSliceContains(t testing.TB, values []string, want string) {
 		}
 	}
 	t.Fatalf("expected %q in %v", want, values)
+}
+
+func assertSliceNotContains(t testing.TB, values []string, want string) {
+	t.Helper()
+	for _, v := range values {
+		if v == want {
+			t.Fatalf("did not expect %q in %v", want, values)
+		}
+	}
+}
+
+func writeApprovalPackage(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"tool/package.json": `{"name":"issues","version":"0.0.1"}`,
+		"tool/toolbox.devpkg.json": `{
+  "module": "example.com/issues",
+  "name": "issues",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/get.ts" }
+  ]
+}`,
+		"tool/tools/get.ts": `export default async function tool(id: string): Promise<{ id: string }> {
+  return { id };
+}
+`,
+	}
+	for rel, content := range files {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q): %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", path, err)
+		}
+	}
+	return filepath.Join(dir, "tool")
 }
 
 func assertTextContains(t testing.TB, got, want string) {

@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,9 +42,7 @@ var daemonStopAll = func(logf func(string, ...any)) ([]int, error) {
 	return daemon.StopAllWithProgress(logf)
 }
 
-var daemonBrowserAutoOpenEnabled = defaultDaemonBrowserAutoOpenEnabled
-
-var daemonOpenBrowser = defaultDaemonOpenBrowser
+var daemonBrowserLauncher browserLauncher = defaultBrowserLauncher{}
 
 type daemonCmd struct {
 	Serve daemonServeCmd `cmd:"" name:"serve" help:"Run the daemon server."`
@@ -195,8 +194,24 @@ func defaultDaemonOpenBrowser(url string) error {
 	}
 }
 
+type browserLauncher interface {
+	Enabled() bool
+	Open(string) error
+}
+
+type defaultBrowserLauncher struct{}
+
+func (defaultBrowserLauncher) Enabled() bool {
+	return defaultDaemonBrowserAutoOpenEnabled()
+}
+
+func (defaultBrowserLauncher) Open(url string) error {
+	return defaultDaemonOpenBrowser(url)
+}
+
 type daemonHTTPControl interface {
 	Clients() []daemon.ClientSnapshot
+	ApplyApprovals(context.Context, []daemon.ApprovalDecision) error
 	UnlockSecretStore(context.Context, string) error
 	LockSecretStore(context.Context) error
 	SecretStoreLocked(context.Context) (bool, error)
@@ -210,8 +225,92 @@ type secretStoreStatusResponse struct {
 	Locked bool `json:"locked"`
 }
 
+type approvalRejectRequest struct {
+	Message string `json:"message"`
+}
+
+type approvalApplyDecisionRequest struct {
+	ID       string `json:"id"`
+	Approved bool   `json:"approved"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type approvalApplyRequest struct {
+	Approvals []approvalApplyDecisionRequest `json:"approvals"`
+}
+
+type daemonHTTPApprovalGroup struct {
+	ID        string                           `json:"id"`
+	Label     string                           `json:"label,omitempty"`
+	ToolCalls []daemon.PendingApprovalSnapshot `json:"tool_calls,omitempty"`
+}
+
+func pendingApprovalGroupsForHTTP(control daemonHTTPControl) []daemonHTTPApprovalGroup {
+	if control == nil {
+		return nil
+	}
+	clients := control.Clients()
+	if len(clients) == 0 {
+		return nil
+	}
+
+	out := make([]daemonHTTPApprovalGroup, 0, len(clients))
+	for _, client := range clients {
+		if len(client.PendingApprovals) == 0 {
+			continue
+		}
+		connectedAt := int64(0)
+		if !client.ConnectedAt.IsZero() {
+			connectedAt = client.ConnectedAt.UnixNano()
+		}
+		group := daemonHTTPApprovalGroup{
+			ID:        fmt.Sprintf("client:%d:%d", client.PID, connectedAt),
+			ToolCalls: append([]daemon.PendingApprovalSnapshot(nil), client.PendingApprovals...),
+		}
+		switch {
+		case strings.TrimSpace(client.Mode) != "" && strings.TrimSpace(client.WorkingDir) != "":
+			group.Label = client.Mode + " " + client.WorkingDir
+		case strings.TrimSpace(client.WorkingDir) != "":
+			group.Label = client.WorkingDir
+		case strings.TrimSpace(client.Mode) != "":
+			group.Label = client.Mode
+		}
+		out = append(out, group)
+	}
+	return out
+}
+
+func findPendingApprovalGroup(control daemonHTTPControl, groupID string) (daemonHTTPApprovalGroup, bool) {
+	for _, group := range pendingApprovalGroupsForHTTP(control) {
+		if group.ID == groupID {
+			return group, true
+		}
+	}
+	return daemonHTTPApprovalGroup{}, false
+}
+
+func toDaemonApprovalDecisions(decisions []approvalApplyDecisionRequest) []daemon.ApprovalDecision {
+	if len(decisions) == 0 {
+		return nil
+	}
+	out := make([]daemon.ApprovalDecision, 0, len(decisions))
+	for _, decision := range decisions {
+		action := daemon.ApprovalActionReject
+		if decision.Approved {
+			action = daemon.ApprovalActionApprove
+		}
+		out = append(out, daemon.ApprovalDecision{
+			Action:     action,
+			ToolCallID: decision.ID,
+			Message:    decision.Reason,
+		})
+	}
+	return out
+}
+
 func maybeAutoOpenDaemonBrowser(stderr io.Writer, control daemonHTTPControl, addr string) {
-	if control == nil || !daemonBrowserAutoOpenEnabled() {
+	launcher := daemonBrowserLauncher
+	if control == nil || launcher == nil || !launcher.Enabled() {
 		return
 	}
 
@@ -224,11 +323,11 @@ func maybeAutoOpenDaemonBrowser(stderr io.Writer, control daemonHTTPControl, add
 		return
 	}
 
-	go func(url string) {
-		if err := daemonOpenBrowser(url); err != nil && stderr != nil {
+	go func(url string, launcher browserLauncher, stderr io.Writer) {
+		if err := launcher.Open(url); err != nil && stderr != nil {
 			_, _ = fmt.Fprintf(stderr, "toolbox daemon browser launch error: %v\n", err)
 		}
-	}("http://" + addr + "/")
+	}("http://"+addr+"/", launcher, stderr)
 }
 
 type daemonIndexPageData struct {
@@ -260,10 +359,18 @@ var daemonIndexTemplate = template.Must(template.New("daemon-index").Parse(`<!do
     }
     button {
       width: fit-content;
+      margin-right: 0.5rem;
+      margin-top: 0.5rem;
     }
     code {
       background: #f4f4f4;
       padding: 0.1rem 0.3rem;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 0.75rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
     }
     #message {
       min-height: 1.5rem;
@@ -290,11 +397,16 @@ var daemonIndexTemplate = template.Must(template.New("daemon-index").Parse(`<!do
   <p>Secret store unavailable.</p>
   {{end}}
   <p id="message"></p>
+  <section>
+    <h2>Approvals</h2>
+    <ul id="approvals"></ul>
+  </section>
   <script>
     const messageEl = document.getElementById('message');
     const unlockForm = document.getElementById('unlock-form');
     const lockForm = document.getElementById('lock-form');
     const unlockInput = document.getElementById('unlock-key');
+    const approvalsEl = document.getElementById('approvals');
 
     async function submitJSON(url, body) {
       const resp = await fetch(url, {
@@ -314,6 +426,119 @@ var daemonIndexTemplate = template.Must(template.New("daemon-index").Parse(`<!do
       if (!resp.ok) {
         throw new Error(text || 'request failed');
       }
+    }
+
+    async function applyApprovals(approvals) {
+      await submitJSON('/approvals/apply', { approvals });
+    }
+
+    function renderApprovals(groups) {
+      approvalsEl.innerHTML = '';
+      if (!groups || groups.length === 0) {
+        const item = document.createElement('li');
+        item.textContent = 'No pending approvals.';
+        approvalsEl.appendChild(item);
+      return;
+      }
+      for (const group of groups) {
+        const item = document.createElement('li');
+        const heading = document.createElement('div');
+        const headingLabel = group.label || group.id;
+        heading.textContent = headingLabel + ' (' + group.tool_calls.length + ' call' + (group.tool_calls.length === 1 ? '' : 's') + ')';
+        item.appendChild(heading);
+
+        const approveGroupButton = document.createElement('button');
+        approveGroupButton.type = 'button';
+        approveGroupButton.textContent = 'Approve All';
+        approveGroupButton.addEventListener('click', async () => {
+          messageEl.textContent = '';
+          try {
+            await applyApprovals((group.tool_calls || []).map((call) => ({
+              id: call.tool_call_id,
+              approved: true
+            })));
+          } catch (err) {
+            messageEl.textContent = err.message || 'approve failed';
+          }
+        });
+        item.appendChild(approveGroupButton);
+
+        const rejectGroupButton = document.createElement('button');
+        rejectGroupButton.type = 'button';
+        rejectGroupButton.textContent = 'Reject All';
+        rejectGroupButton.addEventListener('click', async () => {
+          const message = window.prompt('Reject message', '');
+          if (message === null) {
+            return;
+          }
+          messageEl.textContent = '';
+          try {
+            await applyApprovals((group.tool_calls || []).map((call) => ({
+              id: call.tool_call_id,
+              approved: false,
+              reason: message
+            })));
+          } catch (err) {
+            messageEl.textContent = err.message || 'reject failed';
+          }
+        });
+        item.appendChild(rejectGroupButton);
+
+        const calls = document.createElement('ul');
+        for (const call of group.tool_calls || []) {
+          const callItem = document.createElement('li');
+          const name = document.createElement('div');
+          name.textContent = call.tool_name + ' [' + call.tool_call_id + ']';
+          callItem.appendChild(name);
+          if (call.params_inspect) {
+            const params = document.createElement('pre');
+            params.textContent = call.params_inspect;
+            callItem.appendChild(params);
+          }
+
+          const approveCallButton = document.createElement('button');
+          approveCallButton.type = 'button';
+          approveCallButton.textContent = 'Approve';
+          approveCallButton.addEventListener('click', async () => {
+            messageEl.textContent = '';
+            try {
+              await applyApprovals([{ id: call.tool_call_id, approved: true }]);
+            } catch (err) {
+              messageEl.textContent = err.message || 'approve failed';
+            }
+          });
+          callItem.appendChild(approveCallButton);
+
+          const rejectCallButton = document.createElement('button');
+          rejectCallButton.type = 'button';
+          rejectCallButton.textContent = 'Reject';
+          rejectCallButton.addEventListener('click', async () => {
+            const message = window.prompt('Reject message', '');
+            if (message === null) {
+              return;
+            }
+            messageEl.textContent = '';
+            try {
+              await applyApprovals([{ id: call.tool_call_id, approved: false, reason: message }]);
+            } catch (err) {
+              messageEl.textContent = err.message || 'reject failed';
+            }
+          });
+          callItem.appendChild(rejectCallButton);
+          calls.appendChild(callItem);
+        }
+        item.appendChild(calls);
+        approvalsEl.appendChild(item);
+      }
+    }
+
+    async function loadApprovals() {
+      const resp = await fetch('/approvals');
+      const text = await resp.text();
+      if (!resp.ok) {
+        throw new Error(text || 'request failed');
+      }
+      renderApprovals(JSON.parse(text || '[]'));
     }
 
     if (unlockForm) {
@@ -341,6 +566,19 @@ var daemonIndexTemplate = template.Must(template.New("daemon-index").Parse(`<!do
         }
       });
     }
+
+    loadApprovals().catch((err) => {
+      messageEl.textContent = err.message || 'failed to load approvals';
+    });
+
+    const approvalEvents = new EventSource('/approvals/events');
+    approvalEvents.addEventListener('approvals', (event) => {
+      try {
+        renderApprovals(JSON.parse(event.data || '[]'));
+      } catch (err) {
+        messageEl.textContent = 'failed to update approvals';
+      }
+    });
   </script>
 </body>
 </html>
@@ -424,6 +662,192 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		if err := json.NewEncoder(w).Encode(snapshot); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+	})
+	mux.HandleFunc("/approvals", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		groups := pendingApprovalGroupsForHTTP(control)
+		if err := json.NewEncoder(w).Encode(groups); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+	mux.HandleFunc("/approvals/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		last := ""
+		sendSnapshot := func() {
+			groups := pendingApprovalGroupsForHTTP(control)
+			payload, err := json.Marshal(groups)
+			if err != nil {
+				return
+			}
+			if string(payload) == last {
+				return
+			}
+			last = string(payload)
+			_, _ = fmt.Fprintf(w, "event: approvals\ndata: %s\n\n", payload)
+			flusher.Flush()
+		}
+
+		sendSnapshot()
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				sendSnapshot()
+			}
+		}
+	})
+	mux.HandleFunc("/approvals/apply", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		if control == nil {
+			http.Error(w, "approvals unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !isJSONRequest(r) {
+			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
+		}
+		var req approvalApplyRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := control.ApplyApprovals(r.Context(), toDaemonApprovalDecisions(req.Approvals)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/approve") && !strings.HasSuffix(r.URL.Path, "/reject") {
+			http.NotFound(w, r)
+			return
+		}
+		reject := strings.HasSuffix(r.URL.Path, "/reject")
+		suffix := "/approve"
+		if reject {
+			suffix = "/reject"
+		}
+		groupID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/approvals/"), suffix)
+		groupID = strings.Trim(groupID, "/")
+		if groupID == "" {
+			http.Error(w, "missing approval group id", http.StatusBadRequest)
+			return
+		}
+		decodedGroupID, err := url.PathUnescape(groupID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if control == nil {
+			http.Error(w, "approvals unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		group, ok := findPendingApprovalGroup(control, decodedGroupID)
+		if !ok {
+			http.Error(w, "approval group not found", http.StatusNotFound)
+			return
+		}
+		decisions := make([]approvalApplyDecisionRequest, 0, len(group.ToolCalls))
+		if reject {
+			if !isJSONRequest(r) {
+				http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+				return
+			}
+			var req approvalRejectRequest
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, call := range group.ToolCalls {
+				decisions = append(decisions, approvalApplyDecisionRequest{
+					ID:       call.ToolCallID,
+					Approved: false,
+					Reason:   req.Message,
+				})
+			}
+		} else {
+			for _, call := range group.ToolCalls {
+				decisions = append(decisions, approvalApplyDecisionRequest{
+					ID:       call.ToolCallID,
+					Approved: true,
+				})
+			}
+		}
+		if err := control.ApplyApprovals(r.Context(), toDaemonApprovalDecisions(decisions)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/approval-tool-calls/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/approve") && !strings.HasSuffix(r.URL.Path, "/reject") {
+			http.NotFound(w, r)
+			return
+		}
+		reject := strings.HasSuffix(r.URL.Path, "/reject")
+		suffix := "/approve"
+		if reject {
+			suffix = "/reject"
+		}
+		toolCallID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/approval-tool-calls/"), suffix)
+		toolCallID = strings.Trim(toolCallID, "/")
+		if toolCallID == "" {
+			http.Error(w, "missing approval tool call id", http.StatusBadRequest)
+			return
+		}
+		decodedToolCallID, err := url.PathUnescape(toolCallID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if control == nil {
+			http.Error(w, "approvals unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		decision := approvalApplyDecisionRequest{ID: decodedToolCallID, Approved: !reject}
+		if reject {
+			if !isJSONRequest(r) {
+				http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+				return
+			}
+			var req approvalRejectRequest
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			decision.Reason = req.Message
+		}
+		if err := control.ApplyApprovals(r.Context(), toDaemonApprovalDecisions([]approvalApplyDecisionRequest{decision})); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/secret-store/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

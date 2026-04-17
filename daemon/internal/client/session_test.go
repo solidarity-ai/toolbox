@@ -3,6 +3,7 @@
 package client
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -55,5 +56,42 @@ func TestHandleStateUpdateFiresInstalledHandlerForNewEpochChange(t *testing.T) {
 
 	if got := changes.Load(); got != 1 {
 		t.Fatalf("changes = %d, want 1", got)
+	}
+}
+
+func TestHandleStateUpdateFiresInstalledApprovalHandlerForNewDecision(t *testing.T) {
+	reg := &SessionRegistration{}
+
+	var (
+		mu        sync.Mutex
+		decisions []ApprovalDecision
+	)
+	reg.SetApprovalHandler(func(decision ApprovalDecision) {
+		mu.Lock()
+		defer mu.Unlock()
+		decisions = append(decisions, decision)
+	})
+
+	reg.handleStateUpdate(&daemonv1.StateUpdate{
+		ApprovalDecisions: []*daemonv1.ApprovalDecision{{
+			Action:     "reject",
+			ToolCallId: "tc-1",
+			Message:    "blocked",
+		}},
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(decisions) != 1 {
+		t.Fatalf("decisions len = %d, want 1", len(decisions))
+	}
+	if decisions[0].Action != "reject" {
+		t.Fatalf("decisions[0].Action = %q, want %q", decisions[0].Action, "reject")
+	}
+	if decisions[0].ToolCallID != "tc-1" {
+		t.Fatalf("decisions[0].ToolCallID = %q, want %q", decisions[0].ToolCallID, "tc-1")
+	}
+	if decisions[0].Message != "blocked" {
+		t.Fatalf("decisions[0].Message = %q, want %q", decisions[0].Message, "blocked")
 	}
 }

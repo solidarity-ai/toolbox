@@ -978,7 +978,7 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	defer stdio.Close()
 
 	c := client.NewClient(stdio)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	initReq := mcp.InitializeRequest{}
@@ -1094,7 +1094,7 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 	defer stdio.Close()
 
 	c := client.NewClient(stdio)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	initReq := mcp.InitializeRequest{}

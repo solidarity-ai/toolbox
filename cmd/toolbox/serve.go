@@ -69,6 +69,13 @@ func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout
 		return err
 	}
 	defer managed.Close()
+	bindApprovalExecution(sessionDelegate, stderr, managed, func() error {
+		return syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
+	})
+	managed.SetAfterSubmit(func() {
+		_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
+	})
+	_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 
 	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
 	backend, err := newFileToolsetBackend(context.Background(), cmd.Toolset, cmd.Effects, opts, consumer)

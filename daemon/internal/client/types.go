@@ -30,8 +30,13 @@ type PingResult struct {
 	PID     int
 }
 
+type PendingApprovalSnapshot = daemonserver.PendingApprovalSnapshot
+type ApprovalDecision = daemonserver.ApprovalDecision
+
 type SessionDelegate interface {
 	toolsetctl.PreparedToolConsumer
+	SetPendingApprovals([]PendingApprovalSnapshot)
+	SetApprovalHandler(func(ApprovalDecision))
 	SetSecretEpochHandler(func())
 	Close() error
 }
@@ -77,11 +82,24 @@ func (d *sessionDelegate) SetPreparedTools(prepared toolset.PreparedToolset) {
 	if d == nil || d.reg == nil {
 		return
 	}
-	if err := d.reg.Update(daemonserver.SessionState{
-		Mode:          d.mode,
-		WorkingDir:    d.cwd,
-		PreparedTools: toolset.PreparedToolRefs(prepared),
-	}); err != nil && d.stderr != nil {
+	state := d.reg.currentState()
+	state.Mode = d.mode
+	state.WorkingDir = d.cwd
+	state.PreparedTools = toolset.PreparedToolRefs(prepared)
+	if err := d.reg.Update(state); err != nil && d.stderr != nil {
+		_, _ = fmt.Fprintf(d.stderr, "toolbox daemon sync error: %v\n", err)
+	}
+}
+
+func (d *sessionDelegate) SetPendingApprovals(approvals []PendingApprovalSnapshot) {
+	if d == nil || d.reg == nil {
+		return
+	}
+	state := d.reg.currentState()
+	state.Mode = d.mode
+	state.WorkingDir = d.cwd
+	state.PendingApprovals = append([]PendingApprovalSnapshot(nil), approvals...)
+	if err := d.reg.Update(state); err != nil && d.stderr != nil {
 		_, _ = fmt.Fprintf(d.stderr, "toolbox daemon sync error: %v\n", err)
 	}
 }
@@ -100,8 +118,19 @@ func (d *sessionDelegate) SetSecretEpochHandler(fn func()) {
 	d.reg.SetSecretEpochHandler(fn)
 }
 
+func (d *sessionDelegate) SetApprovalHandler(fn func(ApprovalDecision)) {
+	if d == nil || d.reg == nil {
+		return
+	}
+	d.reg.SetApprovalHandler(fn)
+}
+
 func (noopSessionDelegate) SetPreparedTools(toolset.PreparedToolset) {}
 
+func (noopSessionDelegate) SetPendingApprovals([]PendingApprovalSnapshot) {}
+
 func (noopSessionDelegate) SetSecretEpochHandler(func()) {}
+
+func (noopSessionDelegate) SetApprovalHandler(func(ApprovalDecision)) {}
 
 func (noopSessionDelegate) Close() error { return nil }

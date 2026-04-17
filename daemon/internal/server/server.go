@@ -74,6 +74,13 @@ func (s *Server) Clients() []ClientSnapshot {
 	return s.registry.Clients()
 }
 
+func (s *Server) PendingApprovals() []PendingApprovalSnapshot {
+	if s == nil || s.registry == nil {
+		return nil
+	}
+	return s.registry.PendingApprovals()
+}
+
 func (s *Server) Registry() *Registry {
 	if s == nil {
 		return nil
@@ -100,4 +107,17 @@ func (s *Server) SecretStoreLocked(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	return s.secretService.Locked(ctx)
+}
+
+func (s *Server) ApplyApprovals(_ context.Context, decisions []ApprovalDecision) error {
+	if s == nil || s.registry == nil {
+		return nil
+	}
+	for _, decision := range decisions {
+		s.registry.QueueApprovalDecision(decision)
+	}
+	if s.sessionService != nil && s.sessionService.notifier != nil {
+		s.sessionService.notifier.Notify()
+	}
+	return nil
 }

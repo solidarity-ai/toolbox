@@ -135,7 +135,7 @@ func TestRunReplInstructionsAliasPrintsInstructions(t *testing.T) {
 		t.Fatalf("runWithIO() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
 
-	if strings.Count(stdout.String(), "// REPL input") < 2 {
+	if strings.Count(stdout.String(), "// Notebook Input") < 2 {
 		t.Fatalf("stdout = %q, want instructions banner at startup and for :instructions", stdout.String())
 	}
 	if calls.Load() != 1 {
@@ -160,6 +160,29 @@ func TestRunReplPrintsConsoleLogsAtEndOfSubmitOutput(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "--\nok [object Object]\n=> 1\n") {
 		t.Fatalf("stdout = %q, want console logs footer after completion output", stdout.String())
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestRunReplAwaitApprovalsReturnsNoOutstandingWhenIdle(t *testing.T) {
+	calls := stubSessionDaemon(t)
+
+	dbPath := filepath.Join(t.TempDir(), "await.toolbox-session")
+	toolsetPath := writeToolsetFile(t, map[string]any{
+		"packages": map[string]any{},
+		"tools":    []any{},
+	})
+
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader(":await_approvals\n:exit\n")
+	if err := runWithIO([]string{"codemode", "repl", "-t", toolsetPath, "-f", dbPath}, input, &stdout, &stderr); err != nil {
+		t.Fatalf("runWithIO() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), "(no outstanding approvals).") {
+		t.Fatalf("stdout = %q, want no-outstanding approvals output", stdout.String())
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())

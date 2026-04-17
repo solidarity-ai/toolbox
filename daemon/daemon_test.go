@@ -118,6 +118,40 @@ func TestSessionRegistrationTracksClients(t *testing.T) {
 	waitForClientCount(t, registry, 0)
 }
 
+func TestSessionRegistrationTracksPendingApprovals(t *testing.T) {
+	_, srv := startTrackedServer(t)
+	registry := srv.Registry()
+
+	reg, err := OpenSessionRegistration(SessionState{
+		Mode:       "codemode_repl",
+		WorkingDir: "/tmp/work",
+		PendingApprovals: []PendingApprovalSnapshot{
+			{ToolCallID: "tc-1", ToolName: "issues.get", ParamsInspect: `{id: "I-1", meta: {team: {owner: {name: "alpha"}}}}`},
+			{ToolCallID: "tc-2", ToolName: "issues.get", ParamsInspect: `{id: "I-2", meta: {team: {owner: {name: "beta"}}}}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenSessionRegistration(): %v", err)
+	}
+	defer func() {
+		if err := reg.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+	}()
+
+	waitForClientCount(t, registry, 1)
+	clients := registry.Clients()
+	if len(clients) != 1 {
+		t.Fatalf("Clients() len = %d, want 1", len(clients))
+	}
+	if len(clients[0].PendingApprovals) != 2 {
+		t.Fatalf("PendingApprovals len = %d, want 2", len(clients[0].PendingApprovals))
+	}
+	if !strings.Contains(clients[0].PendingApprovals[0].ParamsInspect, `owner: {name: "alpha"}`) {
+		t.Fatalf("PendingApprovals[0].ParamsInspect = %q, want deep params", clients[0].PendingApprovals[0].ParamsInspect)
+	}
+}
+
 func TestSessionRegistrationSecretEpochHandlerFiresOnSecretChanges(t *testing.T) {
 	_, _ = startTrackedServer(t)
 

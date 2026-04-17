@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -30,7 +29,11 @@ type fakeSessionDaemon struct{}
 
 func (fakeSessionDaemon) SetPreparedTools(toolset.PreparedToolset) {}
 
+func (fakeSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
+
 func (fakeSessionDaemon) SetSecretEpochHandler(func()) {}
+
+func (fakeSessionDaemon) SetApprovalHandler(func(daemon.ApprovalDecision)) {}
 
 func (fakeSessionDaemon) Close() error { return nil }
 
@@ -49,21 +52,14 @@ func TestBindSecretEpochReload(t *testing.T) {
 
 func TestBindSecretEpochReloadLogsFailures(t *testing.T) {
 	delegate := &recordingSessionDaemon{}
-	var stderr bytes.Buffer
+	var stderr lockedBuffer
 
 	bindSecretEpochReload(delegate, &stderr, func() error {
 		return io.EOF
 	})
 	delegate.fire()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if stderr.Len() > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := stderr.String(); got != "toolbox daemon reload error: EOF\n" {
+	if got := waitForBufferSubstring(t, &stderr, "toolbox daemon reload error: EOF"); got != "toolbox daemon reload error: EOF\n" {
 		t.Fatalf("stderr = %q, want %q", got, "toolbox daemon reload error: EOF\n")
 	}
 }
@@ -74,9 +70,13 @@ type recordingSessionDaemon struct {
 
 func (d *recordingSessionDaemon) SetPreparedTools(toolset.PreparedToolset) {}
 
+func (d *recordingSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
+
 func (d *recordingSessionDaemon) SetSecretEpochHandler(fn func()) {
 	d.handler.Store(fn)
 }
+
+func (d *recordingSessionDaemon) SetApprovalHandler(func(daemon.ApprovalDecision)) {}
 
 func (d *recordingSessionDaemon) Close() error { return nil }
 

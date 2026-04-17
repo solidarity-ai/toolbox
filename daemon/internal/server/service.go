@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync/atomic"
 
 	connect "connectrpc.com/connect"
 	daemonv1 "github.com/solidarity-ai/toolbox/daemon/apiv1"
@@ -64,16 +65,16 @@ func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream
 	subID, updates := s.notifier.Subscribe()
 	defer s.notifier.Unsubscribe(subID)
 
-	if err := stream.Send(s.currentStateUpdate()); err != nil {
+	if err := stream.Send(s.currentStateUpdate(0)); err != nil {
 		return err
 	}
 
+	var clientID atomic.Uint64
 	recvErrCh := make(chan error, 1)
 	go func() {
-		var clientID uint64
 		defer func() {
-			if clientID != 0 {
-				s.registry.RemoveClient(clientID)
+			if id := clientID.Load(); id != 0 {
+				s.registry.RemoveClient(id)
 				s.notifier.Notify()
 			}
 		}()
@@ -89,13 +90,16 @@ func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream
 				}
 				return
 			}
-			if clientID == 0 {
-				clientID = s.registry.AddClient(int(msg.GetPid()))
+			id := clientID.Load()
+			if id == 0 {
+				id = s.registry.AddClient(int(msg.GetPid()))
+				clientID.Store(id)
 			}
-			s.registry.UpdateClient(clientID, SessionState{
-				Mode:          msg.GetMode(),
-				WorkingDir:    msg.GetWorkingDir(),
-				PreparedTools: append([]string(nil), msg.GetPreparedTools()...),
+			s.registry.UpdateClient(id, SessionState{
+				Mode:             msg.GetMode(),
+				WorkingDir:       msg.GetWorkingDir(),
+				PreparedTools:    append([]string(nil), msg.GetPreparedTools()...),
+				PendingApprovals: pendingApprovalsFromProto(msg.GetPendingApprovals()),
 			})
 			s.notifier.Notify()
 		}
@@ -109,20 +113,21 @@ func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream
 			if !ok {
 				return nil
 			}
-			if err := stream.Send(s.currentStateUpdate()); err != nil {
+			if err := stream.Send(s.currentStateUpdate(clientID.Load())); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (s *SessionService) currentStateUpdate() *daemonv1.StateUpdate {
+func (s *SessionService) currentStateUpdate(clientID uint64) *daemonv1.StateUpdate {
 	if s == nil {
 		return &daemonv1.StateUpdate{}
 	}
 	return &daemonv1.StateUpdate{
-		Clients:     clientSnapshotsToProto(s.registry.Clients()),
-		SecretEpoch: s.secretEpoch.Current(),
+		Clients:           clientSnapshotsToProto(s.registry.Clients()),
+		SecretEpoch:       s.secretEpoch.Current(),
+		ApprovalDecisions: approvalDecisionsToProto(s.registry.ApprovalDecisions(clientID)),
 	}
 }
 
@@ -133,10 +138,11 @@ func clientSnapshotsToProto(clients []ClientSnapshot) []*daemonv1.ClientSnapshot
 	out := make([]*daemonv1.ClientSnapshot, 0, len(clients))
 	for _, client := range clients {
 		snapshot := &daemonv1.ClientSnapshot{
-			Pid:           int32(client.PID),
-			Mode:          client.Mode,
-			WorkingDir:    client.WorkingDir,
-			PreparedTools: append([]string(nil), client.PreparedTools...),
+			Pid:              int32(client.PID),
+			Mode:             client.Mode,
+			WorkingDir:       client.WorkingDir,
+			PreparedTools:    append([]string(nil), client.PreparedTools...),
+			PendingApprovals: pendingApprovalsToProto(client.PendingApprovals),
 		}
 		if !client.ConnectedAt.IsZero() {
 			snapshot.ConnectedAt = timestamppb.New(client.ConnectedAt)
@@ -145,6 +151,59 @@ func clientSnapshotsToProto(clients []ClientSnapshot) []*daemonv1.ClientSnapshot
 			snapshot.LastSyncAt = timestamppb.New(client.LastSyncAt)
 		}
 		out = append(out, snapshot)
+	}
+	return out
+}
+
+func pendingApprovalsFromProto(approvals []*daemonv1.PendingApprovalSnapshot) []PendingApprovalSnapshot {
+	if len(approvals) == 0 {
+		return nil
+	}
+	out := make([]PendingApprovalSnapshot, 0, len(approvals))
+	for _, approval := range approvals {
+		next := PendingApprovalSnapshot{
+			ToolCallID:    approval.GetToolCallId(),
+			ToolName:      approval.GetToolName(),
+			ParamsInspect: approval.GetParamsInspect(),
+			EffectID:      approval.GetEffectId(),
+			Status:        approval.GetStatus(),
+			Error:         approval.GetError(),
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func pendingApprovalsToProto(approvals []PendingApprovalSnapshot) []*daemonv1.PendingApprovalSnapshot {
+	if len(approvals) == 0 {
+		return nil
+	}
+	out := make([]*daemonv1.PendingApprovalSnapshot, 0, len(approvals))
+	for _, approval := range approvals {
+		next := &daemonv1.PendingApprovalSnapshot{
+			ToolCallId:    approval.ToolCallID,
+			ToolName:      approval.ToolName,
+			ParamsInspect: approval.ParamsInspect,
+			EffectId:      approval.EffectID,
+			Status:        approval.Status,
+			Error:         approval.Error,
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func approvalDecisionsToProto(decisions []ApprovalDecision) []*daemonv1.ApprovalDecision {
+	if len(decisions) == 0 {
+		return nil
+	}
+	out := make([]*daemonv1.ApprovalDecision, 0, len(decisions))
+	for _, decision := range decisions {
+		out = append(out, &daemonv1.ApprovalDecision{
+			Action:     decision.Action,
+			ToolCallId: decision.ToolCallID,
+			Message:    decision.Message,
+		})
 	}
 	return out
 }

@@ -22,11 +22,18 @@ type SessionDelegate = daemonclient.SessionDelegate
 
 type SessionState = daemonserver.SessionState
 type ClientSnapshot = daemonserver.ClientSnapshot
+type PendingApprovalSnapshot = daemonserver.PendingApprovalSnapshot
+type ApprovalDecision = daemonserver.ApprovalDecision
 type Registry = daemonserver.Registry
 type Server = daemonserver.Server
 type SessionService = daemonserver.SessionService
 type SecretStore = daemonclient.SecretStore
 type SecretStoreService = daemonserver.SecretStoreService
+
+const (
+	ApprovalActionApprove = daemonserver.ApprovalActionApprove
+	ApprovalActionReject  = daemonserver.ApprovalActionReject
+)
 
 func IsUnsupportedPlatform(err error) bool {
 	return errors.Is(err, ErrUnsupportedPlatform)

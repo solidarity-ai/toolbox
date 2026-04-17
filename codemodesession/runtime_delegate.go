@@ -20,12 +20,16 @@ import (
 )
 
 type runtimeDelegate struct {
-	prepared func() toolset.PreparedToolset
+	prepared  func() toolset.PreparedToolset
+	toolCalls toolCallJournal
+	approvals approvalStore
 }
 
 type runtimeBinding struct {
-	prepared func() toolset.PreparedToolset
-	state    runtimeToolState
+	prepared  func() toolset.PreparedToolset
+	toolCalls toolCallJournal
+	approvals approvalStore
+	state     runtimeToolState
 }
 
 type runtimeState struct {
@@ -33,17 +37,18 @@ type runtimeState struct {
 }
 
 type runtimeToolState struct {
-	Name         string   `json:"name"`
-	Package      string   `json:"package"`
-	Params       []string `json:"params,omitempty"`
-	ReplayPolicy string   `json:"replayPolicy"`
+	Name          string   `json:"name"`
+	Package       string   `json:"package"`
+	Params        []string `json:"params,omitempty"`
+	ReplayPolicy  string   `json:"replayPolicy"`
+	NeedsApproval bool     `json:"needsApproval,omitempty"`
 }
 
-func newRuntimeDelegate(prepared func() toolset.PreparedToolset) repl.VMDelegate {
+func newRuntimeDelegate(prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore) repl.VMDelegate {
 	if prepared == nil {
 		prepared = func() toolset.PreparedToolset { return toolset.PreparedToolset{} }
 	}
-	return runtimeDelegate{prepared: prepared}
+	return runtimeDelegate{prepared: prepared, toolCalls: toolCalls, approvals: approvals}
 }
 
 func (d runtimeDelegate) ConfigureRuntime(ctx repl.SessionRuntimeContext, rt *goja.Runtime, host repl.HostFuncBuilder, state json.RawMessage) (json.RawMessage, error) {
@@ -51,7 +56,7 @@ func (d runtimeDelegate) ConfigureRuntime(ctx repl.SessionRuntimeContext, rt *go
 	if err != nil {
 		return nil, err
 	}
-	if err := installRuntimeBindings(rt, host, bindings, ctx.IsCurrentRuntime); err != nil {
+	if err := installRuntimeBindings(rt, host, bindings, d.toolCalls, d.approvals, ctx.SessionID, ctx.IsCurrentRuntime); err != nil {
 		return nil, err
 	}
 	return nextState, nil
@@ -69,7 +74,7 @@ func (d runtimeDelegate) TransitionRuntime(ctx repl.RuntimeTransitionContext, rt
 	if err := removeRuntimeBindings(rt, fromDecoded.Tools); err != nil {
 		return err
 	}
-	return installRuntimeBindings(rt, host, runtimeBindingsFromState(d.prepared, toDecoded.Tools), ctx.IsCurrentRuntime)
+	return installRuntimeBindings(rt, host, runtimeBindingsFromState(d.prepared, toDecoded.Tools), d.toolCalls, d.approvals, ctx.SessionID, ctx.IsCurrentRuntime)
 }
 
 func configureRuntimeBindings(prepared func() toolset.PreparedToolset, state json.RawMessage) ([]runtimeBinding, json.RawMessage, error) {
@@ -110,9 +115,10 @@ func buildRuntimeToolStates(prepared toolset.PreparedToolset) []runtimeToolState
 			continue
 		}
 		toolState := runtimeToolState{
-			Name:         preparedTool.Name,
-			Package:      preparedToolPackageName(preparedTool),
-			ReplayPolicy: string(replayPolicyForTool(preparedTool.Effect, preparedTool.Idempotent)),
+			Name:          preparedTool.Name,
+			Package:       preparedToolPackageName(preparedTool),
+			ReplayPolicy:  string(replayPolicyForTool(preparedTool.Effect, preparedTool.Idempotent)),
+			NeedsApproval: preparedTool.NeedsApproval,
 		}
 		if tool.Sig != nil {
 			hidden := tool.HiddenParams()
@@ -132,12 +138,15 @@ func runtimeBindingsFromState(prepared func() toolset.PreparedToolset, toolState
 	out := make([]runtimeBinding, 0, len(toolStates))
 	for _, toolState := range toolStates {
 		out = append(out, runtimeBinding{
-			prepared: prepared,
+			prepared:  prepared,
+			toolCalls: nil,
+			approvals: nil,
 			state: runtimeToolState{
-				Name:         toolState.Name,
-				Package:      toolState.Package,
-				Params:       append([]string(nil), toolState.Params...),
-				ReplayPolicy: toolState.ReplayPolicy,
+				Name:          toolState.Name,
+				Package:       toolState.Package,
+				Params:        append([]string(nil), toolState.Params...),
+				ReplayPolicy:  toolState.ReplayPolicy,
+				NeedsApproval: toolState.NeedsApproval,
 			},
 		})
 	}
@@ -188,9 +197,14 @@ func normalizeRawJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return normalized, nil
 }
 
-func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, bindings []runtimeBinding, isCurrentRuntime func() bool) error {
+func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, bindings []runtimeBinding, toolCalls toolCallJournal, approvals approvalStore, sessionID repl.SessionID, isCurrentRuntime func() bool) error {
 	global := rt.GlobalObject()
+	if err := installToolCallInspector(rt, host, toolCalls, sessionID); err != nil {
+		return err
+	}
 	for _, binding := range bindings {
+		binding.toolCalls = toolCalls
+		binding.approvals = approvals
 		pkgObj, err := ensureObjectPath(rt, global, packageNamespaceSegments(binding.state.Package))
 		if err != nil {
 			return fmt.Errorf("install package %q: %w", binding.state.Package, err)
@@ -204,7 +218,7 @@ func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, binding
 		if err != nil {
 			return fmt.Errorf("install tool namespace for %q: %w", binding.state.Name, err)
 		}
-		wrapper, err := buildRuntimeWrapper(rt, host, binding, isCurrentRuntime)
+		wrapper, err := buildRuntimeWrapper(rt, host, binding, sessionID, isCurrentRuntime)
 		if err != nil {
 			return fmt.Errorf("build tool %q wrapper: %w", binding.state.Name, err)
 		}
@@ -256,9 +270,9 @@ func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error
 	return nil
 }
 
-func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, isCurrentRuntime func() bool) (goja.Value, error) {
+func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, sessionID repl.SessionID, isCurrentRuntime func() bool) (goja.Value, error) {
 	staleMessage := fmt.Sprintf("tool %s came from a previous runtime and is no longer callable", binding.state.Name)
-	rawInvoke := host.WrapSync(binding.state.Name, binding.replay(), func(ctx context.Context, params []byte) ([]byte, error) {
+	rawInvoke := host.WrapAsyncWithEffectID(binding.state.Name, binding.replay(), func(ctx context.Context, _ repl.EffectID, params []byte) ([]byte, error) {
 		args, err := decodeRuntimeArgs(params)
 		if err != nil {
 			return nil, fmt.Errorf("%s: decode args: %w", binding.state.Name, err)
@@ -274,6 +288,21 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 		}
 		return encodeRuntimeResult(currentReturnType(tool), result)
 	})
+	rawApproval := host.WrapSyncWithEffectID(pendingApprovalEffectName(binding.state.Name), repl.ReplayReadonly, func(_ context.Context, effectID repl.EffectID, params []byte) ([]byte, error) {
+		toolCallID := string(effectID)
+		reviewedToolKey := approvalReviewedToolKey(binding.prepared(), binding.state.Name)
+		if binding.toolCalls != nil {
+			if err := binding.toolCalls.EnsureNeedsApproval(sessionID, toolCallID, binding.state.Name, params); err != nil {
+				return nil, err
+			}
+		}
+		if binding.approvals != nil {
+			if err := binding.approvals.RecordPendingToolCall(sessionID, toolCallID, toolCallID, binding.state.Name, reviewedToolKey, params); err != nil {
+				return nil, err
+			}
+		}
+		return encodeToolCallTaskValue(toolCallID)
+	})
 
 	wrapper := func(call goja.FunctionCall) goja.Value {
 		if isCurrentRuntime != nil && !isCurrentRuntime() {
@@ -286,10 +315,52 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			}
 			_ = argsObj.Set(paramName, call.Arguments[i])
 		}
-		return rawInvoke(goja.FunctionCall{
+		paramsEncoded, err := jswire.EncodeGoja(argsObj)
+		if err != nil {
+			panic(rt.NewTypeError("tool %s args: %v", binding.state.Name, err))
+		}
+
+		if binding.state.NeedsApproval {
+			taskValue, effectID := rawApproval(goja.FunctionCall{
+				This:      goja.Undefined(),
+				Arguments: []goja.Value{argsObj},
+			})
+			if strings.TrimSpace(string(effectID)) == "" {
+				panic(rt.NewTypeError("tool %s toolCallId: missing effect id", binding.state.Name))
+			}
+			taskObj := taskValue.ToObject(rt)
+			if taskObj == nil {
+				panic(rt.NewTypeError("tool %s returned a non-task value", binding.state.Name))
+			}
+			return taskObj
+		}
+
+		promiseValue, effectID := rawInvoke(goja.FunctionCall{
 			This:      goja.Undefined(),
 			Arguments: []goja.Value{argsObj},
 		})
+		toolCallID := strings.TrimSpace(string(effectID))
+		if toolCallID == "" {
+			panic(rt.NewTypeError("tool %s toolCallId: missing effect id", binding.state.Name))
+		}
+		if binding.toolCalls != nil {
+			if err := binding.toolCalls.EnsureStarted(sessionID, toolCallID, binding.state.Name, paramsEncoded); err != nil {
+				panic(rt.NewTypeError("tool %s start journal: %v", binding.state.Name, err))
+			}
+		}
+		task := newToolCallTaskValue(rt, toolCallID)
+
+		promiseObj := promiseValue.ToObject(rt)
+		if promiseObj == nil {
+			panic(rt.NewTypeError("tool %s returned a non-promise value", binding.state.Name))
+		}
+		if err := promiseObj.Set("task", task); err != nil {
+			panic(rt.NewTypeError("tool %s attach task: %v", binding.state.Name, err))
+		}
+		if err := attachToolCallSettlers(rt, promiseObj, binding.toolCalls, sessionID, toolCallID); err != nil {
+			panic(rt.NewTypeError("tool %s attach settlers: %v", binding.state.Name, err))
+		}
+		return promiseObj
 	}
 	wrapped := rt.ToValue(wrapper)
 	replengine.SetIndexedValueMetadata(wrapped, replengine.IndexedValueMetadata{StaleMessage: staleMessage})
@@ -307,11 +378,159 @@ func (b runtimeBinding) replay() repl.ReplayPolicy {
 	}
 }
 
+func installToolCallInspector(rt *goja.Runtime, host repl.HostFuncBuilder, toolCalls toolCallJournal, sessionID repl.SessionID) error {
+	if rt == nil {
+		return nil
+	}
+	inspectByID := host.WrapSync("__tool_call_by_id", repl.ReplayReadonly, func(ctx context.Context, params []byte) ([]byte, error) {
+		toolCallID, err := decodeToolCallIDArg(params)
+		if err != nil {
+			return nil, err
+		}
+		if toolCalls == nil {
+			return nil, fmt.Errorf("tool call inspection is unavailable")
+		}
+		snapshot, ok, err := toolCalls.Snapshot(sessionID, toolCallID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("unknown tool call %q", toolCallID)
+		}
+		value, err := toolCallSnapshotValue(snapshot)
+		if err != nil {
+			return nil, err
+		}
+		return jswire.EncodeGoja(goja.New().ToValue(value))
+	})
+
+	return rt.Set("$tool_call", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			panic(rt.NewTypeError("$tool_call requires a ToolCallPromise or ToolCallTask"))
+		}
+		toolCallID, err := extractToolCallIDFromRef(rt, call.Arguments[0])
+		if err != nil {
+			panic(rt.NewTypeError("%s", err.Error()))
+		}
+		return inspectByID(goja.FunctionCall{
+			This:      goja.Undefined(),
+			Arguments: []goja.Value{rt.ToValue(toolCallID)},
+		})
+	})
+}
+
 func currentReturnType(tool toolset.PreparedTool) *toolbox.TSType {
 	if tool.Sig == nil || tool.Sig.Return() == nil {
 		return nil
 	}
 	return tool.Sig.Return().UnwrapPromise()
+}
+
+func newToolCallTaskValue(rt *goja.Runtime, toolCallID string) *goja.Object {
+	task := rt.NewObject()
+	_ = task.Set("toolCallId", toolCallID)
+	return task
+}
+
+func encodeToolCallTaskValue(toolCallID string) ([]byte, error) {
+	return jswire.EncodeGoja(goja.New().ToValue(map[string]any{
+		"toolCallId": toolCallID,
+	}))
+}
+
+func pendingApprovalEffectName(toolName string) string {
+	return "__pending_approval." + strings.TrimSpace(toolName)
+}
+
+func attachToolCallSettlers(rt *goja.Runtime, promise *goja.Object, toolCalls toolCallJournal, sessionID repl.SessionID, toolCallID string) error {
+	if rt == nil || promise == nil || toolCalls == nil {
+		return nil
+	}
+	thenValue := promise.Get("then")
+	thenFn, ok := goja.AssertFunction(thenValue)
+	if !ok {
+		return fmt.Errorf("promise.then is not callable")
+	}
+
+	onFulfilled := rt.ToValue(func(call goja.FunctionCall) goja.Value {
+		var result []byte
+		if len(call.Arguments) > 0 {
+			encoded, err := jswire.EncodeGoja(call.Arguments[0])
+			if err == nil {
+				result = encoded
+			}
+		}
+		_ = toolCalls.EnsureCompleted(sessionID, toolCallID, result)
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		return call.Arguments[0]
+	})
+	onRejected := rt.ToValue(func(call goja.FunctionCall) goja.Value {
+		errText := "tool call failed"
+		if len(call.Arguments) > 0 {
+			errText = toolCallErrorString(call.Arguments[0])
+		}
+		_ = toolCalls.EnsureFailed(sessionID, toolCallID, errText)
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		return call.Arguments[0]
+	})
+
+	_, err := thenFn(promise, onFulfilled, onRejected)
+	return err
+}
+
+func decodeToolCallIDArg(params []byte) (string, error) {
+	value, err := jswire.DecodeGoja(goja.New(), params)
+	if err != nil {
+		return "", fmt.Errorf("decode tool call ref: %w", err)
+	}
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return "", fmt.Errorf("tool call ref must not be empty")
+	}
+	return strings.TrimSpace(value.String()), nil
+}
+
+func extractToolCallIDFromRef(rt *goja.Runtime, value goja.Value) (string, error) {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+	}
+	obj := value.ToObject(rt)
+	if obj == nil {
+		return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+	}
+	if taskValue := obj.Get("task"); taskValue != nil && taskValue != goja.Undefined() && taskValue != goja.Null() {
+		taskObj := taskValue.ToObject(rt)
+		if taskObj != nil {
+			if toolCallID := strings.TrimSpace(taskObj.Get("toolCallId").String()); toolCallID != "" && toolCallID != "undefined" {
+				return toolCallID, nil
+			}
+		}
+	}
+	if toolCallID := strings.TrimSpace(obj.Get("toolCallId").String()); toolCallID != "" && toolCallID != "undefined" {
+		return toolCallID, nil
+	}
+	return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+}
+
+func toolCallErrorString(value goja.Value) string {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return "tool call failed"
+	}
+	if obj, ok := value.(*goja.Object); ok {
+		stack := obj.Get("stack")
+		if stack != nil && stack != goja.Undefined() && stack != goja.Null() {
+			if text := strings.TrimSpace(stack.String()); text != "" {
+				return text
+			}
+		}
+	}
+	if text := strings.TrimSpace(value.String()); text != "" {
+		return text
+	}
+	return "tool call failed"
 }
 
 func decodeRuntimeArgs(params []byte) (map[string]any, error) {
@@ -384,6 +603,14 @@ func looksLikeJSONLiteral(raw string) bool {
 	}
 }
 
+func approvalReviewedToolKey(prepared toolset.PreparedToolset, toolName string) string {
+	tool, ok := prepared.Tool(toolName)
+	if !ok {
+		return ""
+	}
+	return tool.ApprovalFingerprint()
+}
+
 func replayPolicyForTool(effect tooldef.Effect, idempotent *bool) repl.ReplayPolicy {
 	if effect == tooldef.EffectReadOnly {
 		return repl.ReplayReadonly
@@ -412,11 +639,11 @@ func ensureObjectPath(rt *goja.Runtime, root *goja.Object, segments []string) (*
 }
 
 func packageNamespaceSegments(packageName string) []string {
-	parts := splitDotted(packageName)
+	parts := sanitizeSegments(splitDotted(packageName))
 	if len(parts) == 0 {
 		return []string{"pkg"}
 	}
-	return sanitizeSegments(parts)
+	return parts
 }
 
 func sanitizeSegments(parts []string) []string {
@@ -426,9 +653,6 @@ func sanitizeSegments(parts []string) []string {
 			continue
 		}
 		out = append(out, sanitizeIdentifierSegment(part))
-	}
-	if len(out) == 0 {
-		return []string{"pkg"}
 	}
 	return out
 }

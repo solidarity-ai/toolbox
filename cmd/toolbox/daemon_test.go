@@ -26,6 +26,23 @@ type stubDaemonHTTPControl struct {
 	lockErr   error
 	statusErr error
 	snapshots []daemon.ClientSnapshot
+	decisions []daemon.ApprovalDecision
+}
+
+type stubBrowserLauncher struct {
+	enabled bool
+	open    func(string) error
+}
+
+func (s stubBrowserLauncher) Enabled() bool {
+	return s.enabled
+}
+
+func (s stubBrowserLauncher) Open(url string) error {
+	if s.open == nil {
+		return nil
+	}
+	return s.open(url)
 }
 
 func (s *stubDaemonHTTPControl) Clients() []daemon.ClientSnapshot {
@@ -64,19 +81,37 @@ func (s *stubDaemonHTTPControl) SecretStoreLocked(context.Context) (bool, error)
 	return s.locked, nil
 }
 
+func (s *stubDaemonHTTPControl) ApplyApprovals(_ context.Context, decisions []daemon.ApprovalDecision) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, decision := range decisions {
+		s.decisions = append(s.decisions, decision)
+		for i := range s.snapshots {
+			filtered := s.snapshots[i].PendingApprovals[:0]
+			for _, approval := range s.snapshots[i].PendingApprovals {
+				if approval.ToolCallID != decision.ToolCallID {
+					filtered = append(filtered, approval)
+				}
+			}
+			s.snapshots[i].PendingApprovals = filtered
+		}
+	}
+	return nil
+}
+
 func TestMaybeAutoOpenDaemonBrowserLocked(t *testing.T) {
-	prevEnabled := daemonBrowserAutoOpenEnabled
-	prevOpen := daemonOpenBrowser
-	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	prevLauncher := daemonBrowserLauncher
 	defer func() {
-		daemonBrowserAutoOpenEnabled = prevEnabled
-		daemonOpenBrowser = prevOpen
+		daemonBrowserLauncher = prevLauncher
 	}()
 
 	opened := make(chan string, 1)
-	daemonOpenBrowser = func(url string) error {
-		opened <- url
-		return nil
+	daemonBrowserLauncher = stubBrowserLauncher{
+		enabled: true,
+		open: func(url string) error {
+			opened <- url
+			return nil
+		},
 	}
 
 	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
@@ -98,18 +133,18 @@ func TestDefaultDaemonBrowserAutoOpenEnabledIsFalseInTests(t *testing.T) {
 }
 
 func TestMaybeAutoOpenDaemonBrowserSkipsWhenDisabled(t *testing.T) {
-	prevEnabled := daemonBrowserAutoOpenEnabled
-	prevOpen := daemonOpenBrowser
-	daemonBrowserAutoOpenEnabled = func() bool { return false }
+	prevLauncher := daemonBrowserLauncher
 	defer func() {
-		daemonBrowserAutoOpenEnabled = prevEnabled
-		daemonOpenBrowser = prevOpen
+		daemonBrowserLauncher = prevLauncher
 	}()
 
 	called := make(chan struct{}, 1)
-	daemonOpenBrowser = func(string) error {
-		called <- struct{}{}
-		return nil
+	daemonBrowserLauncher = stubBrowserLauncher{
+		enabled: false,
+		open: func(string) error {
+			called <- struct{}{}
+			return nil
+		},
 	}
 
 	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
@@ -122,18 +157,18 @@ func TestMaybeAutoOpenDaemonBrowserSkipsWhenDisabled(t *testing.T) {
 }
 
 func TestMaybeAutoOpenDaemonBrowserSkipsWhenUnlocked(t *testing.T) {
-	prevEnabled := daemonBrowserAutoOpenEnabled
-	prevOpen := daemonOpenBrowser
-	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	prevLauncher := daemonBrowserLauncher
 	defer func() {
-		daemonBrowserAutoOpenEnabled = prevEnabled
-		daemonOpenBrowser = prevOpen
+		daemonBrowserLauncher = prevLauncher
 	}()
 
 	called := make(chan struct{}, 1)
-	daemonOpenBrowser = func(string) error {
-		called <- struct{}{}
-		return nil
+	daemonBrowserLauncher = stubBrowserLauncher{
+		enabled: true,
+		open: func(string) error {
+			called <- struct{}{}
+			return nil
+		},
 	}
 
 	maybeAutoOpenDaemonBrowser(io.Discard, &stubDaemonHTTPControl{locked: false}, "127.0.0.1:7113")
@@ -146,29 +181,24 @@ func TestMaybeAutoOpenDaemonBrowserSkipsWhenUnlocked(t *testing.T) {
 }
 
 func TestMaybeAutoOpenDaemonBrowserLogsFailureWithoutReturningError(t *testing.T) {
-	prevEnabled := daemonBrowserAutoOpenEnabled
-	prevOpen := daemonOpenBrowser
-	daemonBrowserAutoOpenEnabled = func() bool { return true }
+	prevLauncher := daemonBrowserLauncher
 	defer func() {
-		daemonBrowserAutoOpenEnabled = prevEnabled
-		daemonOpenBrowser = prevOpen
+		daemonBrowserLauncher = prevLauncher
 	}()
 
-	var stderr bytes.Buffer
-	daemonOpenBrowser = func(string) error {
-		return errors.New("boom")
+	var stderr lockedBuffer
+	daemonBrowserLauncher = stubBrowserLauncher{
+		enabled: true,
+		open: func(string) error {
+			return errors.New("boom")
+		},
 	}
 
 	maybeAutoOpenDaemonBrowser(&stderr, &stubDaemonHTTPControl{locked: true}, "127.0.0.1:7113")
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(stderr.String(), "toolbox daemon browser launch error: boom") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if got := waitForBufferSubstring(t, &stderr, "toolbox daemon browser launch error: boom"); !strings.Contains(got, "toolbox daemon browser launch error: boom") {
+		t.Fatalf("stderr = %q, want browser launch error", got)
 	}
-	t.Fatalf("stderr = %q, want browser launch error", stderr.String())
 }
 
 func TestDaemonBindAddress(t *testing.T) {
@@ -228,6 +258,93 @@ func TestStartDaemonDebugServerServesPingAndEcho(t *testing.T) {
 	}
 	if string(body) != "hello" {
 		t.Fatalf("/echo body = %q, want hello", string(body))
+	}
+}
+
+func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{
+		snapshots: []daemon.ClientSnapshot{{
+			PID:        41,
+			Mode:       "codemode_repl",
+			WorkingDir: "/tmp/work",
+			PendingApprovals: []daemon.PendingApprovalSnapshot{
+				{ToolCallID: "tc-1", ToolName: "issues.get", ParamsInspect: `{id: "I-1", meta: {team: {owner: {name: "alpha"}}}}`},
+				{ToolCallID: "tc-2", ToolName: "issues.get", ParamsInspect: `{id: "I-2", meta: {team: {owner: {name: "beta"}}}}`},
+			},
+		}},
+	}
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	resp, err := http.Get("http://" + addr + "/approvals")
+	if err != nil {
+		t.Fatalf("GET /approvals: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.StatusCode; got != http.StatusOK {
+		t.Fatalf("GET /approvals status = %d, want %d", got, http.StatusOK)
+	}
+	var groups []daemonHTTPApprovalGroup
+	if err := json.NewDecoder(resp.Body).Decode(&groups); err != nil {
+		t.Fatalf("Decode(/approvals): %v", err)
+	}
+	if len(groups) != 1 || groups[0].ID != "client:41:0" {
+		t.Fatalf("GET /approvals groups = %#v", groups)
+	}
+	if !strings.Contains(groups[0].ToolCalls[0].ParamsInspect, `owner: {name: "alpha"}`) {
+		t.Fatalf("GET /approvals params = %#v, want deep params", groups[0].ToolCalls)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/approval-tool-calls/tc-1/approve", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(approve call): %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /approval-tool-calls/.../approve: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.StatusCode; got != http.StatusNoContent {
+		t.Fatalf("POST /approval-tool-calls/.../approve status = %d, want %d", got, http.StatusNoContent)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/client:41:0/reject", strings.NewReader(`{"message":"blocked"}`))
+	if err != nil {
+		t.Fatalf("NewRequest(reject group): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /approvals/.../reject: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.StatusCode; got != http.StatusNoContent {
+		t.Fatalf("POST /approvals/.../reject status = %d, want %d", got, http.StatusNoContent)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.decisions) != 2 {
+		t.Fatalf("decisions = %#v, want 2 decisions", control.decisions)
+	}
+	if control.decisions[0].Action != daemon.ApprovalActionApprove || control.decisions[0].ToolCallID != "tc-1" {
+		t.Fatalf("first decision = %#v, want approve tc-1", control.decisions[0])
+	}
+	if control.decisions[1].Action != daemon.ApprovalActionReject || control.decisions[1].ToolCallID != "tc-2" || control.decisions[1].Message != "blocked" {
+		t.Fatalf("second decision = %#v, want reject tc-2 with message", control.decisions[1])
+	}
+	if len(control.snapshots) != 1 || len(control.snapshots[0].PendingApprovals) != 0 {
+		t.Fatalf("remaining approvals = %#v, want none", control.snapshots)
 	}
 }
 

@@ -1,0 +1,5 @@
+cell (failed to commit)
+==
+failure: typecheck failed
+diagnostics:
+- 1:6 error: Cannot find name 'missingVar'.

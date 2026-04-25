@@ -64,17 +64,28 @@ func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout
 	}
 	defer sessionDelegate.Close()
 
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), mcpServerNameForToolsetPath(cmd.Toolset), cwd)
+	var managed *codemodemcp.ManagedServer
+	if strings.TrimSpace(cmd.TBSession) == "" {
+		managed, err = codemodemcp.OpenManagedNamed(context.Background(), mcpServerNameForToolsetPath(cmd.Toolset), cwd)
+	} else {
+		managed, err = codemodemcp.OpenManagedBoundNamed(context.Background(), mcpServerNameForToolsetPath(cmd.Toolset), cwd, cmd.TBSession)
+		if err == nil && stderr != nil {
+			_, _ = io.WriteString(stderr, "toolbox codemode mcp tb_session="+strings.TrimSpace(cmd.TBSession)+" locked=true\n")
+		}
+	}
 	if err != nil {
 		return err
 	}
 	defer managed.Close()
+	syncSessionBinding(sessionDelegate, managed)
 	bindApprovalExecution(sessionDelegate, stderr, managed, func() error {
 		return syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 	})
 	managed.SetAfterSubmit(func() {
+		syncSessionBinding(sessionDelegate, managed)
 		_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 	})
+	syncSessionBinding(sessionDelegate, managed)
 	_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 
 	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}

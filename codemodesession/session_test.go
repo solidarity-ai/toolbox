@@ -161,11 +161,11 @@ func TestSubmitDoesNotExposeRuntimeHashToken(t *testing.T) {
 	}
 	defer session.Close()
 
-	out := session.Submit(ctx, `const p = calc.calc.add(2, 3); (globalThis as any).__toolboxCurrentRuntimeHash === undefined && typeof p.task.toolCallId === "string" && p.task.toolCallId.length > 0 && (await p) === 5`)
+	out := session.Submit(ctx, `const p = calc.calc.add(2, 3); (globalThis as any).__toolboxCurrentRuntimeHash === undefined && typeof p.toolCallTask.toolCallId === "string" && p.toolCallTask.toolCallId.length > 0 && (await p) === 5`)
 	assertContains(t, out, "=> true")
 }
 
-func TestSubmitToolCallPromiseHasTaskAndSupportsInspection(t *testing.T) {
+func TestSubmitToolCallPromiseHasToolCallTaskAndSupportsInspection(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
@@ -183,7 +183,7 @@ func TestSubmitToolCallPromiseHasTaskAndSupportsInspection(t *testing.T) {
 	defer session.Close()
 
 	out := session.Submit(ctx, `const p = issues.get("I-1");
-const taskId = p.task.toolCallId;
+const taskId = p.toolCallTask.toolCallId;
 const value = await p;
 const view = $tool_call(p);
 console.log(JSON.stringify({
@@ -221,29 +221,28 @@ func TestSubmitToolCallTaskNeedsApprovalAndSupportsInspection(t *testing.T) {
 
 	out := session.Submit(ctx, `const task = issues.get("I-1");
 const view = $tool_call(task);
-console.log(JSON.stringify({
-  hasTaskId: typeof task.toolCallId === "string" && task.toolCallId.length > 0,
-  status: view.status,
-  toolName: view.toolName,
-  hasTaskProperty: Object.prototype.hasOwnProperty.call(task as any, "task"),
-}))`)
+	console.log(JSON.stringify({
+	  hasTaskId: typeof task.toolCallId === "string" && task.toolCallId.length > 0,
+	  status: view.status,
+	  toolName: view.toolName,
+	  hasTaskProperty: Object.prototype.hasOwnProperty.call(task as any, "toolCallTask"),
+	}))`)
 	assertContains(t, out, `"hasTaskId":true`)
 	assertContains(t, out, `"status":"needsApproval"`)
 	assertContains(t, out, `"toolName":"get"`)
 	assertContains(t, out, `"hasTaskProperty":false`)
 }
 
-func TestOpenSQLiteGroupsPendingApprovalCallsByCellAndApprovesThemTogether(t *testing.T) {
+func TestSubmitToolCallSupportsRawStringInspection(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
-  return { id, title: "Example " + id };
+  return { id, title: "Example" };
 }
 `,
 	})
-	sqlitePath := filepath.Join(t.TempDir(), "session.sqlite")
 
-	session, err := codemodesession.OpenSQLite(ctx, sqlitePath, t.TempDir(), codemodesession.SessionConfig{
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
 		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
 			ToolApprovals: map[string]bool{
 				"issues.get": true,
@@ -251,8 +250,275 @@ func TestOpenSQLiteGroupsPendingApprovalCallsByCellAndApprovesThemTogether(t *te
 		}),
 	})
 	if err != nil {
-		t.Fatalf("OpenSQLite() error: %v", err)
+		t.Fatalf("OpenMemory() error: %v", err)
 	}
+	defer session.Close()
+
+	out := session.Submit(ctx, `const task = issues.get("I-1");
+const view = $tool_call(task.toolCallId);
+console.log(JSON.stringify(view))`)
+	assertContains(t, out, `"status":"needsApproval"`)
+	assertContains(t, out, `"toolName":"get"`)
+	assertContains(t, out, `"approval":{"approvalId":"`)
+}
+
+func TestSubmitToolCallRejectsForeignSessionRawStringInspection(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
+  return { id, title: "Example" };
+}
+`,
+	})
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+
+	first, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory(first) error: %v", err)
+	}
+	defer first.Close()
+	if got := first.Submit(ctx, `issues.get("I-1")`); !strings.Contains(got, "cell 1") {
+		t.Fatalf("Submit(first) = %q, want committed task cell", got)
+	}
+	approvals, err := first.PendingApprovals(ctx)
+	if err != nil {
+		t.Fatalf("PendingApprovals(first): %v", err)
+	}
+	if len(approvals) != 1 {
+		t.Fatalf("PendingApprovals(first) len = %d, want 1", len(approvals))
+	}
+	toolCallID := approvals[0].ToolCallID
+
+	second, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory(second) error: %v", err)
+	}
+	defer second.Close()
+
+	out := second.Submit(ctx, `const view = $tool_call("`+toolCallID+`");
+console.log(JSON.stringify(view))`)
+	assertContains(t, out, `unknown tool call "`+toolCallID+`"`)
+}
+
+func TestTimedOutToolSubmitDoesNotPoisonLaterApprovalSession(t *testing.T) {
+	originalTimeout := codemodesession.DefaultSubmitTimeout
+	codemodesession.DefaultSubmitTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		codemodesession.DefaultSubmitTimeout = originalTimeout
+	})
+
+	firstRoot := t.TempDir()
+	partialDir := writeSessionPackage(t, filepath.Join(firstRoot, "partial-timeout"), "example.com/partial-timeout", "partial_timeout", map[string]string{
+		"tools/fast.ts": `export default async function tool(id: string): Promise<{ id: string; kind: string }> {
+  return { id, kind: "fast" };
+}
+`,
+		"tools/slow.ts": `export default async function tool(id: string): Promise<{ id: string; kind: string }> {
+  return await new Promise(() => {});
+}
+`,
+	})
+
+	first, err := codemodesession.OpenMemory(context.Background(), firstRoot, codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(partialDir), toolset.Config{}),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory(first): %v", err)
+	}
+
+	out := first.Submit(context.Background(), `const first = await partial_timeout.fast("I-1");
+const second = await partial_timeout.fast("I-2");
+const third = partial_timeout.slow("I-3");
+await new Promise(() => {});
+[first, second, third]`)
+	assertContains(t, out, `slow [pending`)
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close(first): %v", err)
+	}
+	codemodesession.DefaultSubmitTimeout = originalTimeout
+
+	secondRoot := t.TempDir()
+	issuesDir := writeSessionPackage(t, filepath.Join(secondRoot, "issues"), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; kind: string }> {
+  return { id, kind: "get" };
+}
+`,
+		"tools/lookup.ts": `export default async function tool(id: string): Promise<{ id: string; kind: string }> {
+  return { id, kind: "lookup" };
+}
+`,
+	})
+
+	secondCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	second, err := codemodesession.OpenMemory(secondCtx, secondRoot, codemodesession.SessionConfig{
+		PreparedTools: prepareToolsetWithApprovals(t, issuesDir, "issues.get", "issues.lookup"),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory(second): %v", err)
+	}
+	defer second.Close()
+
+	out = second.Submit(secondCtx, `var tasks = [issues.get("I-1"), issues.get("I-2"), issues.get("I-3"), issues.lookup("I-4")];
+tasks.map((task) => $tool_call(task).status)`)
+	assertContains(t, out, `"needsApproval"`)
+
+	groups := mustPendingApprovalGroups(t, secondCtx, second)
+	if len(groups) != 1 {
+		t.Fatalf("pending approval groups len = %d, want 1", len(groups))
+	}
+
+	decisions := make([]codemodesession.ApprovalDecision, 0, len(groups[0].ToolCalls))
+	for _, call := range groups[0].ToolCalls {
+		decisions = append(decisions, codemodesession.ApprovalDecision{
+			ToolCallID: call.ToolCallID,
+			Approved:   false,
+			Reason:     "blocked by policy",
+		})
+	}
+	mustApplyApprovals(t, secondCtx, second, decisions...)
+
+	out = second.Submit(secondCtx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task)), null, 2));
+"done"`)
+	assertContains(t, out, `"status": "failed"`)
+	assertContains(t, out, `"error": "blocked by policy"`)
+}
+
+func TestTimedOutToolSubmitCancelsToolContext(t *testing.T) {
+	originalTimeout := codemodesession.DefaultSubmitTimeout
+	codemodesession.DefaultSubmitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		codemodesession.DefaultSubmitTimeout = originalTimeout
+	})
+
+	toolCancelled := make(chan struct{})
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{{
+		Name: "blocker.wait",
+		PackageMeta: &tooldef.Package{
+			Name:    "blocker",
+			Runtime: tooldef.RuntimeBuiltin,
+		},
+		BuiltIn: func(ctx context.Context, _ map[string]any) (string, error) {
+			<-ctx.Done()
+			close(toolCancelled)
+			return "", ctx.Err()
+		},
+	}})
+
+	session, err := codemodesession.OpenMemory(context.Background(), t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	out := session.Submit(context.Background(), `await blocker.blocker.wait()`)
+	assertContains(t, out, "context deadline exceeded")
+
+	select {
+	case <-toolCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("tool context was not cancelled when the submit timed out")
+	}
+}
+
+func TestTimedOutNonCooperativeToolDoesNotBlockLaterSubmit(t *testing.T) {
+	originalTimeout := codemodesession.DefaultSubmitTimeout
+	codemodesession.DefaultSubmitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		codemodesession.DefaultSubmitTimeout = originalTimeout
+	})
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{{
+		Name: "blocker.wait",
+		PackageMeta: &tooldef.Package{
+			Name:    "blocker",
+			Runtime: tooldef.RuntimeBuiltin,
+		},
+		BuiltIn: func(context.Context, map[string]any) (string, error) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return "released", nil
+		},
+	}})
+
+	session, err := codemodesession.OpenMemory(context.Background(), t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+
+	submitDone := make(chan string, 1)
+	go func() {
+		submitDone <- session.Submit(context.Background(), `await blocker.blocker.wait()`)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for non-cooperative tool to start")
+	}
+
+	var first string
+	select {
+	case first = <-submitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for timed-out submit to return")
+	}
+	assertContains(t, first, "context deadline exceeded")
+
+	secondDone := make(chan string, 1)
+	go func() {
+		secondDone <- session.Submit(context.Background(), `"next"`)
+	}()
+
+	var second string
+	select {
+	case second = <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("later submit blocked behind a non-cooperative tool from the previous generation")
+	}
+	assertContains(t, second, "next")
+
+	close(release)
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+}
+
+func TestPersistentSessionGroupsPendingApprovalCallsByCellAndApprovesThemTogether(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
+  return { id, title: "Example " + id };
+}
+`,
+	})
+	tempDir := t.TempDir()
+
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11001", tempDir, codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+			ToolApprovals: map[string]bool{
+				"issues.get": true,
+			},
+		}),
+	})
 
 	out := session.Submit(ctx, `var tasks = [issues.get("I-1"), issues.get("I-2")];
 tasks.map((task) => $tool_call(task).status)`)
@@ -273,16 +539,13 @@ tasks.map((task) => $tool_call(task).status)`)
 		t.Fatalf("Close(first) error: %v", err)
 	}
 
-	reopened, err := codemodesession.OpenSQLite(ctx, sqlitePath, t.TempDir(), codemodesession.SessionConfig{
+	reopened := mustOpenPersistentSession(t, ctx, tempDir, "a11001", tempDir, codemodesession.SessionConfig{
 		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
 			ToolApprovals: map[string]bool{
 				"issues.get": true,
 			},
 		}),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(reopen) error: %v", err)
-	}
 	defer reopened.Close()
 
 	reopenedGroups := mustPendingApprovalGroups(t, ctx, reopened)
@@ -314,7 +577,7 @@ tasks.map((task) => $tool_call(task).status)`)
 	assertContains(t, inspect, `"id":"I-2"`)
 }
 
-func TestOpenSQLiteAllowsMixedApprovalActionsWithinOneCellGroup(t *testing.T) {
+func TestPersistentSessionAllowsMixedApprovalActionsWithinOneCellGroup(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(input: {
@@ -331,17 +594,15 @@ func TestOpenSQLiteAllowsMixedApprovalActionsWithinOneCellGroup(t *testing.T) {
 }
 `,
 	})
+	tempDir := t.TempDir()
 
-	session, err := codemodesession.OpenSQLite(ctx, filepath.Join(t.TempDir(), "session.sqlite"), t.TempDir(), codemodesession.SessionConfig{
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11002", tempDir, codemodesession.SessionConfig{
 		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
 			ToolApprovals: map[string]bool{
 				"issues.get": true,
 			},
 		}),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error: %v", err)
-	}
 	defer session.Close()
 
 	out := session.Submit(ctx, `var tasks = [
@@ -417,7 +678,7 @@ tasks.map((task) => $tool_call(task).status)`)
 	assertContains(t, inspect, `"owner":"gamma"`)
 }
 
-func TestOpenSQLiteRejectsEntireApprovalGroupWithMessage(t *testing.T) {
+func TestPersistentSessionRejectsEntireApprovalGroupWithMessage(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string }> {
@@ -425,17 +686,15 @@ func TestOpenSQLiteRejectsEntireApprovalGroupWithMessage(t *testing.T) {
 }
 `,
 	})
+	tempDir := t.TempDir()
 
-	session, err := codemodesession.OpenSQLite(ctx, filepath.Join(t.TempDir(), "session.sqlite"), t.TempDir(), codemodesession.SessionConfig{
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11003", tempDir, codemodesession.SessionConfig{
 		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
 			ToolApprovals: map[string]bool{
 				"issues.get": true,
 			},
 		}),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite() error: %v", err)
-	}
 	defer session.Close()
 
 	out := session.Submit(ctx, `var tasks = [issues.get("I-1"), issues.get("I-2")];
@@ -466,6 +725,91 @@ tasks.map((task) => $tool_call(task).status)`)
 "done"`)
 	assertContains(t, inspect, `"status":"failed"`)
 	assertContains(t, inspect, `"error":"blocked by policy"`)
+}
+
+func TestOpenMemoryRejectsDuplicateApprovalDecisionBatch(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: prepareIssuesApprovalToolset(t),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertDuplicateApprovalDecisionBatchRejected(t, ctx, session)
+}
+
+func TestPersistentSessionRejectsDuplicateApprovalDecisionBatch(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11004", tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepareIssuesApprovalToolset(t),
+	})
+	defer session.Close()
+
+	assertDuplicateApprovalDecisionBatchRejected(t, ctx, session)
+}
+
+func TestPersistentSessionAppliesMixedApprovalDecisionBatchAcrossDifferentCalls(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11005", tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepareIssuesApprovalToolset(t),
+	})
+	defer session.Close()
+
+	out := session.Submit(ctx, `var tasks = [issues.get("I-1"), issues.get("I-2")];
+tasks.map((task) => $tool_call(task).status)`)
+	assertContains(t, out, `"needsApproval"`)
+
+	groups := mustPendingApprovalGroups(t, ctx, session)
+	if len(groups) != 1 {
+		t.Fatalf("pending approval groups len = %d, want 1", len(groups))
+	}
+	if len(groups[0].ToolCalls) != 2 {
+		t.Fatalf("pending approval groups[0].ToolCalls len = %d, want 2", len(groups[0].ToolCalls))
+	}
+
+	var approveID string
+	var rejectID string
+	for _, call := range groups[0].ToolCalls {
+		switch {
+		case strings.Contains(call.ParamsInspect, `"I-1"`):
+			approveID = call.ToolCallID
+		case strings.Contains(call.ParamsInspect, `"I-2"`):
+			rejectID = call.ToolCallID
+		}
+	}
+	if approveID == "" || rejectID == "" {
+		t.Fatalf("pending approval groups = %#v, want tool calls for I-1 and I-2", groups)
+	}
+
+	mustApplyApprovals(t, ctx, session,
+		codemodesession.ApprovalDecision{
+			ToolCallID: approveID,
+			Approved:   true,
+		},
+		codemodesession.ApprovalDecision{
+			ToolCallID: rejectID,
+			Approved:   false,
+			Reason:     "manual reject",
+		},
+	)
+
+	after := mustPendingApprovalGroups(t, ctx, session)
+	if len(after) != 0 {
+		t.Fatalf("pending approval groups(after mixed batch) len = %d, want 0", len(after))
+	}
+
+	inspect := session.Submit(ctx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task))));
+"done"`)
+	assertContains(t, inspect, `"status":"success"`)
+	assertContains(t, inspect, `"status":"failed"`)
+	assertContains(t, inspect, `"error":"manual reject"`)
+	assertContains(t, inspect, `"title":"Example I-1"`)
 }
 
 func TestAwaitNextApprovalReturnsNoOutstandingWhenIdle(t *testing.T) {
@@ -654,7 +998,7 @@ await second;
 const secondView = $tool_call(second);
 const params = secondView.params as any;
 console.log(JSON.stringify({
-  sameId: first.task.toolCallId === second.task.toolCallId,
+  sameId: first.toolCallTask.toolCallId === second.toolCallTask.toolCallId,
   status: secondView.status,
   paramId: params?.id ?? null,
   resultId: secondView.status === "success" ? secondView.result.id : null,
@@ -857,15 +1201,11 @@ func TestSubmitPrintsConsoleLogsOnFailure(t *testing.T) {
 	assertNotContains(t, out, "submit error:")
 }
 
-func TestOpenSQLiteResumesLatestSession(t *testing.T) {
+func TestPersistentSessionReopensByTBSession(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode.toolbox-session")
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12001", tempDir)
 	if first.Resumed() {
 		t.Fatal("first session resumed = true, want false")
 	}
@@ -874,10 +1214,7 @@ func TestOpenSQLiteResumesLatestSession(t *testing.T) {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12001", tempDir)
 	defer second.Close()
 
 	if !second.Resumed() {
@@ -887,26 +1224,19 @@ func TestOpenSQLiteResumesLatestSession(t *testing.T) {
 	assertContains(t, out, "=> 3")
 }
 
-func TestOpenSQLiteReopensToolCellsWithoutPreparedTools(t *testing.T) {
+func TestPersistentSessionReopensToolCellsWithoutPreparedTools(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-tools.toolbox-session")
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12002", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepareCalcToolset(t),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
 	assertContains(t, first.Submit(ctx, `await calc.calc.add(2, 3)`), `=> 5`)
 	if err := first.Close(); err != nil {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12002", tempDir)
 	defer second.Close()
 	if !second.Resumed() {
 		t.Fatal("second session resumed = false, want true")
@@ -916,25 +1246,18 @@ func TestOpenSQLiteReopensToolCellsWithoutPreparedTools(t *testing.T) {
 	assertContains(t, out, "=> 1")
 }
 
-func TestOpenSQLiteResumesWithCurrentPreparedToolsBeforeFirstSubmit(t *testing.T) {
+func TestPersistentSessionResumesWithCurrentPreparedToolsBeforeFirstSubmit(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-live-tools.toolbox-session")
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12003", tempDir)
 	if err := first.Close(); err != nil {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12003", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepareCalcToolset(t),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
 	defer second.Close()
 
 	if !second.Resumed() {
@@ -944,26 +1267,19 @@ func TestOpenSQLiteResumesWithCurrentPreparedToolsBeforeFirstSubmit(t *testing.T
 	assertContains(t, out, "=> 5")
 }
 
-func TestOpenSQLiteResumesCommittedValuesAndAddsCurrentPreparedTools(t *testing.T) {
+func TestPersistentSessionResumesCommittedValuesAndAddsCurrentPreparedTools(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-live-tools-with-history.toolbox-session")
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12004", tempDir)
 	assertContains(t, first.Submit(ctx, `"alpha"`), "alpha")
 	if err := first.Close(); err != nil {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12004", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepareCalcToolset(t),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
 	defer second.Close()
 
 	if !second.Resumed() {
@@ -974,10 +1290,9 @@ func TestOpenSQLiteResumesCommittedValuesAndAddsCurrentPreparedTools(t *testing.
 	assertContains(t, out, "=> true")
 }
 
-func TestOpenSQLiteReopensToolCallTaskHistory(t *testing.T) {
+func TestPersistentSessionReopensToolCallTaskHistory(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-tool-calls.toolbox-session")
 	dir := writeSessionPackage(t, filepath.Join(tempDir, "issues"), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
   return { id, title: "Example" };
@@ -990,21 +1305,15 @@ func TestOpenSQLiteReopensToolCallTaskHistory(t *testing.T) {
 		},
 	})
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12005", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepared,
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
 	assertContains(t, first.Submit(ctx, `issues.get("I-1")`), "cell 1")
 	if err := first.Close(); err != nil {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12005", tempDir)
 	defer second.Close()
 
 	out := second.Submit(ctx, `const task = $val(1) as { toolCallId: string };
@@ -1019,10 +1328,9 @@ console.log(JSON.stringify({
 	assertContains(t, out, `"toolName":"get"`)
 }
 
-func TestOpenSQLiteResumedSessionUsesFreshToolCallIDs(t *testing.T) {
+func TestPersistentSessionUsesFreshToolCallIDsAfterResume(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-tool-call-seq.toolbox-session")
 	dir := writeSessionPackage(t, filepath.Join(tempDir, "issues"), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
   return { id, title: "Example " + id };
@@ -1035,12 +1343,9 @@ func TestOpenSQLiteResumedSessionUsesFreshToolCallIDs(t *testing.T) {
 		},
 	})
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12006", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepared,
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
 
 	out := first.Submit(ctx, `var firstTask = issues.get("I-1");
 const firstView = $tool_call(firstTask);
@@ -1066,12 +1371,9 @@ console.log(JSON.stringify({
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12006", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepared,
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
 	defer second.Close()
 
 	out = second.Submit(ctx, `var secondTask = issues.get("I-2");
@@ -1096,10 +1398,9 @@ console.log(JSON.stringify({
 	}
 }
 
-func TestOpenSQLiteRejectsApprovalWhenPreparedToolChangesAfterReview(t *testing.T) {
+func TestPersistentSessionRejectsApprovalWhenPreparedToolChangesAfterReview(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-approval-tool-drift.toolbox-session")
 	firstDir := writeSessionPackage(t, filepath.Join(tempDir, "issues-v1"), "example.com/issues", "issues", map[string]string{
 		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
   return { id, title: "v1-" + id };
@@ -1124,12 +1425,9 @@ func TestOpenSQLiteRejectsApprovalWhenPreparedToolChangesAfterReview(t *testing.
 		},
 	})
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12007", tempDir, codemodesession.SessionConfig{
 		PreparedTools: firstPrepared,
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
 
 	out := first.Submit(ctx, `var reviewedTask = issues.get("I-1");
 const reviewedView = $tool_call(reviewedTask);
@@ -1151,12 +1449,9 @@ console.log(JSON.stringify({
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12007", tempDir, codemodesession.SessionConfig{
 		PreparedTools: secondPrepared,
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
 	defer second.Close()
 
 	mustApplyApprovals(t, ctx, second, codemodesession.ApprovalDecision{
@@ -1174,27 +1469,20 @@ console.log(JSON.stringify(view));
 	assertNotContains(t, inspect, `"title":"v2-I-1"`)
 }
 
-func TestOpenSQLiteResumesWithCurrentPreparedToolsAfterCommittedCells(t *testing.T) {
+func TestPersistentSessionResumesWithCurrentPreparedToolsAfterCommittedCells(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "codemode-remove-tools.toolbox-session")
 
-	first, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir, codemodesession.SessionConfig{
+	first := mustCreatePersistentSession(t, ctx, tempDir, "a12008", tempDir, codemodesession.SessionConfig{
 		PreparedTools: prepareCalcToolset(t),
 	})
-	if err != nil {
-		t.Fatalf("OpenSQLite(first) error: %v", err)
-	}
 	assertContains(t, first.Submit(ctx, `calc.calc.add`), "cell 1")
 	assertContains(t, first.Submit(ctx, `"alpha"`), "alpha")
 	if err := first.Close(); err != nil {
 		t.Fatalf("first Close() error: %v", err)
 	}
 
-	second, err := codemodesession.OpenSQLite(ctx, dbPath, tempDir)
-	if err != nil {
-		t.Fatalf("OpenSQLite(second) error: %v", err)
-	}
+	second := mustOpenPersistentSession(t, ctx, tempDir, "a12008", tempDir)
 	defer second.Close()
 
 	if !second.Resumed() {
@@ -1286,6 +1574,88 @@ func mustApplyApprovals(t testing.TB, ctx context.Context, session *codemodesess
 	}
 }
 
+func assertDuplicateApprovalDecisionBatchRejected(t testing.TB, ctx context.Context, session *codemodesession.Session) {
+	t.Helper()
+
+	out := session.Submit(ctx, `var task = issues.get("I-1");
+$tool_call(task).status`)
+	assertContains(t, out, `"needsApproval"`)
+
+	groups := mustPendingApprovalGroups(t, ctx, session)
+	if len(groups) != 1 {
+		t.Fatalf("pending approval groups len = %d, want 1", len(groups))
+	}
+	if len(groups[0].ToolCalls) != 1 {
+		t.Fatalf("pending approval groups[0].ToolCalls len = %d, want 1", len(groups[0].ToolCalls))
+	}
+	toolCallID := groups[0].ToolCalls[0].ToolCallID
+
+	err := session.ApplyApprovals(ctx, []codemodesession.ApprovalDecision{
+		{
+			ToolCallID: toolCallID,
+			Approved:   true,
+		},
+		{
+			ToolCallID: toolCallID,
+			Approved:   false,
+			Reason:     "manual reject",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("duplicate approval decision for %q", toolCallID)) {
+		t.Fatalf("ApplyApprovals(duplicate batch) error = %v, want duplicate approval decision", err)
+	}
+
+	after := mustPendingApprovalGroups(t, ctx, session)
+	if len(after) != 1 {
+		t.Fatalf("pending approval groups(after duplicate batch) len = %d, want 1", len(after))
+	}
+	if len(after[0].ToolCalls) != 1 {
+		t.Fatalf("pending approval groups(after duplicate batch)[0].ToolCalls len = %d, want 1", len(after[0].ToolCalls))
+	}
+	if after[0].ToolCalls[0].ToolCallID != toolCallID {
+		t.Fatalf("pending approval groups(after duplicate batch)[0].ToolCalls[0].ToolCallID = %q, want %q", after[0].ToolCalls[0].ToolCallID, toolCallID)
+	}
+
+	pendingInspect := session.Submit(ctx, `console.log(JSON.stringify($tool_call(task)));
+"done"`)
+	assertContains(t, pendingInspect, `"status":"needsApproval"`)
+
+	mustApplyApprovals(t, ctx, session, codemodesession.ApprovalDecision{
+		ToolCallID: toolCallID,
+		Approved:   true,
+	})
+
+	cleared := mustPendingApprovalGroups(t, ctx, session)
+	if len(cleared) != 0 {
+		t.Fatalf("pending approval groups(after final approve) len = %d, want 0", len(cleared))
+	}
+
+	approvedInspect := session.Submit(ctx, `console.log(JSON.stringify($tool_call(task)));
+"done"`)
+	assertContains(t, approvedInspect, `"status":"success"`)
+	assertContains(t, approvedInspect, `"title":"Example I-1"`)
+}
+
+func mustCreatePersistentSession(t testing.TB, ctx context.Context, rootDir, tbSession, currentDir string, cfgs ...codemodesession.SessionConfig) *codemodesession.Session {
+	t.Helper()
+	t.Setenv("TOOLBOX_SESSIONS_DIR", filepath.Join(rootDir, "sessions"))
+	session, err := codemodesession.CreateNew(ctx, tbSession, currentDir, cfgs...)
+	if err != nil {
+		t.Fatalf("CreateNew(%q) error: %v", tbSession, err)
+	}
+	return session
+}
+
+func mustOpenPersistentSession(t testing.TB, ctx context.Context, rootDir, tbSession, currentDir string, cfgs ...codemodesession.SessionConfig) *codemodesession.Session {
+	t.Helper()
+	t.Setenv("TOOLBOX_SESSIONS_DIR", filepath.Join(rootDir, "sessions"))
+	session, err := codemodesession.OpenExisting(ctx, tbSession, currentDir, cfgs...)
+	if err != nil {
+		t.Fatalf("OpenExisting(%q) error: %v", tbSession, err)
+	}
+	return session
+}
+
 func newPreparedTool(name, packageName string) assembler.LoadedTool {
 	return newPreparedToolWithUseWhenHint(name, packageName, "")
 }
@@ -1298,6 +1668,21 @@ func prepareCalcToolset(t testing.TB) toolset.PreparedToolset {
 func prepareCalcAndEdgeCasesToolset(t testing.TB) toolset.PreparedToolset {
 	t.Helper()
 	return tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc", "edge-cases"), toolset.Config{})
+}
+
+func prepareIssuesApprovalToolset(t testing.TB) toolset.PreparedToolset {
+	t.Helper()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{
+		"tools/get.ts": `export default async function tool(id: string): Promise<{ id: string; title: string }> {
+  return { id, title: "Example " + id };
+}
+`,
+	})
+	return tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
 }
 
 func newPreparedToolWithUseWhenHint(name, packageName, useWhenHint string) assembler.LoadedTool {

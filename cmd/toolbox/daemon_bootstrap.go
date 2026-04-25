@@ -83,6 +83,11 @@ type approvalActionExecutor interface {
 	ApplyApprovals(context.Context, []codemodesession.ApprovalDecision) error
 }
 
+type sessionBindingProvider interface {
+	BoundTBSession() string
+	Locked() bool
+}
+
 func syncPendingApprovals(ctx context.Context, provider pendingApprovalProvider, delegate daemon.SessionDelegate, stderr io.Writer) error {
 	if provider == nil || delegate == nil {
 		return nil
@@ -136,6 +141,20 @@ func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, ex
 	})
 }
 
+func setSessionBinding(delegate daemon.SessionDelegate, boundTBSession string, locked bool) {
+	if delegate == nil {
+		return
+	}
+	delegate.SetSessionBinding(boundTBSession, locked)
+}
+
+func syncSessionBinding(delegate daemon.SessionDelegate, provider sessionBindingProvider) {
+	if delegate == nil || provider == nil {
+		return
+	}
+	delegate.SetSessionBinding(provider.BoundTBSession(), provider.Locked())
+}
+
 func toDaemonApprovals(approvals []codemodesession.PendingApproval) []daemon.PendingApprovalSnapshot {
 	if len(approvals) == 0 {
 		return nil
@@ -144,6 +163,7 @@ func toDaemonApprovals(approvals []codemodesession.PendingApproval) []daemon.Pen
 	for _, approval := range approvals {
 		next := daemon.PendingApprovalSnapshot{
 			ToolCallID:    approval.ToolCallID,
+			TBSession:     approval.TBSession,
 			ToolName:      approval.ToolName,
 			ParamsInspect: approval.ParamsInspect,
 			EffectID:      approval.EffectID,

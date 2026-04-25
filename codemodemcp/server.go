@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -18,66 +16,71 @@ import (
 const (
 	ToolSuperTool               = codemodesession.SuperToolName
 	ToolAwaitSuperToolApprovals = codemodesession.AwaitSuperToolApprovalsName
+	ToolNewSession              = codemodesession.NewSessionToolName
 	defaultServerName           = "toolbox"
 )
 
-// New creates an MCP server with the initial Toolbox MCP surface.
+// New creates an unlocked codemode MCP server.
 func New(cfgs ...codemodesession.SessionConfig) *server.MCPServer {
 	return NewNamed(defaultServerName, cfgs...)
 }
 
-// NewNamed creates an MCP server with the initial Toolbox MCP surface.
+// NewNamed creates an unlocked codemode MCP server.
 func NewNamed(name string, cfgs ...codemodesession.SessionConfig) *server.MCPServer {
 	cfg := firstSessionConfig(cfgs)
-	metaSession := &codemodesession.Session{}
-	metaSession.SetPreparedTools(cfg.PreparedTools)
-	instructions := metaSession.Instructions()
-	runner := &sessionRunner{currentDir: currentWorkingDir(), config: cfg}
-	if strings.TrimSpace(name) == "" {
-		name = defaultServerName
+	managed := &ManagedServer{
+		server:  newMCPServer(name),
+		manager: codemodesession.NewUnlockedManager(currentWorkingDir(), cfg),
 	}
-
-	mcpServer := server.NewMCPServer(
-		name,
-		"0.1.0",
-		server.WithToolCapabilities(true),
-	)
-
-	mcpServer.SetTools(sessionBackedServerTools(cfg.PreparedTools.HasApprovalTools(), newSuperTool(instructions), runner.handleSuperTool, newAwaitSuperToolApprovalsTool(), runner.handleAwaitSuperToolApprovals)...)
-
-	return mcpServer
+	managed.SetPreparedTools(cfg.PreparedTools)
+	return managed.server
 }
 
 type ManagedServer struct {
 	server      *server.MCPServer
-	session     *codemodesession.Session
-	afterSubmit func()
+	manager     *codemodesession.Manager
+	afterChange func()
 }
 
-func OpenManagedNamed(ctx context.Context, name, currentDir string) (*ManagedServer, error) {
+func OpenManagedNamed(_ context.Context, name, currentDir string, cfgs ...codemodesession.SessionConfig) (*ManagedServer, error) {
+	cfg := firstSessionConfig(cfgs)
 	if strings.TrimSpace(currentDir) == "" {
 		currentDir = currentWorkingDir()
 	}
-	if strings.TrimSpace(name) == "" {
-		name = defaultServerName
+	managed := &ManagedServer{
+		server:  newMCPServer(name),
+		manager: codemodesession.NewUnlockedManager(currentDir, cfg),
 	}
+	managed.SetPreparedTools(cfg.PreparedTools)
+	return managed, nil
+}
 
-	session, err := codemodesession.OpenSQLite(ctx, managedSessionSQLitePath(currentDir, name), currentDir)
+func OpenManagedBoundNamed(ctx context.Context, name, currentDir, tbSession string, cfgs ...codemodesession.SessionConfig) (*ManagedServer, error) {
+	cfg := firstSessionConfig(cfgs)
+	if strings.TrimSpace(currentDir) == "" {
+		currentDir = currentWorkingDir()
+	}
+	manager, err := codemodesession.OpenLockedManager(ctx, tbSession, currentDir, cfg)
 	if err != nil {
 		return nil, err
 	}
+	managed := &ManagedServer{
+		server:  newMCPServer(name),
+		manager: manager,
+	}
+	managed.SetPreparedTools(cfg.PreparedTools)
+	return managed, nil
+}
 
-	mcpServer := server.NewMCPServer(
+func newMCPServer(name string) *server.MCPServer {
+	if strings.TrimSpace(name) == "" {
+		name = defaultServerName
+	}
+	return server.NewMCPServer(
 		name,
 		"0.1.0",
 		server.WithToolCapabilities(true),
 	)
-	managed := &ManagedServer{
-		server:  mcpServer,
-		session: session,
-	}
-	managed.SetPreparedTools(toolset.PreparedToolset{})
-	return managed, nil
 }
 
 func (s *ManagedServer) Server() *server.MCPServer {
@@ -88,18 +91,106 @@ func (s *ManagedServer) Server() *server.MCPServer {
 }
 
 func (s *ManagedServer) Close() error {
-	if s == nil || s.session == nil {
+	if s == nil || s.manager == nil {
 		return nil
 	}
-	return s.session.Close()
+	return s.manager.Close()
 }
 
 func (s *ManagedServer) SetPreparedTools(prepared toolset.PreparedToolset) {
-	if s == nil || s.server == nil || s.session == nil {
+	if s == nil || s.server == nil || s.manager == nil {
 		return
 	}
-	s.session.SetPreparedTools(prepared)
-	s.server.SetTools(sessionBackedServerTools(prepared.HasApprovalTools(), newSuperTool(s.session.Instructions()), s.handleSuperTool, newAwaitSuperToolApprovalsTool(), s.handleAwaitSuperToolApprovals)...)
+	s.manager.SetPreparedTools(prepared)
+	s.server.SetTools(s.tools(prepared)...)
+}
+
+func (s *ManagedServer) SetAfterSubmit(fn func()) {
+	if s == nil {
+		return
+	}
+	s.afterChange = fn
+}
+
+func (s *ManagedServer) PendingApprovals(ctx context.Context) ([]codemodesession.PendingApproval, error) {
+	if s == nil || s.manager == nil {
+		return nil, nil
+	}
+	return s.manager.PendingApprovals(ctx)
+}
+
+func (s *ManagedServer) Locked() bool {
+	if s == nil || s.manager == nil {
+		return false
+	}
+	return s.manager.Locked()
+}
+
+func (s *ManagedServer) BoundTBSession() string {
+	if s == nil || s.manager == nil {
+		return ""
+	}
+	return s.manager.BoundTBSession()
+}
+
+func (s *ManagedServer) ApplyApprovals(ctx context.Context, decisions []codemodesession.ApprovalDecision) error {
+	if s == nil || s.manager == nil {
+		return nil
+	}
+	return s.manager.ApplyApprovals(ctx, decisions)
+}
+
+func (s *ManagedServer) tools(prepared toolset.PreparedToolset) []server.ServerTool {
+	if s == nil || s.manager == nil {
+		return nil
+	}
+	tools := []server.ServerTool{{
+		Tool:    s.newSuperTool(),
+		Handler: s.handleSuperTool,
+	}}
+	if !s.manager.Locked() {
+		tools = append(tools, server.ServerTool{
+			Tool:    s.newSessionTool(prepared.HasApprovalTools()),
+			Handler: s.handleNewSession,
+		})
+	}
+	if prepared.HasApprovalTools() {
+		tools = append(tools, server.ServerTool{
+			Tool:    s.newAwaitSuperToolApprovalsTool(),
+			Handler: s.handleAwaitSuperToolApprovals,
+		})
+	}
+	return tools
+}
+
+func (s *ManagedServer) newSuperTool() mcp.Tool {
+	options := []mcp.ToolOption{
+		mcp.WithDescription(s.manager.Instructions()),
+		mcp.WithString(codemodesession.TypeScriptCellSourceParam, mcp.Required(), mcp.Description("TypeScript code (can be multiline) for next cell.")),
+		mcp.WithNumber(codemodesession.TimeoutSecsParam,
+			mcp.Description(fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds())),
+			mcp.Min(0.001),
+			mcp.DefaultNumber(codemodesession.DefaultSubmitTimeout.Seconds()),
+		),
+	}
+	if !s.manager.Locked() {
+		options = append(options, mcp.WithString(codemodesession.TBSessionParam, mcp.Required(), mcp.Description("Notebook identity. Reuse the same tb_session to continue the same notebook.")))
+	}
+	return mcp.NewTool(ToolSuperTool, options...)
+}
+
+func (s *ManagedServer) newAwaitSuperToolApprovalsTool() mcp.Tool {
+	options := []mcp.ToolOption{
+		mcp.WithDescription("Wait for the outstanding approval(s) to be handled. Returns immediately with (no outstanding approvals). when nothing is waiting. Get as many approvals done as possible before calling, then call again if more are still waiting."),
+	}
+	if !s.manager.Locked() {
+		options = append(options, mcp.WithString(codemodesession.TBSessionParam, mcp.Required(), mcp.Description("Notebook identity. Reuse the same tb_session to continue the same notebook.")))
+	}
+	return mcp.NewTool(ToolAwaitSuperToolApprovals, options...)
+}
+
+func (s *ManagedServer) newSessionTool(awaitAvailable bool) mcp.Tool {
+	return mcp.NewTool(ToolNewSession, mcp.WithDescription(codemodesession.NewSessionToolDescription(awaitAvailable)))
 }
 
 func (s *ManagedServer) handleSuperTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -107,134 +198,56 @@ func (s *ManagedServer) handleSuperTool(ctx context.Context, request mcp.CallToo
 	if err != nil {
 		return nil, err
 	}
+	tbSession := ""
+	if s.manager != nil && !s.manager.Locked() {
+		tbSession, err = request.RequireString(codemodesession.TBSessionParam)
+		if err != nil {
+			return nil, err
+		}
+	}
 	submitCtx, cancel, err := withSuperToolTimeout(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 	defer cancel()
-	result := s.session.Submit(submitCtx, code)
-	if s.afterSubmit != nil {
-		s.afterSubmit()
+	result, err := s.manager.Submit(submitCtx, tbSession, code)
+	if err != nil {
+		return nil, err
 	}
+	s.notifyChange()
 	return mcp.NewToolResultText(result), nil
 }
 
-func (s *ManagedServer) handleAwaitSuperToolApprovals(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	result, err := s.session.AwaitNextApproval(ctx)
+func (s *ManagedServer) handleAwaitSuperToolApprovals(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	tbSession := ""
+	var err error
+	if s.manager != nil && !s.manager.Locked() {
+		tbSession, err = request.RequireString(codemodesession.TBSessionParam)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result, err := s.manager.AwaitNextApproval(ctx, tbSession)
 	if err != nil {
 		return nil, err
 	}
 	return mcp.NewToolResultText(result.Text()), nil
 }
 
-func (s *ManagedServer) SetAfterSubmit(fn func()) {
-	if s == nil {
+func (s *ManagedServer) handleNewSession(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	tbSession, err := s.manager.CreateFreshSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.notifyChange()
+	return mcp.NewToolResultText(tbSession), nil
+}
+
+func (s *ManagedServer) notifyChange() {
+	if s == nil || s.afterChange == nil {
 		return
 	}
-	s.afterSubmit = fn
-}
-
-func (s *ManagedServer) PendingApprovals(ctx context.Context) ([]codemodesession.PendingApproval, error) {
-	if s == nil || s.session == nil {
-		return nil, nil
-	}
-	return s.session.PendingApprovals(ctx)
-}
-
-func (s *ManagedServer) ApplyApprovals(ctx context.Context, decisions []codemodesession.ApprovalDecision) error {
-	if s == nil || s.session == nil {
-		return nil
-	}
-	return s.session.ApplyApprovals(ctx, decisions)
-}
-
-func newSuperTool(instructions string) mcp.Tool {
-	return mcp.NewTool(
-		ToolSuperTool,
-		mcp.WithDescription(instructions),
-		mcp.WithString(codemodesession.TypeScriptCellSourceParam, mcp.Required(), mcp.Description("TypeScript code (can be multiline) for next cell.")),
-		mcp.WithNumber(codemodesession.TimeoutSecsParam,
-			mcp.Description(fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds())),
-			mcp.Min(0.001),
-			mcp.DefaultNumber(codemodesession.DefaultSubmitTimeout.Seconds()),
-		),
-	)
-}
-
-func newAwaitSuperToolApprovalsTool() mcp.Tool {
-	return mcp.NewTool(
-		ToolAwaitSuperToolApprovals,
-		mcp.WithDescription("Wait for the outstanding approval(s) to be handled. Returns immediately with (no outstanding approvals). when nothing is waiting. Get as many approvals done as possible before calling, then call again if more are still waiting."),
-	)
-}
-
-func sessionBackedServerTools(hasApprovalTools bool, superTool mcp.Tool, superHandler server.ToolHandlerFunc, awaitTool mcp.Tool, awaitHandler server.ToolHandlerFunc) []server.ServerTool {
-	tools := []server.ServerTool{{
-		Tool:    superTool,
-		Handler: superHandler,
-	}}
-	if hasApprovalTools {
-		tools = append(tools, server.ServerTool{
-			Tool:    awaitTool,
-			Handler: awaitHandler,
-		})
-	}
-	return tools
-}
-
-type sessionRunner struct {
-	mu         sync.Mutex
-	session    *codemodesession.Session
-	currentDir string
-	config     codemodesession.SessionConfig
-}
-
-func (r *sessionRunner) handleSuperTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	code, err := request.RequireString(codemodesession.TypeScriptCellSourceParam)
-	if err != nil {
-		return nil, err
-	}
-	submitCtx, cancel, err := withSuperToolTimeout(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	defer cancel()
-	return mcp.NewToolResultText(r.submit(submitCtx, code)), nil
-}
-
-func (r *sessionRunner) handleAwaitSuperToolApprovals(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	session, err := r.open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result, err := session.AwaitNextApproval(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return mcp.NewToolResultText(result.Text()), nil
-}
-
-func (r *sessionRunner) submit(ctx context.Context, code string) string {
-	session, err := r.open(ctx)
-	if err != nil {
-		return "cell (failed to commit)\n==\nfailure: " + strings.TrimSpace(err.Error()) + "\n"
-	}
-	return session.Submit(ctx, code)
-}
-
-func (r *sessionRunner) open(ctx context.Context) (*codemodesession.Session, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.session != nil {
-		return r.session, nil
-	}
-	session, err := codemodesession.OpenMemory(ctx, r.currentDir, r.config)
-	if err != nil {
-		return nil, err
-	}
-	r.session = session
-	return r.session, nil
+	s.afterChange()
 }
 
 func firstSessionConfig(cfgs []codemodesession.SessionConfig) codemodesession.SessionConfig {
@@ -252,14 +265,6 @@ func currentWorkingDir() string {
 	return cwd
 }
 
-func managedSessionSQLitePath(currentDir, name string) string {
-	safe := strings.NewReplacer("/", "-", "\\", "-", " ", "-").Replace(strings.TrimSpace(name))
-	if safe == "" {
-		safe = defaultServerName
-	}
-	return filepath.Join(currentDir, ".toolbox-codemodemcp-"+safe+".sqlite")
-}
-
 func withSuperToolTimeout(ctx context.Context, request mcp.CallToolRequest) (context.Context, context.CancelFunc, error) {
 	timeout, err := superToolTimeout(request)
 	if err != nil {
@@ -268,8 +273,8 @@ func withSuperToolTimeout(ctx context.Context, request mcp.CallToolRequest) (con
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	nextCtx, cancel := context.WithTimeout(ctx, timeout)
-	return nextCtx, cancel, nil
+	next, cancel := context.WithTimeout(ctx, timeout)
+	return next, cancel, nil
 }
 
 func superToolTimeout(request mcp.CallToolRequest) (time.Duration, error) {

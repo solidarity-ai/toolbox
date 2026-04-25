@@ -1,6 +1,10 @@
 {
   "name": "toolbox-release-workspace",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solidarity-ai/toolbox"
+  },
   "workspaces": [
     "packages/*"
   ],

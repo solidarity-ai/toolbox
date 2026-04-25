@@ -270,8 +270,8 @@ func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testi
 			Mode:       "codemode_repl",
 			WorkingDir: "/tmp/work",
 			PendingApprovals: []daemon.PendingApprovalSnapshot{
-				{ToolCallID: "tc-1", ToolName: "issues.get", ParamsInspect: `{id: "I-1", meta: {team: {owner: {name: "alpha"}}}}`},
-				{ToolCallID: "tc-2", ToolName: "issues.get", ParamsInspect: `{id: "I-2", meta: {team: {owner: {name: "beta"}}}}`},
+				{ToolCallID: "tc-1", TBSession: "abc123", ToolName: "issues.get", ParamsInspect: `{id: "I-1", meta: {team: {owner: {name: "alpha"}}}}`},
+				{ToolCallID: "tc-2", TBSession: "abc123", ToolName: "issues.get", ParamsInspect: `{id: "I-2", meta: {team: {owner: {name: "beta"}}}}`},
 			},
 		}},
 	}
@@ -298,7 +298,7 @@ func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testi
 	if err := json.NewDecoder(resp.Body).Decode(&groups); err != nil {
 		t.Fatalf("Decode(/approvals): %v", err)
 	}
-	if len(groups) != 1 || groups[0].ID != "client:41:0" {
+	if len(groups) != 1 || groups[0].ID != "tb_session:abc123" {
 		t.Fatalf("GET /approvals groups = %#v", groups)
 	}
 	if !strings.Contains(groups[0].ToolCalls[0].ParamsInspect, `owner: {name: "alpha"}`) {
@@ -318,7 +318,7 @@ func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testi
 		t.Fatalf("POST /approval-tool-calls/.../approve status = %d, want %d", got, http.StatusNoContent)
 	}
 
-	req, err = http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/client:41:0/reject", strings.NewReader(`{"message":"blocked"}`))
+	req, err = http.NewRequest(http.MethodPost, "http://"+addr+"/approvals/tb_session:abc123/reject", strings.NewReader(`{"message":"blocked"}`))
 	if err != nil {
 		t.Fatalf("NewRequest(reject group): %v", err)
 	}

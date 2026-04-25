@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing/fstest"
+	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
@@ -24,7 +25,8 @@ const (
 	// delta beyond the default DOM libs. It deserves more design once we start
 	// composing distinct runtime shims/compat layers, and we may eventually
 	// want the checker to stop relying on the default DOM libs entirely.
-	hostCompatDTSFile = "__toolbox_host_compat.d.ts"
+	hostCompatDTSFile        = "__toolbox_host_compat.d.ts"
+	checkSessionReuseTimeout = 5 * time.Second
 )
 
 // nodeBuiltins are marked as external so esbuild doesn't try to bundle them.
@@ -64,12 +66,22 @@ type Host struct {
 
 // Run is the minimal TS-tool runtime seam.
 func Run(def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSignature) (string, error) {
-	return RunWithHost(def, args, Host{}, nil, sig)
+	return RunContext(context.Background(), def, args, sig)
+}
+
+// RunContext is the minimal TS-tool runtime seam with cancellation.
+func RunContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSignature) (string, error) {
+	return RunWithHostContext(ctx, def, args, Host{}, nil, sig)
 }
 
 // RunWithSession is like Run but accepts a session pointer for caching.
 func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
-	return RunWithHost(def, args, Host{}, session, sig)
+	return RunWithSessionContext(context.Background(), def, args, session, sig)
+}
+
+// RunWithSessionContext is like RunContext but accepts a session pointer for caching.
+func RunWithSessionContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+	return RunWithHostContext(ctx, def, args, Host{}, session, sig)
 }
 
 // RunWithHost is the same minimal runtime seam with optional host imports.
@@ -78,6 +90,24 @@ func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbo
 // If sig is non-nil, args are spread as individual function params in order;
 // otherwise they are passed as a single object (legacy style).
 func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+	return RunWithHostContext(context.Background(), def, args, host, session, sig)
+}
+
+// RunWithHostContext is RunWithHost with cancellation support.
+func RunWithHostContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (result string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if ctx.Err() != nil {
+				result = ""
+				err = ctx.Err()
+				return
+			}
+			panic(recovered)
+		}
+	}()
 	var checkSession *toolbox.CheckSession
 	if session != nil {
 		checkSession = *session
@@ -87,7 +117,10 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session 
 		return "", err
 	}
 
-	diagnostics, checkSession, err := toolbox.Check(context.Background(), toolbox.CheckInput{
+	checkCtx, cancelCheck := checkerContext(ctx, checkSession)
+	defer cancelCheck()
+
+	diagnostics, checkSession, err := toolbox.Check(checkCtx, toolbox.CheckInput{
 		Files:            files,
 		Entry:            runnerTSFile,
 		CurrentDirectory: "/",
@@ -111,11 +144,18 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session 
 		return "", err
 	}
 
-	rt, err := qjs.New()
+	rt, err := qjs.New(qjs.Option{
+		Context:            ctx,
+		CloseOnContextDone: true,
+	})
 	if err != nil {
 		return "", fmt.Errorf("create qjs runtime: %w", err)
 	}
-	defer rt.Close()
+	defer func() {
+		if rt != nil {
+			rt.Close()
+		}
+	}()
 
 	if err := installHost(rt, host); err != nil {
 		return "", err
@@ -123,11 +163,63 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session 
 
 	val, err := rt.Eval(runnerJSFile, qjs.Code(code), qjs.TypeModule())
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("run %s: %w", def.Entry, err)
 	}
-	defer val.Free()
+	defer func() {
+		if val != nil {
+			val.Free()
+		}
+	}()
 
 	return val.String(), nil
+}
+
+// PrepareCheckSession creates or refreshes a reusable TypeScript checker
+// session for the tool without executing the runtime.
+func PrepareCheckSession(def tooldef.TSToolDef, session **toolbox.CheckSession) error {
+	var checkSession *toolbox.CheckSession
+	if session != nil {
+		checkSession = *session
+	}
+	files, err := withRunner(def.Files, prepareRunnerSource(def.Entry))
+	if err != nil {
+		return err
+	}
+
+	checkCtx, cancelCheck := checkerContext(context.Background(), checkSession)
+	defer cancelCheck()
+
+	diagnostics, checkSession, err := toolbox.Check(checkCtx, toolbox.CheckInput{
+		Files:            files,
+		Entry:            runnerTSFile,
+		CurrentDirectory: "/",
+	}, checkSession)
+	if session != nil {
+		*session = checkSession
+	}
+	if err != nil {
+		return fmt.Errorf("typescript check failed: %w", err)
+	}
+	if len(diagnostics) > 0 {
+		return fmt.Errorf("typescript check failed: %s", formatDiagnostics(diagnostics))
+	}
+	return nil
+}
+
+func checkerContext(ctx context.Context, session *toolbox.CheckSession) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	base := context.WithoutCancel(ctx)
+	if session == nil {
+		// typescript-go stores the creation context on the session itself, so the
+		// first checker session must not inherit a short-lived timeout/cancel path.
+		return base, func() {}
+	}
+	return context.WithTimeout(base, checkSessionReuseTimeout)
 }
 
 func installHost(rt *qjs.Runtime, host Host) error {
@@ -345,6 +437,10 @@ func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature)
 	sb.WriteString(`export default typeof __r === "string" ? __r : JSON.stringify(__r);`)
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+func prepareRunnerSource(entry string) string {
+	return fmt.Sprintf("import tool from \"./%s\";\nexport default typeof tool;\n", entry)
 }
 
 func formatDiagnostics(diagnostics []toolbox.Diagnostic) string {

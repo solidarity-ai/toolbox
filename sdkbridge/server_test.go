@@ -80,6 +80,7 @@ func TestBridgeServeStdioPreservesLifecycleRequestOrder(t *testing.T) {
 
 	composedAny, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
 		Mode:        ComposeModeCodemode,
+		TBSession:   mustNewCodemodeSessionID(t, bridge),
 		ToolsetFile: path,
 	}))
 	if err != nil {
@@ -475,6 +476,7 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 
 	result, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
 		Mode:        ComposeModeCodemode,
+		TBSession:   mustNewCodemodeSessionID(t, bridge),
 		ToolsetFile: path,
 	}))
 	if err != nil {
@@ -494,6 +496,9 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	}
 	if _, ok := props[codemodesession.TimeoutSecsParam]; !ok {
 		t.Fatalf("codemode params schema = %#v, want %q", composed.Tools[0].ParamsSchema, codemodesession.TimeoutSecsParam)
+	}
+	if _, ok := props[codemodesession.TBSessionParam]; ok {
+		t.Fatalf("locked codemode params schema = %#v, did not want %q", composed.Tools[0].ParamsSchema, codemodesession.TBSessionParam)
 	}
 	if !strings.Contains(composed.Tools[0].Description, "super_tool submits a code cell to a notebook like environment") {
 		t.Fatalf("codemode description = %q, want super_tool instructions", composed.Tools[0].Description)
@@ -526,6 +531,121 @@ func TestBridgeComposeCodemodeReturnsSingleTool(t *testing.T) {
 	}
 	if got := timedOut.(ToolInvokeResult).Content; !strings.Contains(got, "context deadline exceeded") {
 		t.Fatalf("codemode timeout result = %q, want timeout failure", got)
+	}
+}
+
+func TestBridgeComposeUnlockedCodemodeRequiresTBSessionAndSupportsFreshSessions(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc")
+	bridge := New(Options{})
+	defer bridge.clearToolsets()
+
+	result, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
+		Mode:        ComposeModeCodemode,
+		ToolsetFile: path,
+	}))
+	if err != nil {
+		t.Fatalf("toolset.compose: %v", err)
+	}
+
+	composed := result.(ComposeResult)
+	if len(composed.Tools) != 2 {
+		t.Fatalf("unlocked codemode compose tools = %d, want 2", len(composed.Tools))
+	}
+	props, _ := composed.Tools[1].ParamsSchema["properties"].(map[string]any)
+	if _, ok := props[codemodesession.TBSessionParam]; !ok {
+		t.Fatalf("unlocked codemode params schema = %#v, want %q", composed.Tools[1].ParamsSchema, codemodesession.TBSessionParam)
+	}
+	if !schemaRequiresParam(composed.Tools[1].ParamsSchema, codemodesession.TBSessionParam) {
+		t.Fatalf("unlocked codemode params schema = %#v, want required %q", composed.Tools[1].ParamsSchema, codemodesession.TBSessionParam)
+	}
+
+	_, err = bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeToolName,
+		Params: map[string]any{
+			codemodesession.TypeScriptCellSourceParam: `await calc.calc.add(1, 2)`,
+		},
+	}))
+	if err == nil {
+		t.Fatal("tool.invoke without tb_session error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "params."+codemodesession.TBSessionParam) {
+		t.Fatalf("tool.invoke without tb_session error = %v, want missing tb_session", err)
+	}
+
+	freshAny, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeNewSessionToolName,
+		Params:    map[string]any{},
+	}))
+	if err != nil {
+		t.Fatalf("tool.invoke new_super_tool_session: %v", err)
+	}
+	tbSession := strings.TrimSpace(freshAny.(ToolInvokeResult).Content)
+	if err := codemodesession.ValidateTBSession(tbSession); err != nil {
+		t.Fatalf("new tb_session = %q, want valid session id: %v", tbSession, err)
+	}
+
+	invoked, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeToolName,
+		Params: map[string]any{
+			codemodesession.TBSessionParam:            tbSession,
+			codemodesession.TypeScriptCellSourceParam: `await calc.calc.add(6, 7)`,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("tool.invoke with tb_session: %v", err)
+	}
+	if got := invoked.(ToolInvokeResult).Content; !strings.Contains(got, "=> 13") {
+		t.Fatalf("codemode invoke result = %q, want completion preview 13", got)
+	}
+}
+
+func TestBridgeLockedCodemodeOmitsFreshSessionTool(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc")
+	bridge := New(Options{})
+	defer bridge.clearToolsets()
+
+	initialTBSession := mustNewCodemodeSessionID(t, bridge)
+	result, err := bridge.handleMethod(context.Background(), "toolset.compose", mustJSON(t, ComposeParams{
+		Mode:        ComposeModeCodemode,
+		TBSession:   initialTBSession,
+		ToolsetFile: path,
+	}))
+	if err != nil {
+		t.Fatalf("toolset.compose: %v", err)
+	}
+
+	composed := result.(ComposeResult)
+	if len(composed.Tools) != 1 {
+		t.Fatalf("locked codemode compose tools = %d, want 1", len(composed.Tools))
+	}
+	if composed.Tools[0].Name != CodeModeToolName {
+		t.Fatalf("locked codemode tool = %q, want %q", composed.Tools[0].Name, CodeModeToolName)
+	}
+
+	_, err = bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeNewSessionToolName,
+		Params:    map[string]any{},
+	}))
+	if err == nil || !strings.Contains(err.Error(), `unknown tool "new_super_tool_session"`) {
+		t.Fatalf("tool.invoke new_super_tool_session error = %v, want unknown tool", err)
+	}
+
+	invoked, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
+		ToolsetID: composed.ToolsetID,
+		ToolName:  CodeModeToolName,
+		Params: map[string]any{
+			codemodesession.TypeScriptCellSourceParam: `await calc.calc.add(2, 3)`,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("tool.invoke after new session: %v", err)
+	}
+	if got := invoked.(ToolInvokeResult).Content; !strings.Contains(got, "=> 5") {
+		t.Fatalf("codemode invoke result = %q, want completion preview 5", got)
 	}
 }
 
@@ -710,6 +830,25 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("json.Marshal(%T): %v", value, err)
 	}
 	return data
+}
+
+func mustNewCodemodeSessionID(t *testing.T, bridge *Bridge) string {
+	t.Helper()
+	result, err := bridge.handleMethod(context.Background(), "codemode.session.new", nil)
+	if err != nil {
+		t.Fatalf("codemode.session.new: %v", err)
+	}
+	return result.(CodemodeSessionNewResult).TBSession
+}
+
+func schemaRequiresParam(schema map[string]any, name string) bool {
+	required, _ := schema["required"].([]any)
+	for _, item := range required {
+		if got, _ := item.(string); got == name {
+			return true
+		}
+	}
+	return false
 }
 
 func writeLocalToolsetFile(t *testing.T, fixtureName string) string {

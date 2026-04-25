@@ -109,14 +109,19 @@ func approvalAwaitResultFromBatch(results []appliedApprovalResult, remaining int
 type approvalAwaitDelegate struct {
 	mu      sync.Mutex
 	nextID  int
-	waiters map[int]chan ApprovalAwaitResult
+	waiters map[int]chan approvalAwaitEvent
 }
 
 func newApprovalAwaitDelegate() *approvalAwaitDelegate {
-	return &approvalAwaitDelegate{waiters: make(map[int]chan ApprovalAwaitResult)}
+	return &approvalAwaitDelegate{waiters: make(map[int]chan approvalAwaitEvent)}
 }
 
-func (d *approvalAwaitDelegate) register(ch chan ApprovalAwaitResult) int {
+type approvalAwaitEvent struct {
+	result ApprovalAwaitResult
+	err    error
+}
+
+func (d *approvalAwaitDelegate) register(ch chan approvalAwaitEvent) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.nextID++
@@ -136,7 +141,7 @@ func (d *approvalAwaitDelegate) Publish(result ApprovalAwaitResult) {
 		return
 	}
 	d.mu.Lock()
-	waiters := make([]chan ApprovalAwaitResult, 0, len(d.waiters))
+	waiters := make([]chan approvalAwaitEvent, 0, len(d.waiters))
 	for _, ch := range d.waiters {
 		waiters = append(waiters, ch)
 	}
@@ -144,7 +149,26 @@ func (d *approvalAwaitDelegate) Publish(result ApprovalAwaitResult) {
 
 	for _, ch := range waiters {
 		select {
-		case ch <- result:
+		case ch <- approvalAwaitEvent{result: result}:
+		default:
+		}
+	}
+}
+
+func (d *approvalAwaitDelegate) PublishError(err error) {
+	if d == nil || err == nil {
+		return
+	}
+	d.mu.Lock()
+	waiters := make([]chan approvalAwaitEvent, 0, len(d.waiters))
+	for _, ch := range d.waiters {
+		waiters = append(waiters, ch)
+	}
+	d.mu.Unlock()
+
+	for _, ch := range waiters {
+		select {
+		case ch <- approvalAwaitEvent{err: err}:
 		default:
 		}
 	}
@@ -155,11 +179,24 @@ func (s *Session) AwaitNextApproval(ctx context.Context) (ApprovalAwaitResult, e
 		return ApprovalAwaitResult{Status: ApprovalAwaitStatusNoOutstanding}, nil
 	}
 	s.mu.Lock()
+	lease := s.lease
+	s.mu.Unlock()
+	if lease != nil {
+		if err := s.requireLease(ctx); err != nil {
+			return ApprovalAwaitResult{}, err
+		}
+	}
+	s.mu.Lock()
 	if s.approvalAwaits == nil {
 		s.mu.Unlock()
 		return ApprovalAwaitResult{}, fmt.Errorf("approval awaiting is unavailable")
 	}
-	ch := make(chan ApprovalAwaitResult, 1)
+	if s.terminalErr != nil {
+		err := s.terminalErr
+		s.mu.Unlock()
+		return ApprovalAwaitResult{}, err
+	}
+	ch := make(chan approvalAwaitEvent, 1)
 	waiterID := s.approvalAwaits.register(ch)
 	approvals, err := s.pendingApprovalsLocked(ctx)
 	if err != nil {
@@ -176,8 +213,11 @@ func (s *Session) AwaitNextApproval(ctx context.Context) (ApprovalAwaitResult, e
 	defer s.approvalAwaits.unregister(waiterID)
 
 	select {
-	case result := <-ch:
-		return result, nil
+	case event := <-ch:
+		if event.err != nil {
+			return ApprovalAwaitResult{}, event.err
+		}
+		return event.result, nil
 	case <-ctx.Done():
 		return ApprovalAwaitResult{}, ctx.Err()
 	}

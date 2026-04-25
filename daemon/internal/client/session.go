@@ -291,6 +291,8 @@ func sessionStateToProto(state daemonserver.SessionState) *daemonv1.SessionState
 	return &daemonv1.SessionState{
 		Pid:              int32(os.Getpid()),
 		Mode:             state.Mode,
+		Locked:           state.Locked,
+		BoundTbSession:   state.BoundTBSession,
 		WorkingDir:       state.WorkingDir,
 		PreparedTools:    append([]string(nil), state.PreparedTools...),
 		PendingApprovals: pendingApprovalsToProto(state.PendingApprovals),
@@ -355,6 +357,7 @@ func pendingApprovalsToProto(approvals []daemonserver.PendingApprovalSnapshot) [
 	for _, approval := range approvals {
 		next := &daemonv1.PendingApprovalSnapshot{
 			ToolCallId:    approval.ToolCallID,
+			TbSession:     approval.TBSession,
 			ToolName:      approval.ToolName,
 			ParamsInspect: approval.ParamsInspect,
 			EffectId:      approval.EffectID,

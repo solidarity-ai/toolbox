@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/dop251/goja"
@@ -23,12 +24,16 @@ type runtimeDelegate struct {
 	prepared  func() toolset.PreparedToolset
 	toolCalls toolCallJournal
 	approvals approvalStore
+	executor  *invoke.Executor
+	toolCtx   func(context.Context) (context.Context, func())
 }
 
 type runtimeBinding struct {
 	prepared  func() toolset.PreparedToolset
 	toolCalls toolCallJournal
 	approvals approvalStore
+	executor  *invoke.Executor
+	toolCtx   func(context.Context) (context.Context, func())
 	state     runtimeToolState
 }
 
@@ -44,15 +49,15 @@ type runtimeToolState struct {
 	NeedsApproval bool     `json:"needsApproval,omitempty"`
 }
 
-func newRuntimeDelegate(prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore) repl.VMDelegate {
+func newRuntimeDelegate(prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore, executor *invoke.Executor, toolCtx func(context.Context) (context.Context, func())) repl.VMDelegate {
 	if prepared == nil {
 		prepared = func() toolset.PreparedToolset { return toolset.PreparedToolset{} }
 	}
-	return runtimeDelegate{prepared: prepared, toolCalls: toolCalls, approvals: approvals}
+	return runtimeDelegate{prepared: prepared, toolCalls: toolCalls, approvals: approvals, executor: executor, toolCtx: toolCtx}
 }
 
 func (d runtimeDelegate) ConfigureRuntime(ctx repl.SessionRuntimeContext, rt *goja.Runtime, host repl.HostFuncBuilder, state json.RawMessage) (json.RawMessage, error) {
-	bindings, nextState, err := configureRuntimeBindings(d.prepared, state)
+	bindings, nextState, err := configureRuntimeBindings(d.prepared, d.executor, d.toolCtx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -74,10 +79,10 @@ func (d runtimeDelegate) TransitionRuntime(ctx repl.RuntimeTransitionContext, rt
 	if err := removeRuntimeBindings(rt, fromDecoded.Tools); err != nil {
 		return err
 	}
-	return installRuntimeBindings(rt, host, runtimeBindingsFromState(d.prepared, toDecoded.Tools), d.toolCalls, d.approvals, ctx.SessionID, ctx.IsCurrentRuntime)
+	return installRuntimeBindings(rt, host, runtimeBindingsFromState(d.prepared, d.executor, d.toolCtx, toDecoded.Tools), d.toolCalls, d.approvals, ctx.SessionID, ctx.IsCurrentRuntime)
 }
 
-func configureRuntimeBindings(prepared func() toolset.PreparedToolset, state json.RawMessage) ([]runtimeBinding, json.RawMessage, error) {
+func configureRuntimeBindings(prepared func() toolset.PreparedToolset, executor *invoke.Executor, toolCtx func(context.Context) (context.Context, func()), state json.RawMessage) ([]runtimeBinding, json.RawMessage, error) {
 	if len(state) == 0 {
 		nextState, err := runtimeStateJSON(prepared())
 		if err != nil {
@@ -87,7 +92,7 @@ func configureRuntimeBindings(prepared func() toolset.PreparedToolset, state jso
 		if err != nil {
 			return nil, nil, err
 		}
-		return runtimeBindingsFromState(prepared, decoded.Tools), nextState, nil
+		return runtimeBindingsFromState(prepared, executor, toolCtx, decoded.Tools), nextState, nil
 	}
 	decoded, err := decodeRuntimeState(state)
 	if err != nil {
@@ -97,7 +102,7 @@ func configureRuntimeBindings(prepared func() toolset.PreparedToolset, state jso
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode persisted runtime state: %w", err)
 	}
-	return runtimeBindingsFromState(prepared, decoded.Tools), normalized, nil
+	return runtimeBindingsFromState(prepared, executor, toolCtx, decoded.Tools), normalized, nil
 }
 
 func buildRuntimeToolStates(prepared toolset.PreparedToolset) []runtimeToolState {
@@ -134,13 +139,15 @@ func buildRuntimeToolStates(prepared toolset.PreparedToolset) []runtimeToolState
 	return out
 }
 
-func runtimeBindingsFromState(prepared func() toolset.PreparedToolset, toolStates []runtimeToolState) []runtimeBinding {
+func runtimeBindingsFromState(prepared func() toolset.PreparedToolset, executor *invoke.Executor, toolCtx func(context.Context) (context.Context, func()), toolStates []runtimeToolState) []runtimeBinding {
 	out := make([]runtimeBinding, 0, len(toolStates))
 	for _, toolState := range toolStates {
 		out = append(out, runtimeBinding{
 			prepared:  prepared,
 			toolCalls: nil,
 			approvals: nil,
+			executor:  executor,
+			toolCtx:   toolCtx,
 			state: runtimeToolState{
 				Name:          toolState.Name,
 				Package:       toolState.Package,
@@ -272,27 +279,11 @@ func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error
 
 func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, sessionID repl.SessionID, isCurrentRuntime func() bool) (goja.Value, error) {
 	staleMessage := fmt.Sprintf("tool %s came from a previous runtime and is no longer callable", binding.state.Name)
-	rawInvoke := host.WrapAsyncWithEffectID(binding.state.Name, binding.replay(), func(ctx context.Context, _ repl.EffectID, params []byte) ([]byte, error) {
-		args, err := decodeRuntimeArgs(params)
-		if err != nil {
-			return nil, fmt.Errorf("%s: decode args: %w", binding.state.Name, err)
-		}
-		prepared := binding.prepared()
-		tool, ok := prepared.Tool(binding.state.Name)
-		if !ok {
-			return nil, fmt.Errorf("tool %s unavailable for live replay", binding.state.Name)
-		}
-		result, err := invoke.RunContext(ctx, prepared, binding.state.Name, args)
-		if err != nil {
-			return nil, err
-		}
-		return encodeRuntimeResult(currentReturnType(tool), result)
-	})
 	rawApproval := host.WrapSyncWithEffectID(pendingApprovalEffectName(binding.state.Name), repl.ReplayReadonly, func(_ context.Context, effectID repl.EffectID, params []byte) ([]byte, error) {
 		toolCallID := string(effectID)
 		reviewedToolKey := approvalReviewedToolKey(binding.prepared(), binding.state.Name)
 		if binding.toolCalls != nil {
-			if err := binding.toolCalls.EnsureNeedsApproval(sessionID, toolCallID, binding.state.Name, params); err != nil {
+			if err := binding.toolCalls.EnsureNeedsApproval(sessionID, toolCallID, toolCallID, binding.state.Name, params); err != nil {
 				return nil, err
 			}
 		}
@@ -335,16 +326,45 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			return taskObj
 		}
 
+		startGate := newToolCallStartGate()
+		rawInvoke := host.WrapAsyncWithEffectID(binding.state.Name, binding.replay(), func(ctx context.Context, _ repl.EffectID, params []byte) ([]byte, error) {
+			if err := startGate.Wait(ctx); err != nil {
+				return nil, err
+			}
+			args, err := decodeRuntimeArgs(params)
+			if err != nil {
+				return nil, fmt.Errorf("%s: decode args: %w", binding.state.Name, err)
+			}
+			prepared := binding.prepared()
+			tool, ok := prepared.Tool(binding.state.Name)
+			if !ok {
+				return nil, fmt.Errorf("tool %s unavailable for live replay", binding.state.Name)
+			}
+			execCtx := ctx
+			release := func() {}
+			if binding.toolCtx != nil {
+				execCtx, release = binding.toolCtx(ctx)
+			}
+			defer release()
+			result, err := runPreparedTool(execCtx, binding.executor, prepared, binding.state.Name, args)
+			if err != nil {
+				return nil, err
+			}
+			return encodeRuntimeResult(currentReturnType(tool), result)
+		})
+
 		promiseValue, effectID := rawInvoke(goja.FunctionCall{
 			This:      goja.Undefined(),
 			Arguments: []goja.Value{argsObj},
 		})
 		toolCallID := strings.TrimSpace(string(effectID))
 		if toolCallID == "" {
+			startGate.Fail(fmt.Errorf("tool %s toolCallId: missing effect id", binding.state.Name))
 			panic(rt.NewTypeError("tool %s toolCallId: missing effect id", binding.state.Name))
 		}
 		if binding.toolCalls != nil {
 			if err := binding.toolCalls.EnsureStarted(sessionID, toolCallID, binding.state.Name, paramsEncoded); err != nil {
+				startGate.Fail(fmt.Errorf("tool %s start journal: %v", binding.state.Name, err))
 				panic(rt.NewTypeError("tool %s start journal: %v", binding.state.Name, err))
 			}
 		}
@@ -352,14 +372,18 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 
 		promiseObj := promiseValue.ToObject(rt)
 		if promiseObj == nil {
+			startGate.Fail(fmt.Errorf("tool %s returned a non-promise value", binding.state.Name))
 			panic(rt.NewTypeError("tool %s returned a non-promise value", binding.state.Name))
 		}
-		if err := promiseObj.Set("task", task); err != nil {
+		if err := promiseObj.Set("toolCallTask", task); err != nil {
+			startGate.Fail(fmt.Errorf("tool %s attach task: %v", binding.state.Name, err))
 			panic(rt.NewTypeError("tool %s attach task: %v", binding.state.Name, err))
 		}
 		if err := attachToolCallSettlers(rt, promiseObj, binding.toolCalls, sessionID, toolCallID); err != nil {
+			startGate.Fail(fmt.Errorf("tool %s attach settlers: %v", binding.state.Name, err))
 			panic(rt.NewTypeError("tool %s attach settlers: %v", binding.state.Name, err))
 		}
+		startGate.Allow()
 		return promiseObj
 	}
 	wrapped := rt.ToValue(wrapper)
@@ -406,7 +430,7 @@ func installToolCallInspector(rt *goja.Runtime, host repl.HostFuncBuilder, toolC
 
 	return rt.Set("$tool_call", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
-			panic(rt.NewTypeError("$tool_call requires a ToolCallPromise or ToolCallTask"))
+			panic(rt.NewTypeError("$tool_call requires a ToolCallPromise, ToolCallTask, or toolCallId string"))
 		}
 		toolCallID, err := extractToolCallIDFromRef(rt, call.Arguments[0])
 		if err != nil {
@@ -471,7 +495,11 @@ func attachToolCallSettlers(rt *goja.Runtime, promise *goja.Object, toolCalls to
 		if len(call.Arguments) > 0 {
 			errText = toolCallErrorString(call.Arguments[0])
 		}
-		_ = toolCalls.EnsureFailed(sessionID, toolCallID, errText)
+		if isToolCallContextCancellation(errText) {
+			_ = toolCalls.EnsureCancelled(sessionID, toolCallID)
+		} else {
+			_ = toolCalls.EnsureFailed(sessionID, toolCallID, errText)
+		}
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
 		}
@@ -495,13 +523,20 @@ func decodeToolCallIDArg(params []byte) (string, error) {
 
 func extractToolCallIDFromRef(rt *goja.Runtime, value goja.Value) (string, error) {
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
-		return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+		return "", fmt.Errorf("$tool_call expects a ToolCallPromise, ToolCallTask, or toolCallId string")
 	}
-	obj := value.ToObject(rt)
-	if obj == nil {
-		return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+	if text, ok := value.Export().(string); ok {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return "", fmt.Errorf("tool call ref must not be empty")
+		}
+		return text, nil
 	}
-	if taskValue := obj.Get("task"); taskValue != nil && taskValue != goja.Undefined() && taskValue != goja.Null() {
+	obj, ok := value.(*goja.Object)
+	if !ok || obj == nil {
+		return "", fmt.Errorf("$tool_call expects a ToolCallPromise, ToolCallTask, or toolCallId string")
+	}
+	if taskValue := obj.Get("toolCallTask"); taskValue != nil && taskValue != goja.Undefined() && taskValue != goja.Null() {
 		taskObj := taskValue.ToObject(rt)
 		if taskObj != nil {
 			if toolCallID := strings.TrimSpace(taskObj.Get("toolCallId").String()); toolCallID != "" && toolCallID != "undefined" {
@@ -512,7 +547,7 @@ func extractToolCallIDFromRef(rt *goja.Runtime, value goja.Value) (string, error
 	if toolCallID := strings.TrimSpace(obj.Get("toolCallId").String()); toolCallID != "" && toolCallID != "undefined" {
 		return toolCallID, nil
 	}
-	return "", fmt.Errorf("$tool_call expects a ToolCallPromise or ToolCallTask")
+	return "", fmt.Errorf("$tool_call expects a ToolCallPromise, ToolCallTask, or toolCallId string")
 }
 
 func toolCallErrorString(value goja.Value) string {
@@ -531,6 +566,52 @@ func toolCallErrorString(value goja.Value) string {
 		return text
 	}
 	return "tool call failed"
+}
+
+type toolCallStartGate struct {
+	once   sync.Once
+	result chan error
+}
+
+func newToolCallStartGate() *toolCallStartGate {
+	return &toolCallStartGate{result: make(chan error, 1)}
+}
+
+func (g *toolCallStartGate) Allow() {
+	if g == nil {
+		return
+	}
+	g.once.Do(func() {
+		g.result <- nil
+	})
+}
+
+func (g *toolCallStartGate) Fail(err error) {
+	if g == nil {
+		return
+	}
+	g.once.Do(func() {
+		g.result <- err
+	})
+}
+
+func (g *toolCallStartGate) Wait(ctx context.Context) error {
+	if g == nil {
+		return nil
+	}
+	select {
+	case err := <-g.result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func isToolCallContextCancellation(errText string) bool {
+	errText = strings.ToLower(strings.TrimSpace(errText))
+	return strings.Contains(errText, "context canceled") ||
+		strings.Contains(errText, "context cancelled") ||
+		strings.Contains(errText, "context deadline exceeded")
 }
 
 func decodeRuntimeArgs(params []byte) (map[string]any, error) {

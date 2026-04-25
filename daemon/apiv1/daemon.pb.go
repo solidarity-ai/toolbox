@@ -117,6 +117,8 @@ type SessionState struct {
 	WorkingDir       string                     `protobuf:"bytes,3,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`
 	PreparedTools    []string                   `protobuf:"bytes,4,rep,name=prepared_tools,json=preparedTools,proto3" json:"prepared_tools,omitempty"`
 	PendingApprovals []*PendingApprovalSnapshot `protobuf:"bytes,5,rep,name=pending_approvals,json=pendingApprovals,proto3" json:"pending_approvals,omitempty"`
+	Locked           bool                       `protobuf:"varint,6,opt,name=locked,proto3" json:"locked,omitempty"`
+	BoundTbSession   string                     `protobuf:"bytes,7,opt,name=bound_tb_session,json=boundTbSession,proto3" json:"bound_tb_session,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -186,6 +188,20 @@ func (x *SessionState) GetPendingApprovals() []*PendingApprovalSnapshot {
 	return nil
 }
 
+func (x *SessionState) GetLocked() bool {
+	if x != nil {
+		return x.Locked
+	}
+	return false
+}
+
+func (x *SessionState) GetBoundTbSession() string {
+	if x != nil {
+		return x.BoundTbSession
+	}
+	return ""
+}
+
 type PendingApprovalSnapshot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ToolCallId    string                 `protobuf:"bytes,1,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
@@ -194,6 +210,7 @@ type PendingApprovalSnapshot struct {
 	EffectId      string                 `protobuf:"bytes,4,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
 	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
 	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	TbSession     string                 `protobuf:"bytes,7,opt,name=tb_session,json=tbSession,proto3" json:"tb_session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -270,6 +287,13 @@ func (x *PendingApprovalSnapshot) GetError() string {
 	return ""
 }
 
+func (x *PendingApprovalSnapshot) GetTbSession() string {
+	if x != nil {
+		return x.TbSession
+	}
+	return ""
+}
+
 type ApprovalDecision struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
@@ -339,6 +363,8 @@ type ClientSnapshot struct {
 	ConnectedAt      *timestamppb.Timestamp     `protobuf:"bytes,5,opt,name=connected_at,json=connectedAt,proto3" json:"connected_at,omitempty"`
 	LastSyncAt       *timestamppb.Timestamp     `protobuf:"bytes,6,opt,name=last_sync_at,json=lastSyncAt,proto3" json:"last_sync_at,omitempty"`
 	PendingApprovals []*PendingApprovalSnapshot `protobuf:"bytes,7,rep,name=pending_approvals,json=pendingApprovals,proto3" json:"pending_approvals,omitempty"`
+	Locked           bool                       `protobuf:"varint,8,opt,name=locked,proto3" json:"locked,omitempty"`
+	BoundTbSession   string                     `protobuf:"bytes,9,opt,name=bound_tb_session,json=boundTbSession,proto3" json:"bound_tb_session,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -420,6 +446,20 @@ func (x *ClientSnapshot) GetPendingApprovals() []*PendingApprovalSnapshot {
 		return x.PendingApprovals
 	}
 	return nil
+}
+
+func (x *ClientSnapshot) GetLocked() bool {
+	if x != nil {
+		return x.Locked
+	}
+	return false
+}
+
+func (x *ClientSnapshot) GetBoundTbSession() string {
+	if x != nil {
+		return x.BoundTbSession
+	}
+	return ""
 }
 
 type StateUpdate struct {
@@ -986,14 +1026,16 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12\x18\n" +
 	"\apayload\x18\x01 \x01(\tR\apayload\x12\x10\n" +
-	"\x03pid\x18\x02 \x01(\x05R\x03pid\"\xd5\x01\n" +
+	"\x03pid\x18\x02 \x01(\x05R\x03pid\"\x97\x02\n" +
 	"\fSessionState\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\x12\x1f\n" +
 	"\vworking_dir\x18\x03 \x01(\tR\n" +
 	"workingDir\x12%\n" +
 	"\x0eprepared_tools\x18\x04 \x03(\tR\rpreparedTools\x12W\n" +
-	"\x11pending_approvals\x18\x05 \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\"\xca\x01\n" +
+	"\x11pending_approvals\x18\x05 \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\x12\x16\n" +
+	"\x06locked\x18\x06 \x01(\bR\x06locked\x12(\n" +
+	"\x10bound_tb_session\x18\a \x01(\tR\x0eboundTbSession\"\xe9\x01\n" +
 	"\x17PendingApprovalSnapshot\x12 \n" +
 	"\ftool_call_id\x18\x01 \x01(\tR\n" +
 	"toolCallId\x12\x1b\n" +
@@ -1001,12 +1043,14 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\x0eparams_inspect\x18\x03 \x01(\tR\rparamsInspect\x12\x1b\n" +
 	"\teffect_id\x18\x04 \x01(\tR\beffectId\x12\x16\n" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"f\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"tb_session\x18\a \x01(\tR\ttbSession\"f\n" +
 	"\x10ApprovalDecision\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12 \n" +
 	"\ftool_call_id\x18\x02 \x01(\tR\n" +
 	"toolCallId\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\xd4\x02\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x96\x03\n" +
 	"\x0eClientSnapshot\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\x12\x1f\n" +
@@ -1016,7 +1060,9 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\fconnected_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vconnectedAt\x12<\n" +
 	"\flast_sync_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"lastSyncAt\x12W\n" +
-	"\x11pending_approvals\x18\a \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\"\xc1\x01\n" +
+	"\x11pending_approvals\x18\a \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\x12\x16\n" +
+	"\x06locked\x18\b \x01(\bR\x06locked\x12(\n" +
+	"\x10bound_tb_session\x18\t \x01(\tR\x0eboundTbSession\"\xc1\x01\n" +
 	"\vStateUpdate\x12;\n" +
 	"\aclients\x18\x01 \x03(\v2!.toolbox.daemon.v1.ClientSnapshotR\aclients\x12!\n" +
 	"\fsecret_epoch\x18\x02 \x01(\tR\vsecretEpoch\x12R\n" +

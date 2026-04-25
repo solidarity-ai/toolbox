@@ -19,11 +19,13 @@ import (
 
 const (
 	approvalCallStatusPending   = "pending"
+	approvalCallStatusExecuting = "executing"
 	approvalCallStatusCompleted = "completed"
 	approvalCallStatusFailed    = "failed"
 )
 
 type PendingApproval struct {
+	TBSession     string
 	ToolCallID    string
 	CellID        string
 	ToolName      string
@@ -45,7 +47,8 @@ type approvalStore interface {
 	RecordPendingToolCall(sessionID repl.SessionID, toolCallID, effectID, toolName, reviewedToolKey string, params []byte) error
 	CommitSubmit(sessionID repl.SessionID, cellID repl.CellID) error
 	PendingApprovals(ctx context.Context, sessionID repl.SessionID) ([]PendingApproval, error)
-	ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal) ([]appliedApprovalResult, error)
+	ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) ([]appliedApprovalResult, error)
+	RecoverSession(ctx context.Context, sessionID repl.SessionID, toolCalls toolCallJournal) error
 }
 
 type approvalCallState struct {
@@ -144,7 +147,7 @@ func (s *memoryApprovalStore) PendingApprovals(_ context.Context, sessionID repl
 	return clonePendingApprovals(s.calls[sessionID]), nil
 }
 
-func (s *memoryApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal) ([]appliedApprovalResult, error) {
+func (s *memoryApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) ([]appliedApprovalResult, error) {
 	s.mu.Lock()
 	ordered, err := validateApprovalDecisionsLocked(s.calls[sessionID], decisions)
 	s.mu.Unlock()
@@ -154,21 +157,26 @@ func (s *memoryApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl
 
 	results := make([]appliedApprovalResult, 0, len(ordered))
 	for _, item := range ordered {
-		result, err := applyApprovalDecision(ctx, sessionID, item.call, item.decision, prepared, st, toolCalls)
-		if err != nil {
-			return nil, err
-		}
-		s.mu.Lock()
-		if sessionCalls := s.calls[sessionID]; sessionCalls != nil {
-			delete(sessionCalls, item.call.ToolCallID)
-			if len(sessionCalls) == 0 {
-				delete(s.calls, sessionID)
+		if item.decision.Approved {
+			if err := s.setCallStatus(sessionID, item.call.ToolCallID, approvalCallStatusExecuting); err != nil {
+				return nil, err
 			}
 		}
-		s.mu.Unlock()
+		result, err := applyApprovalDecision(ctx, sessionID, item.call, item.decision, prepared, st, toolCalls, executor)
+		if err != nil {
+			if item.decision.Approved && shouldReturnApprovalToPending(toolCalls, sessionID, item.call.ToolCallID) {
+				_ = s.setCallStatus(sessionID, item.call.ToolCallID, approvalCallStatusPending)
+			}
+			return nil, err
+		}
+		s.deleteCall(sessionID, item.call.ToolCallID)
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+func (s *memoryApprovalStore) RecoverSession(context.Context, repl.SessionID, toolCallJournal) error {
+	return nil
 }
 
 func newSQLiteApprovalStore(db *sql.DB) (approvalStore, error) {
@@ -274,9 +282,10 @@ func (s *sqliteApprovalStore) PendingApprovals(ctx context.Context, sessionID re
 	rows, err := s.db.QueryContext(ctx, `
 SELECT tool_call_id, cell_id, tool_name, params, effect_id, status, error, created_at, updated_at
 FROM approval_tool_calls
-WHERE session = ?
+WHERE session = ? AND status = ?
 ORDER BY created_at ASC, tool_call_id ASC`,
 		string(sessionID),
+		approvalCallStatusPending,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query pending approvals: %w", err)
@@ -315,7 +324,7 @@ ORDER BY created_at ASC, tool_call_id ASC`,
 	return out, nil
 }
 
-func (s *sqliteApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal) ([]appliedApprovalResult, error) {
+func (s *sqliteApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) ([]appliedApprovalResult, error) {
 	ordered, err := s.loadDecisionCalls(ctx, sessionID, decisions)
 	if err != nil {
 		return nil, err
@@ -323,16 +332,69 @@ func (s *sqliteApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl
 
 	results := make([]appliedApprovalResult, 0, len(ordered))
 	for _, item := range ordered {
-		result, err := applyApprovalDecision(ctx, sessionID, item.call, item.decision, prepared, st, toolCalls)
+		if item.decision.Approved {
+			if err := s.setCallStatus(ctx, sessionID, item.call.ToolCallID, approvalCallStatusExecuting); err != nil {
+				return nil, err
+			}
+		}
+		result, err := applyApprovalDecision(ctx, sessionID, item.call, item.decision, prepared, st, toolCalls, executor)
 		if err != nil {
+			if item.decision.Approved && shouldReturnApprovalToPending(toolCalls, sessionID, item.call.ToolCallID) {
+				_ = s.setCallStatus(ctx, sessionID, item.call.ToolCallID, approvalCallStatusPending)
+			}
 			return nil, err
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM approval_tool_calls WHERE tool_call_id = ?`, item.call.ToolCallID); err != nil {
-			return nil, fmt.Errorf("delete approval tool call %q: %w", item.call.ToolCallID, err)
+		if err := s.deleteCall(ctx, sessionID, item.call.ToolCallID); err != nil {
+			return nil, err
 		}
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+func (s *sqliteApprovalStore) RecoverSession(ctx context.Context, sessionID repl.SessionID, toolCalls toolCallJournal) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT tool_call_id
+FROM approval_tool_calls
+WHERE session = ? AND status = ?
+ORDER BY created_at ASC, tool_call_id ASC`,
+		string(sessionID),
+		approvalCallStatusExecuting,
+	)
+	if err != nil {
+		return fmt.Errorf("query executing approval calls: %w", err)
+	}
+	defer rows.Close()
+
+	var toolCallIDs []string
+	for rows.Next() {
+		var toolCallID string
+		if err := rows.Scan(&toolCallID); err != nil {
+			return fmt.Errorf("scan executing approval call: %w", err)
+		}
+		toolCallIDs = append(toolCallIDs, strings.TrimSpace(toolCallID))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate executing approval calls: %w", err)
+	}
+
+	for _, toolCallID := range toolCallIDs {
+		if toolCalls != nil {
+			snapshot, ok, err := toolCalls.Snapshot(sessionID, toolCallID)
+			if err != nil {
+				return err
+			}
+			if ok && !isTerminalToolCallStatus(snapshot.Status) {
+				if err := toolCalls.EnsureUnknown(sessionID, toolCallID); err != nil {
+					return err
+				}
+			}
+		}
+		if err := s.deleteCall(ctx, sessionID, toolCallID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *sqliteApprovalStore) ensureSchema() error {
@@ -383,7 +445,7 @@ func validateApprovalDecisionsLocked(calls map[string]approvalCallState, decisio
 		}
 		seen[decision.ToolCallID] = struct{}{}
 		call, ok := calls[decision.ToolCallID]
-		if !ok {
+		if !ok || call.Status != approvalCallStatusPending {
 			return nil, fmt.Errorf("unknown approval tool call %q", decision.ToolCallID)
 		}
 		out = append(out, decisionWithCall{decision: decision, call: cloneApprovalCallState(call)})
@@ -419,9 +481,10 @@ func (s *sqliteApprovalStore) loadCall(ctx context.Context, sessionID repl.Sessi
 	row := s.db.QueryRowContext(ctx, `
 SELECT tool_call_id, cell_id, effect_id, tool_name, reviewed_tool_key, params, status, error, created_at, updated_at
 FROM approval_tool_calls
-WHERE session = ? AND tool_call_id = ?`,
+WHERE session = ? AND tool_call_id = ? AND status = ?`,
 		string(sessionID),
 		toolCallID,
+		approvalCallStatusPending,
 	)
 
 	var (
@@ -481,6 +544,9 @@ func clonePendingApprovals(calls map[string]approvalCallState) []PendingApproval
 	}
 	states := make([]approvalCallState, 0, len(calls))
 	for _, call := range calls {
+		if call.Status != approvalCallStatusPending {
+			continue
+		}
 		states = append(states, cloneApprovalCallState(call))
 	}
 	sort.Slice(states, func(i, j int) bool {
@@ -527,7 +593,7 @@ func parseApprovalTime(raw string) time.Time {
 	return parsed
 }
 
-func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call approvalCallState, decision ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal) (appliedApprovalResult, error) {
+func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call approvalCallState, decision ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) (appliedApprovalResult, error) {
 	result := appliedApprovalResult{
 		Status: ApprovalAwaitStatusRejected,
 		ToolCall: PendingApproval{
@@ -540,7 +606,13 @@ func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call a
 	}
 
 	if decision.Approved {
-		outcome, err := executeApprovedToolCall(ctx, sessionID, call.CellID, call, prepared, st, toolCalls)
+		if toolCalls == nil {
+			return appliedApprovalResult{}, fmt.Errorf("tool call journal unavailable")
+		}
+		if err := toolCalls.EnsureStarted(sessionID, call.ToolCallID, call.ToolName, call.Params); err != nil {
+			return appliedApprovalResult{}, err
+		}
+		outcome, err := executeApprovedToolCall(ctx, sessionID, call.CellID, call, prepared, st, toolCalls, executor)
 		if err != nil {
 			return appliedApprovalResult{}, err
 		}
@@ -557,13 +629,24 @@ func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call a
 	return result, nil
 }
 
+func shouldReturnApprovalToPending(toolCalls toolCallJournal, sessionID repl.SessionID, toolCallID string) bool {
+	if toolCalls == nil {
+		return true
+	}
+	snapshot, ok, err := toolCalls.Snapshot(sessionID, toolCallID)
+	if err != nil || !ok {
+		return true
+	}
+	return snapshot.Status == toolCallStatusNeedsApproval
+}
+
 type approvalExecutionOutcome struct {
 	EffectID string
 	Status   string
 	Error    string
 }
 
-func executeApprovedToolCall(ctx context.Context, sessionID repl.SessionID, cellID repl.CellID, call approvalCallState, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal) (approvalExecutionOutcome, error) {
+func executeApprovedToolCall(ctx context.Context, sessionID repl.SessionID, cellID repl.CellID, call approvalCallState, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) (approvalExecutionOutcome, error) {
 	if st == nil {
 		return approvalExecutionOutcome{}, fmt.Errorf("approval execution store unavailable")
 	}
@@ -597,7 +680,13 @@ func executeApprovedToolCall(ctx context.Context, sessionID repl.SessionID, cell
 			return approvalExecutionOutcome{}, fmt.Errorf("journal approval effect failure for %q: %w", call.ToolCallID, appendErr)
 		}
 		if toolCalls != nil {
-			if err := toolCalls.EnsureFailed(sessionID, call.ToolCallID, errText); err != nil {
+			var err error
+			if isToolCallContextCancellation(errText) {
+				err = toolCalls.EnsureCancelled(sessionID, call.ToolCallID)
+			} else {
+				err = toolCalls.EnsureFailed(sessionID, call.ToolCallID, errText)
+			}
+			if err != nil {
 				return approvalExecutionOutcome{}, err
 			}
 		}
@@ -618,7 +707,7 @@ func executeApprovedToolCall(ctx context.Context, sessionID repl.SessionID, cell
 	if err != nil {
 		return fail(fmt.Sprintf("tool %s args: %v", call.ToolName, err))
 	}
-	raw, err := invoke.RunContext(ctx, prepared, call.ToolName, args)
+	raw, err := runPreparedTool(ctx, executor, prepared, call.ToolName, args)
 	if err != nil {
 		return fail(err.Error())
 	}
@@ -680,4 +769,64 @@ func approvedToolReviewMismatchMessage(call approvalCallState, tool toolset.Prep
 		label = "tool"
 	}
 	return fmt.Sprintf("approved tool %s no longer matches the reviewed version; resubmit to review the current tool", label)
+}
+
+func (s *memoryApprovalStore) setCallStatus(sessionID repl.SessionID, toolCallID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessionCalls := s.calls[sessionID]
+	call, ok := sessionCalls[toolCallID]
+	if !ok {
+		return fmt.Errorf("unknown approval tool call %q", toolCallID)
+	}
+	call.Status = status
+	call.UpdatedAt = time.Now().UTC()
+	sessionCalls[toolCallID] = call
+	return nil
+}
+
+func (s *memoryApprovalStore) deleteCall(sessionID repl.SessionID, toolCallID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sessionCalls := s.calls[sessionID]; sessionCalls != nil {
+		delete(sessionCalls, toolCallID)
+		if len(sessionCalls) == 0 {
+			delete(s.calls, sessionID)
+		}
+	}
+}
+
+func (s *sqliteApprovalStore) setCallStatus(ctx context.Context, sessionID repl.SessionID, toolCallID, status string) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE approval_tool_calls
+SET status = ?, updated_at = ?
+WHERE session = ? AND tool_call_id = ?`,
+		status,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		string(sessionID),
+		toolCallID,
+	)
+	if err != nil {
+		return fmt.Errorf("update approval tool call %q status: %w", toolCallID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update approval tool call %q status: %w", toolCallID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("unknown approval tool call %q", toolCallID)
+	}
+	return nil
+}
+
+func (s *sqliteApprovalStore) deleteCall(ctx context.Context, sessionID repl.SessionID, toolCallID string) error {
+	if _, err := s.db.ExecContext(ctx, `
+DELETE FROM approval_tool_calls
+WHERE session = ? AND tool_call_id = ?`,
+		string(sessionID),
+		toolCallID,
+	); err != nil {
+		return fmt.Errorf("delete approval tool call %q: %w", toolCallID, err)
+	}
+	return nil
 }

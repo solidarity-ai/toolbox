@@ -1,0 +1,8 @@
+cell (failed to commit)
+==
+failure: eval_and_await_cell_settlement: promise rejected: Error: boom; awaiting cell settlement: promise rejected: Error: boom
+	at __repljs_cell__ (cell.js:3:7(27))
+	at cell.js:6:3(2)
+
+--
+bad [object Object]

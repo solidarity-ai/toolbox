@@ -71,20 +71,28 @@ type outdatedCmd struct {
 }
 
 type replCmd struct {
-	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to load for session instructions."`
-	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
-	File    string `name:"file" short:"f" default:".toolbox-session" type:"path" help:"SQLite session database path."`
+	Toolset   string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to load for session instructions."`
+	Effects   string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
+	TBSession string `name:"tb-session" help:"Existing tb_session to reopen. When omitted, repl creates and locks a fresh session."`
 }
 
 type mcpCmd struct {
-	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to serve."`
-	Effects string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
+	Toolset   string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to serve."`
+	Effects   string `help:"Comma-separated effects to include: readonly,reversible,irreversible."`
+	TBSession string `name:"tb-session" help:"Existing tb_session to lock to. When omitted, codemode mcp runs unlocked and requires tb_session in tool calls."`
 }
 
 type codemodeCmd struct {
-	Repl replCmd `cmd:"" help:"Start a persistent TypeScript REPL backed by SQLite session storage."`
-	MCP  mcpCmd  `cmd:"" name:"mcp" help:"Serve the selected toolset over the codemode MCP stdio surface."`
+	Session codemodeSessionCmd `cmd:"" help:"Create trusted codemode sessions."`
+	Repl    replCmd            `cmd:"" help:"Start a persistent TypeScript REPL backed by tb_session storage."`
+	MCP     mcpCmd             `cmd:"" name:"mcp" help:"Serve the selected toolset over the codemode MCP stdio surface."`
 }
+
+type codemodeSessionCmd struct {
+	New codemodeSessionNewCmd `cmd:"" help:"Create a fresh tb_session."`
+}
+
+type codemodeSessionNewCmd struct{}
 
 type authCmd struct {
 	Args []string `arg:"" optional:"" passthrough:"all" name:"arg" help:"Legacy auth arguments."`
@@ -161,6 +169,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runMCP(parsed.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "codemode repl"):
 		return runRepl(parsed.Codemode.Repl, secretOpts, stdin, stdout, stderr)
+	case strings.HasPrefix(command, "codemode session new"):
+		return runCodemodeSessionNew(stdout)
 	case strings.HasPrefix(command, "codemode mcp"):
 		return runCodemodeMCP(parsed.Codemode.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):

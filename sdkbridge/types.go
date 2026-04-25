@@ -17,7 +17,11 @@ const (
 	ComposeModeCodemode ComposeMode = "codemode"
 )
 
-const CodeModeToolName = "super_tool"
+const (
+	CodeModeToolName               = "super_tool"
+	CodeModeAwaitApprovalsToolName = "await_super_tool_approvals"
+	CodeModeNewSessionToolName     = "new_super_tool_session"
+)
 
 // ToolDescriptor is the host-facing tool shape returned by toolset.compose.
 type ToolDescriptor struct {
@@ -109,6 +113,7 @@ type ToolsetFileWriteParams struct {
 
 type ComposeParams struct {
 	Mode        ComposeMode     `json:"mode"`
+	TBSession   string          `json:"tb_session,omitempty"`
 	ToolsetFile string          `json:"toolset_file,omitempty"`
 	Toolset     json.RawMessage `json:"toolset,omitempty"`
 	Config      *ComposeConfig  `json:"config,omitempty"`
@@ -134,6 +139,10 @@ type BindingDTO struct {
 type ComposeResult struct {
 	ToolsetID string           `json:"toolset_id"`
 	Tools     []ToolDescriptor `json:"tools"`
+}
+
+type CodemodeSessionNewResult struct {
+	TBSession string `json:"tb_session"`
 }
 
 type ToolsetDocument = toolsetfile.ToolsetFile

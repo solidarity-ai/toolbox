@@ -1,0 +1,41 @@
+cell 2
+--
+[
+  {
+    "error": "blocked by policy",
+    "params": {
+      "id": "I-1"
+    },
+    "status": "failed",
+    "toolCallId": "<tool-call-id>",
+    "toolName": "get"
+  },
+  {
+    "error": "blocked by policy",
+    "params": {
+      "id": "I-2"
+    },
+    "status": "failed",
+    "toolCallId": "<tool-call-id>",
+    "toolName": "get"
+  },
+  {
+    "error": "blocked by policy",
+    "params": {
+      "id": "I-3"
+    },
+    "status": "failed",
+    "toolCallId": "<tool-call-id>",
+    "toolName": "get"
+  },
+  {
+    "error": "blocked by policy",
+    "params": {
+      "id": "I-4"
+    },
+    "status": "failed",
+    "toolCallId": "<tool-call-id>",
+    "toolName": "lookup"
+  }
+]
+=> "done"

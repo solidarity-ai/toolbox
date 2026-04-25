@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
@@ -66,6 +67,39 @@ func TestRunCalcAsyncAddStub(t *testing.T) {
 	}
 	if got != "11" {
 		t.Fatalf("expected 11, got %q", got)
+	}
+}
+
+func TestRunContextTimeoutDoesNotPoisonLaterRun(t *testing.T) {
+	slow := tooldef.TSToolDef{
+		Entry: "tools/slow.ts",
+		Files: fstest.MapFS{
+			"tools/slow.ts": &fstest.MapFile{Data: []byte(`
+export default async function tool() {
+  await new Promise(() => {});
+  return "done";
+}
+`)},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	if _, err := quickts.RunContext(ctx, slow, map[string]any{}, nil); err == nil {
+		t.Fatal("expected timed out quickts run to fail")
+	}
+
+	tool := calcTool(t, "calc.add")
+	got, err := quickts.RunContext(context.Background(), *tool.TS, map[string]any{
+		"a": 2,
+		"b": 3,
+	}, tool.Sig)
+	if err != nil {
+		t.Fatalf("expected later quickts run to recover, got %v", err)
+	}
+	if got != "5" {
+		t.Fatalf("expected 5, got %q", got)
 	}
 }
 

@@ -13,7 +13,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2
 	github.com/jinzhu/inflection v1.0.0
 	github.com/klauspost/compress v1.18.5
-	github.com/mackross/repljs v0.0.0-20260413021201-84857fea19b4
+	github.com/mackross/repljs v0.0.0-20260425110339-984d91d94da5
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
 	github.com/vmihailenco/msgpack/v5 v5.4.1
@@ -64,7 +64,5 @@ require (
 )
 
 replace github.com/fastschema/qjs => github.com/mackross/qjs v0.0.7-0.20260409233706-931ab4cd91ce
-
-replace github.com/mackross/repljs => ./third_party/repljs
 
 replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260414161116-99aced908a7c

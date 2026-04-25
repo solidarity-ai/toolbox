@@ -35,6 +35,7 @@ type ApprovalDecision = daemonserver.ApprovalDecision
 
 type SessionDelegate interface {
 	toolsetctl.PreparedToolConsumer
+	SetSessionBinding(boundTBSession string, locked bool)
 	SetPendingApprovals([]PendingApprovalSnapshot)
 	SetApprovalHandler(func(ApprovalDecision))
 	SetSecretEpochHandler(func())
@@ -91,6 +92,20 @@ func (d *sessionDelegate) SetPreparedTools(prepared toolset.PreparedToolset) {
 	}
 }
 
+func (d *sessionDelegate) SetSessionBinding(boundTBSession string, locked bool) {
+	if d == nil || d.reg == nil {
+		return
+	}
+	state := d.reg.currentState()
+	state.Mode = d.mode
+	state.WorkingDir = d.cwd
+	state.Locked = locked
+	state.BoundTBSession = boundTBSession
+	if err := d.reg.Update(state); err != nil && d.stderr != nil {
+		_, _ = fmt.Fprintf(d.stderr, "toolbox daemon sync error: %v\n", err)
+	}
+}
+
 func (d *sessionDelegate) SetPendingApprovals(approvals []PendingApprovalSnapshot) {
 	if d == nil || d.reg == nil {
 		return
@@ -126,6 +141,8 @@ func (d *sessionDelegate) SetApprovalHandler(fn func(ApprovalDecision)) {
 }
 
 func (noopSessionDelegate) SetPreparedTools(toolset.PreparedToolset) {}
+
+func (noopSessionDelegate) SetSessionBinding(string, bool) {}
 
 func (noopSessionDelegate) SetPendingApprovals([]PendingApprovalSnapshot) {}
 

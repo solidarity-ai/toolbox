@@ -2,6 +2,7 @@ package tswasmcli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -24,6 +25,13 @@ type Result struct {
 }
 
 func Run(request Request) (Result, error) {
+	return RunContext(context.Background(), request)
+}
+
+func RunContext(ctx context.Context, request Request) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if request.WasmPath == "" && len(request.WasmBytes) == 0 {
 		return Result{}, fmt.Errorf("missing wasm path or bytes")
 	}
@@ -40,7 +48,7 @@ func Run(request Request) (Result, error) {
 	cmdArgs := []string{"--runtime", request.Runtime, wasmArg}
 	cmdArgs = append(cmdArgs, request.Args...)
 
-	cmd := exec.Command(resolveHostBinaryPath(), cmdArgs...)
+	cmd := exec.CommandContext(ctx, resolveHostBinaryPath(), cmdArgs...)
 
 	if request.VFSSockPath != "" {
 		cmd.Env = append(cmd.Environ(), "TOOLBOX_VFS_SOCK="+request.VFSSockPath)

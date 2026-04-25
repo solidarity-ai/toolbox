@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/solidarity-ai/toolbox/codemodesession"
@@ -24,20 +23,13 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 	}
 	defer sessionDelegate.Close()
 
-	sqlitePath := cmd.File
-	if strings.TrimSpace(sqlitePath) == "" {
-		sqlitePath = ".toolbox-session"
-	}
-	if !filepath.IsAbs(sqlitePath) {
-		sqlitePath = filepath.Join(cwd, sqlitePath)
-	}
-
 	ctx := context.Background()
-	session, err := codemodesession.OpenSQLite(ctx, sqlitePath, cwd, codemodesession.SessionConfig{})
+	session, err := openReplSession(ctx, strings.TrimSpace(cmd.TBSession), cwd)
 	if err != nil {
 		return err
 	}
 	defer session.Close()
+	setSessionBinding(sessionDelegate, session.TBSession(), true)
 	bindApprovalExecution(sessionDelegate, stderr, session, func() error {
 		return syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 	})
@@ -53,7 +45,7 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 	})
 
 	fmt.Fprintln(stdout, "toolbox repl started")
-	fmt.Fprintf(stdout, "session=%s sqlite=%s resumed=%t language=ts\n", session.ID(), sqlitePath, session.Resumed())
+	fmt.Fprintf(stdout, "tb_session=%s repl_session=%s resumed=%t language=ts\n", session.TBSession(), session.ID(), session.Resumed())
 	fmt.Fprintln(stdout, session.Instructions())
 
 	scanner := bufio.NewScanner(stdin)
@@ -101,6 +93,27 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 			_ = syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 		}
 	}
+}
+
+func runCodemodeSessionNew(stdout io.Writer) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	session, err := codemodesession.CreateFresh(context.Background(), cwd, codemodesession.SessionConfig{})
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	_, err = fmt.Fprintln(stdout, session.TBSession())
+	return err
+}
+
+func openReplSession(ctx context.Context, tbSession, cwd string) (*codemodesession.Session, error) {
+	if strings.TrimSpace(tbSession) == "" {
+		return codemodesession.CreateFresh(ctx, cwd, codemodesession.SessionConfig{})
+	}
+	return codemodesession.OpenExisting(ctx, tbSession, cwd, codemodesession.SessionConfig{})
 }
 
 func readReplMultiline(scanner *bufio.Scanner, out io.Writer) (string, bool) {

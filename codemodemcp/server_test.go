@@ -46,11 +46,53 @@ func TestMCPServerListsAwaitSuperToolApprovalsOnlyWhenApprovalsArePossible(t *te
 	assertSliceContains(t, withApprovals.ToolNames(), codemodemcp.ToolAwaitSuperToolApprovals)
 }
 
+func TestUnlockedMCPToolSchemasRequireTBSession(t *testing.T) {
+	dir := writeApprovalPackage(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+
+	h := mcptest.NewHarness(t, codemodemcp.New(codemodesession.SessionConfig{PreparedTools: prepared}))
+	tools := h.ListTools()
+
+	assertToolPropertyPresent(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TBSessionParam)
+	assertToolPropertyPresent(t, tools.Tools, codemodemcp.ToolAwaitSuperToolApprovals, codemodesession.TBSessionParam)
+	assertToolPropertyRequired(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TBSessionParam)
+	assertToolPropertyRequired(t, tools.Tools, codemodemcp.ToolAwaitSuperToolApprovals, codemodesession.TBSessionParam)
+}
+
+func TestLockedMCPToolSchemasHideTBSession(t *testing.T) {
+	tempDir := t.TempDir()
+	dir := writeApprovalPackage(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir), codemodesession.SessionConfig{PreparedTools: prepared})
+	if err != nil {
+		t.Fatalf("OpenManagedBoundNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	h := mcptest.NewHarness(t, managed.Server())
+	tools := h.ListTools()
+
+	assertToolPropertyAbsent(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TBSessionParam)
+	assertToolPropertyAbsent(t, tools.Tools, codemodemcp.ToolAwaitSuperToolApprovals, codemodesession.TBSessionParam)
+	assertSliceNotContains(t, h.ToolNames(), codemodemcp.ToolNewSession)
+}
+
 func TestMCPServerCallsSuperTool(t *testing.T) {
 	h := mcptest.NewHarness(t, codemodemcp.New())
+	tbSession := mustNewTBSession(t, h)
 
 	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
-		"typescript_cell_source": "const value: number = 1\nvalue + 1",
+		codemodesession.TBSessionParam: tbSession,
+		"typescript_cell_source":       "const value: number = 1\nvalue + 1",
 	})
 	if result.IsError {
 		t.Fatalf("expected non-error result")
@@ -60,14 +102,16 @@ func TestMCPServerCallsSuperTool(t *testing.T) {
 	assertTextContains(t, text, "cell 1")
 	assertTextContains(t, text, "=> 2")
 	next := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
-		"typescript_cell_source": "const value: number = 1",
+		codemodesession.TBSessionParam: tbSession,
+		"typescript_cell_source":       "const value: number = 1",
 	})
 	if next.IsError {
 		t.Fatalf("expected non-error result")
 	}
 
 	action := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
-		"typescript_cell_source": "value + 2",
+		codemodesession.TBSessionParam: tbSession,
+		"typescript_cell_source":       "value + 2",
 	})
 	if action.IsError {
 		t.Fatalf("expected non-error result")
@@ -86,8 +130,10 @@ func TestMCPServerSuperToolUsesDefaultTimeout(t *testing.T) {
 	})
 
 	h := mcptest.NewHarness(t, codemodemcp.New())
+	tbSession := mustNewTBSession(t, h)
 
 	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TBSessionParam:            tbSession,
 		codemodesession.TypeScriptCellSourceParam: `await new Promise(() => {})`,
 	})
 	if result.IsError {
@@ -114,7 +160,8 @@ func TestMCPServerCustomName(t *testing.T) {
 }
 
 func TestManagedMCPServerUpdatesSuperToolAtRuntime(t *testing.T) {
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	tempDir := t.TempDir()
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir))
 	if err != nil {
 		t.Fatalf("OpenManagedNamed(): %v", err)
 	}
@@ -137,7 +184,8 @@ func TestManagedMCPServerUpdatesSuperToolAtRuntime(t *testing.T) {
 }
 
 func TestManagedMCPServerUpdatesAwaitToolAtRuntime(t *testing.T) {
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	tempDir := t.TempDir()
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir))
 	if err != nil {
 		t.Fatalf("OpenManagedNamed(): %v", err)
 	}
@@ -159,7 +207,8 @@ func TestManagedMCPServerUpdatesAwaitToolAtRuntime(t *testing.T) {
 }
 
 func TestManagedMCPServerAwaitSuperToolApprovalsReturnsNoOutstandingWhenIdle(t *testing.T) {
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	tempDir := t.TempDir()
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir))
 	if err != nil {
 		t.Fatalf("OpenManagedNamed(): %v", err)
 	}
@@ -181,7 +230,8 @@ func TestManagedMCPServerAwaitSuperToolApprovalsReturnsNoOutstandingWhenIdle(t *
 }
 
 func TestManagedMCPServerAwaitSuperToolApprovalsReturnsResolutionAndRemaining(t *testing.T) {
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	tempDir := t.TempDir()
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir))
 	if err != nil {
 		t.Fatalf("OpenManagedNamed(): %v", err)
 	}
@@ -250,8 +300,38 @@ tasks.map((task) => $tool_call(task).status)`,
 	}
 }
 
+func TestUnlockedMCPAwaitSuperToolApprovalsOnlyObservesRequestedSession(t *testing.T) {
+	dir := writeApprovalPackage(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+
+	h := mcptest.NewHarness(t, codemodemcp.New(codemodesession.SessionConfig{PreparedTools: prepared}))
+	tbSessionA := mustNewTBSession(t, h)
+	tbSessionB := mustNewTBSession(t, h)
+
+	result := h.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TBSessionParam:            tbSessionB,
+		codemodesession.TypeScriptCellSourceParam: `issues.get("I-2")`,
+	})
+	if result.IsError {
+		t.Fatalf("super_tool expected non-error result")
+	}
+
+	await := h.CallTool(codemodemcp.ToolAwaitSuperToolApprovals, map[string]any{
+		codemodesession.TBSessionParam: tbSessionA,
+	})
+	if await.IsError {
+		t.Fatalf("await_super_tool_approvals expected non-error result")
+	}
+	assertTextContains(t, resultText(t, await), "(no outstanding approvals).")
+}
+
 func TestManagedMCPServerAwaitSuperToolApprovalsCancelledByLaterSuperTool(t *testing.T) {
-	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", t.TempDir())
+	tempDir := t.TempDir()
+	managed, err := codemodemcp.OpenManagedBoundNamed(context.Background(), "example", tempDir, mustCreateTBSession(t, tempDir))
 	if err != nil {
 		t.Fatalf("OpenManagedNamed(): %v", err)
 	}
@@ -328,6 +408,25 @@ func resultText(t testing.TB, result *mcp.CallToolResult) string {
 		t.Fatalf("expected text content, got %#v", result.Content[0])
 	}
 	return text.Text
+}
+
+func mustNewTBSession(t testing.TB, h *mcptest.Harness) string {
+	t.Helper()
+	result := h.CallTool(codemodemcp.ToolNewSession, nil)
+	if result.IsError {
+		t.Fatalf("new_super_tool_session expected non-error result")
+	}
+	return strings.TrimSpace(resultText(t, result))
+}
+
+func mustCreateTBSession(t testing.TB, currentDir string) string {
+	t.Helper()
+	session, err := codemodesession.CreateFresh(context.Background(), currentDir)
+	if err != nil {
+		t.Fatalf("CreateFresh(): %v", err)
+	}
+	defer session.Close()
+	return session.TBSession()
 }
 
 func assertSliceContains(t testing.TB, values []string, want string) {
@@ -415,6 +514,50 @@ func assertToolPropertyDescriptionContains(t testing.TB, tools []mcp.Tool, toolN
 			t.Fatalf("expected %q in description for %s.%s, got %q", want, toolName, propertyName, desc)
 		}
 		return
+	}
+	t.Fatalf("tool %q not found", toolName)
+}
+
+func assertToolPropertyPresent(t testing.TB, tools []mcp.Tool, toolName, propertyName string) {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name != toolName {
+			continue
+		}
+		if _, ok := tool.InputSchema.Properties[propertyName]; !ok {
+			t.Fatalf("property %q missing from %s schema: %#v", propertyName, toolName, tool.InputSchema.Properties)
+		}
+		return
+	}
+	t.Fatalf("tool %q not found", toolName)
+}
+
+func assertToolPropertyAbsent(t testing.TB, tools []mcp.Tool, toolName, propertyName string) {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name != toolName {
+			continue
+		}
+		if _, ok := tool.InputSchema.Properties[propertyName]; ok {
+			t.Fatalf("property %q unexpectedly present in %s schema: %#v", propertyName, toolName, tool.InputSchema.Properties)
+		}
+		return
+	}
+	t.Fatalf("tool %q not found", toolName)
+}
+
+func assertToolPropertyRequired(t testing.TB, tools []mcp.Tool, toolName, propertyName string) {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name != toolName {
+			continue
+		}
+		for _, required := range tool.InputSchema.Required {
+			if required == propertyName {
+				return
+			}
+		}
+		t.Fatalf("property %q not required in %s schema: %#v", propertyName, toolName, tool.InputSchema.Required)
 	}
 	t.Fatalf("tool %q not found", toolName)
 }

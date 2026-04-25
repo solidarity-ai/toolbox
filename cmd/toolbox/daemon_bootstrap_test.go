@@ -29,6 +29,8 @@ type fakeSessionDaemon struct{}
 
 func (fakeSessionDaemon) SetPreparedTools(toolset.PreparedToolset) {}
 
+func (fakeSessionDaemon) SetSessionBinding(string, bool) {}
+
 func (fakeSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
 
 func (fakeSessionDaemon) SetSecretEpochHandler(func()) {}
@@ -65,10 +67,17 @@ func TestBindSecretEpochReloadLogsFailures(t *testing.T) {
 }
 
 type recordingSessionDaemon struct {
-	handler atomic.Value
+	handler        atomic.Value
+	boundTBSession string
+	locked         bool
 }
 
 func (d *recordingSessionDaemon) SetPreparedTools(toolset.PreparedToolset) {}
+
+func (d *recordingSessionDaemon) SetSessionBinding(boundTBSession string, locked bool) {
+	d.boundTBSession = boundTBSession
+	d.locked = locked
+}
 
 func (d *recordingSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
 
@@ -99,4 +108,32 @@ func waitForAtomic(t *testing.T, value *atomic.Int32, want int32) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("atomic value = %d, want %d", value.Load(), want)
+}
+
+type staticSessionBinding struct {
+	boundTBSession string
+	locked         bool
+}
+
+func (s staticSessionBinding) BoundTBSession() string { return s.boundTBSession }
+
+func (s staticSessionBinding) Locked() bool { return s.locked }
+
+func TestSyncSessionBindingCopiesManagedState(t *testing.T) {
+	delegate := &recordingSessionDaemon{}
+
+	syncSessionBinding(delegate, staticSessionBinding{boundTBSession: "abc123", locked: true})
+	if delegate.boundTBSession != "abc123" || !delegate.locked {
+		t.Fatalf("delegate binding = (%q, %t), want (%q, %t)", delegate.boundTBSession, delegate.locked, "abc123", true)
+	}
+
+	syncSessionBinding(delegate, staticSessionBinding{boundTBSession: "def456", locked: true})
+	if delegate.boundTBSession != "def456" || !delegate.locked {
+		t.Fatalf("delegate binding after refresh = (%q, %t), want (%q, %t)", delegate.boundTBSession, delegate.locked, "def456", true)
+	}
+
+	syncSessionBinding(delegate, staticSessionBinding{})
+	if delegate.boundTBSession != "" || delegate.locked {
+		t.Fatalf("delegate unlocked binding = (%q, %t), want (%q, %t)", delegate.boundTBSession, delegate.locked, "", false)
+	}
 }

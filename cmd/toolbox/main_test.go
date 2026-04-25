@@ -1113,16 +1113,34 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools(): %v", err)
 	}
-	if len(tools.Tools) != 1 {
-		t.Fatalf("len(tools) = %d, want 1", len(tools.Tools))
+	if len(tools.Tools) != 2 {
+		t.Fatalf("len(tools) = %d, want 2", len(tools.Tools))
 	}
 	if !hasToolNamed(tools.Tools, "super_tool") {
 		t.Fatalf("tools = %#v, want super_tool", tools.Tools)
 	}
+	if !hasToolNamed(tools.Tools, "new_super_tool_session") {
+		t.Fatalf("tools = %#v, want new_super_tool_session", tools.Tools)
+	}
+
+	newReq := mcp.CallToolRequest{}
+	newReq.Params.Name = "new_super_tool_session"
+	newSessionResult, err := c.CallTool(ctx, newReq)
+	if err != nil {
+		t.Fatalf("CallTool(new_super_tool_session): %v", err)
+	}
+	newSessionText, ok := mcp.AsTextContent(newSessionResult.Content[0])
+	if !ok {
+		t.Fatalf("new_super_tool_session first content item = %#v, want text content", newSessionResult.Content[0])
+	}
+	tbSession := strings.TrimSpace(newSessionText.Text)
 
 	callReq := mcp.CallToolRequest{}
 	callReq.Params.Name = "super_tool"
-	callReq.Params.Arguments = map[string]any{"typescript_cell_source": "Object.keys($pkgMetadata).sort().join(',')"}
+	callReq.Params.Arguments = map[string]any{
+		"tb_session":             tbSession,
+		"typescript_cell_source": "Object.keys($pkgMetadata).sort().join(',')",
+	}
 	result, err := c.CallTool(ctx, callReq)
 	if err != nil {
 		t.Fatalf("CallTool(): %v", err)

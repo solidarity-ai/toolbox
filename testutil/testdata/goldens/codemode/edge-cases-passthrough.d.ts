@@ -3,7 +3,7 @@ type ToolCallTask<T = unknown> = {
 };
 
 type ToolCallPromise<T> = Promise<T> & {
-  task: ToolCallTask<T>;
+  toolCallTask: ToolCallTask<T>;
 };
 
 type ToolCallView<T = unknown> =
@@ -18,6 +18,7 @@ type ToolCallView<T = unknown> =
       toolName: string;
       status: "needsApproval";
       params?: unknown;
+      approval: { approvalId?: string };
     }
   | {
       toolCallId: string;
@@ -32,9 +33,22 @@ type ToolCallView<T = unknown> =
       status: "failed";
       params?: unknown;
       error: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "cancelled";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "unknown";
+      params?: unknown;
     };
 
-declare function $tool_call<T>(ref: ToolCallPromise<T> | ToolCallTask<T>): ToolCallView<T>;
+declare function $tool_call<T>(refOrId: ToolCallTask<T> | string): ToolCallView<T>;
+declare function $tool_call<T>(ref: ToolCallPromise<T>): ToolCallView<T>;
 
 declare namespace edgeCases {
   namespace edgeCases {

@@ -20,6 +20,8 @@ const (
 	factTypeToolCallNeedsApproval = "ToolCallNeedsApproval"
 	factTypeToolCallCompleted     = "ToolCallCompleted"
 	factTypeToolCallFailed        = "ToolCallFailed"
+	factTypeToolCallCancelled     = "ToolCallCancelled"
+	factTypeToolCallUnknown       = "ToolCallUnknown"
 )
 
 type toolCallStatus string
@@ -29,12 +31,15 @@ const (
 	toolCallStatusNeedsApproval toolCallStatus = "needsApproval"
 	toolCallStatusSuccess       toolCallStatus = "success"
 	toolCallStatusFailed        toolCallStatus = "failed"
+	toolCallStatusCancelled     toolCallStatus = "cancelled"
+	toolCallStatusUnknown       toolCallStatus = "unknown"
 )
 
 type toolCallSnapshot struct {
 	ToolCallID string
 	ToolName   string
 	Status     toolCallStatus
+	ApprovalID string
 	Params     []byte
 	Result     []byte
 	Error      string
@@ -53,6 +58,7 @@ func (toolCallStartedFact) FactType() string { return factTypeToolCallStarted }
 type toolCallNeedsApprovalFact struct {
 	Session    repl.SessionID `json:"session"`
 	ToolCallID string         `json:"tool_call_id"`
+	ApprovalID string         `json:"approval_id,omitempty"`
 	ToolName   string         `json:"tool_name"`
 	Params     []byte         `json:"params,omitempty"`
 	At         time.Time      `json:"at"`
@@ -78,12 +84,31 @@ type toolCallFailedFact struct {
 
 func (toolCallFailedFact) FactType() string { return factTypeToolCallFailed }
 
+type toolCallCancelledFact struct {
+	Session    repl.SessionID `json:"session"`
+	ToolCallID string         `json:"tool_call_id"`
+	At         time.Time      `json:"at"`
+}
+
+func (toolCallCancelledFact) FactType() string { return factTypeToolCallCancelled }
+
+type toolCallUnknownFact struct {
+	Session    repl.SessionID `json:"session"`
+	ToolCallID string         `json:"tool_call_id"`
+	At         time.Time      `json:"at"`
+}
+
+func (toolCallUnknownFact) FactType() string { return factTypeToolCallUnknown }
+
 type toolCallJournal interface {
 	EnsureStarted(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error
-	EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error
+	EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, approvalID, toolName string, params []byte) error
 	EnsureCompleted(sessionID repl.SessionID, toolCallID string, result []byte) error
 	EnsureFailed(sessionID repl.SessionID, toolCallID, errText string) error
+	EnsureCancelled(sessionID repl.SessionID, toolCallID string) error
+	EnsureUnknown(sessionID repl.SessionID, toolCallID string) error
 	Snapshot(sessionID repl.SessionID, toolCallID string) (toolCallSnapshot, bool, error)
+	Recover(ctx context.Context, sessionID repl.SessionID) error
 }
 
 func newMemoryToolCallJournal(st repl.Store) toolCallJournal {
@@ -110,7 +135,20 @@ type memoryToolCallJournal struct {
 }
 
 func (j *memoryToolCallJournal) EnsureStarted(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error {
-	return j.ensureInitialFact(sessionID, toolCallID, toolCallStartedFact{
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		switch current.Status {
+		case toolCallStatusStarted:
+			return nil
+		case toolCallStatusNeedsApproval:
+		default:
+			return nil
+		}
+	}
+	return j.appendFact(toolCallStartedFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
@@ -119,10 +157,11 @@ func (j *memoryToolCallJournal) EnsureStarted(sessionID repl.SessionID, toolCall
 	})
 }
 
-func (j *memoryToolCallJournal) EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error {
+func (j *memoryToolCallJournal) EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, approvalID, toolName string, params []byte) error {
 	return j.ensureInitialFact(sessionID, toolCallID, toolCallNeedsApprovalFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
+		ApprovalID: approvalID,
 		ToolName:   toolName,
 		Params:     cloneToolCallBytes(params),
 		At:         time.Now().UTC(),
@@ -134,7 +173,10 @@ func (j *memoryToolCallJournal) EnsureCompleted(sessionID repl.SessionID, toolCa
 	if err != nil {
 		return err
 	}
-	if ok && current.Status == toolCallStatusSuccess {
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusSuccess || isTerminalToolCallStatus(current.Status) {
 		return nil
 	}
 	return j.appendFact(toolCallCompletedFact{
@@ -150,13 +192,52 @@ func (j *memoryToolCallJournal) EnsureFailed(sessionID repl.SessionID, toolCallI
 	if err != nil {
 		return err
 	}
-	if ok && current.Status == toolCallStatusFailed {
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusFailed || isTerminalToolCallStatus(current.Status) {
 		return nil
 	}
 	return j.appendFact(toolCallFailedFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
 		Error:      errText,
+		At:         time.Now().UTC(),
+	})
+}
+
+func (j *memoryToolCallJournal) EnsureCancelled(sessionID repl.SessionID, toolCallID string) error {
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusCancelled || isTerminalToolCallStatus(current.Status) {
+		return nil
+	}
+	return j.appendFact(toolCallCancelledFact{
+		Session:    sessionID,
+		ToolCallID: toolCallID,
+		At:         time.Now().UTC(),
+	})
+}
+
+func (j *memoryToolCallJournal) EnsureUnknown(sessionID repl.SessionID, toolCallID string) error {
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusUnknown || isTerminalToolCallStatus(current.Status) {
+		return nil
+	}
+	return j.appendFact(toolCallUnknownFact{
+		Session:    sessionID,
+		ToolCallID: toolCallID,
 		At:         time.Now().UTC(),
 	})
 }
@@ -173,6 +254,10 @@ func (j *memoryToolCallJournal) Snapshot(sessionID repl.SessionID, toolCallID st
 		return toolCallSnapshot{}, false, nil
 	}
 	return cloneToolCallSnapshot(snapshot), true, nil
+}
+
+func (j *memoryToolCallJournal) Recover(context.Context, repl.SessionID) error {
+	return nil
 }
 
 func (j *memoryToolCallJournal) ensureInitialFact(sessionID repl.SessionID, toolCallID string, fact model.Fact) error {
@@ -207,7 +292,20 @@ type sqliteToolCallJournal struct {
 }
 
 func (j *sqliteToolCallJournal) EnsureStarted(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error {
-	return j.ensureInitialFact(sessionID, toolCallID, toolCallStartedFact{
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		switch current.Status {
+		case toolCallStatusStarted:
+			return nil
+		case toolCallStatusNeedsApproval:
+		default:
+			return nil
+		}
+	}
+	return j.appendFact(toolCallStartedFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
@@ -216,10 +314,11 @@ func (j *sqliteToolCallJournal) EnsureStarted(sessionID repl.SessionID, toolCall
 	})
 }
 
-func (j *sqliteToolCallJournal) EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, toolName string, params []byte) error {
+func (j *sqliteToolCallJournal) EnsureNeedsApproval(sessionID repl.SessionID, toolCallID, approvalID, toolName string, params []byte) error {
 	return j.ensureInitialFact(sessionID, toolCallID, toolCallNeedsApprovalFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
+		ApprovalID: approvalID,
 		ToolName:   toolName,
 		Params:     cloneToolCallBytes(params),
 		At:         time.Now().UTC(),
@@ -231,7 +330,10 @@ func (j *sqliteToolCallJournal) EnsureCompleted(sessionID repl.SessionID, toolCa
 	if err != nil {
 		return err
 	}
-	if ok && current.Status == toolCallStatusSuccess {
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusSuccess || isTerminalToolCallStatus(current.Status) {
 		return nil
 	}
 	return j.appendFact(toolCallCompletedFact{
@@ -247,13 +349,52 @@ func (j *sqliteToolCallJournal) EnsureFailed(sessionID repl.SessionID, toolCallI
 	if err != nil {
 		return err
 	}
-	if ok && current.Status == toolCallStatusFailed {
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusFailed || isTerminalToolCallStatus(current.Status) {
 		return nil
 	}
 	return j.appendFact(toolCallFailedFact{
 		Session:    sessionID,
 		ToolCallID: toolCallID,
 		Error:      errText,
+		At:         time.Now().UTC(),
+	})
+}
+
+func (j *sqliteToolCallJournal) EnsureCancelled(sessionID repl.SessionID, toolCallID string) error {
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusCancelled || isTerminalToolCallStatus(current.Status) {
+		return nil
+	}
+	return j.appendFact(toolCallCancelledFact{
+		Session:    sessionID,
+		ToolCallID: toolCallID,
+		At:         time.Now().UTC(),
+	})
+}
+
+func (j *sqliteToolCallJournal) EnsureUnknown(sessionID repl.SessionID, toolCallID string) error {
+	current, ok, err := j.Snapshot(sessionID, toolCallID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("unknown tool call %q", toolCallID)
+	}
+	if current.Status == toolCallStatusUnknown || isTerminalToolCallStatus(current.Status) {
+		return nil
+	}
+	return j.appendFact(toolCallUnknownFact{
+		Session:    sessionID,
+		ToolCallID: toolCallID,
 		At:         time.Now().UTC(),
 	})
 }
@@ -274,6 +415,29 @@ func (j *sqliteToolCallJournal) Snapshot(sessionID repl.SessionID, toolCallID st
 		return toolCallSnapshot{}, false, nil
 	}
 	return cloneToolCallSnapshot(snapshot), true, nil
+}
+
+func (j *sqliteToolCallJournal) Recover(_ context.Context, sessionID repl.SessionID) error {
+	if err := j.loadSession(sessionID); err != nil {
+		return err
+	}
+
+	j.mu.RLock()
+	sessionCalls := j.snapshots[sessionID]
+	toolCallIDs := make([]string, 0, len(sessionCalls))
+	for toolCallID, snapshot := range sessionCalls {
+		if snapshot.Status == toolCallStatusStarted {
+			toolCallIDs = append(toolCallIDs, toolCallID)
+		}
+	}
+	j.mu.RUnlock()
+
+	for _, toolCallID := range toolCallIDs {
+		if err := j.EnsureUnknown(sessionID, toolCallID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (j *sqliteToolCallJournal) ensureInitialFact(sessionID repl.SessionID, toolCallID string, fact model.Fact) error {
@@ -315,7 +479,7 @@ func (j *sqliteToolCallJournal) loadSession(sessionID repl.SessionID) error {
 	const q = `
 SELECT fact_type, payload
 FROM facts
-WHERE fact_type IN (?, ?, ?, ?)
+WHERE fact_type IN (?, ?, ?, ?, ?, ?)
 ORDER BY id ASC`
 
 	rows, err := db.QueryContext(context.Background(), q,
@@ -323,6 +487,8 @@ ORDER BY id ASC`
 		factTypeToolCallNeedsApproval,
 		factTypeToolCallCompleted,
 		factTypeToolCallFailed,
+		factTypeToolCallCancelled,
+		factTypeToolCallUnknown,
 	)
 	if err != nil {
 		return fmt.Errorf("load tool calls for session %q: %w", sessionID, err)
@@ -363,19 +529,26 @@ func applyToolCallFact(dst map[repl.SessionID]map[string]toolCallSnapshot, fact 
 		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
 			snapshot.ToolCallID = f.ToolCallID
 			snapshot.ToolName = f.ToolName
+			snapshot.ApprovalID = ""
 			snapshot.Params = cloneToolCallBytes(f.Params)
+			snapshot.Result = nil
+			snapshot.Error = ""
 			snapshot.Status = toolCallStatusStarted
 		})
 	case toolCallNeedsApprovalFact:
 		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
 			snapshot.ToolCallID = f.ToolCallID
 			snapshot.ToolName = f.ToolName
+			snapshot.ApprovalID = f.ApprovalID
 			snapshot.Params = cloneToolCallBytes(f.Params)
+			snapshot.Result = nil
+			snapshot.Error = ""
 			snapshot.Status = toolCallStatusNeedsApproval
 		})
 	case toolCallCompletedFact:
 		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
 			snapshot.ToolCallID = f.ToolCallID
+			snapshot.ApprovalID = ""
 			snapshot.Result = cloneToolCallBytes(f.Result)
 			snapshot.Error = ""
 			snapshot.Status = toolCallStatusSuccess
@@ -383,9 +556,26 @@ func applyToolCallFact(dst map[repl.SessionID]map[string]toolCallSnapshot, fact 
 	case toolCallFailedFact:
 		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
 			snapshot.ToolCallID = f.ToolCallID
+			snapshot.ApprovalID = ""
 			snapshot.Result = nil
 			snapshot.Error = f.Error
 			snapshot.Status = toolCallStatusFailed
+		})
+	case toolCallCancelledFact:
+		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
+			snapshot.ToolCallID = f.ToolCallID
+			snapshot.ApprovalID = ""
+			snapshot.Result = nil
+			snapshot.Error = ""
+			snapshot.Status = toolCallStatusCancelled
+		})
+	case toolCallUnknownFact:
+		setToolCallSnapshot(dst, f.Session, f.ToolCallID, func(snapshot *toolCallSnapshot) {
+			snapshot.ToolCallID = f.ToolCallID
+			snapshot.ApprovalID = ""
+			snapshot.Result = nil
+			snapshot.Error = ""
+			snapshot.Status = toolCallStatusUnknown
 		})
 	}
 }
@@ -414,6 +604,18 @@ func applyToolCallJSONPayload(dst map[repl.SessionID]map[string]toolCallSnapshot
 		var fact toolCallFailedFact
 		if err := json.Unmarshal(payload, &fact); err != nil {
 			return fmt.Errorf("decode %s: %w", factTypeToolCallFailed, err)
+		}
+		applyToolCallFact(dst, fact)
+	case factTypeToolCallCancelled:
+		var fact toolCallCancelledFact
+		if err := json.Unmarshal(payload, &fact); err != nil {
+			return fmt.Errorf("decode %s: %w", factTypeToolCallCancelled, err)
+		}
+		applyToolCallFact(dst, fact)
+	case factTypeToolCallUnknown:
+		var fact toolCallUnknownFact
+		if err := json.Unmarshal(payload, &fact); err != nil {
+			return fmt.Errorf("decode %s: %w", factTypeToolCallUnknown, err)
 		}
 		applyToolCallFact(dst, fact)
 	}
@@ -457,6 +659,12 @@ func toolCallSnapshotValue(snapshot toolCallSnapshot) (any, error) {
 		view["params"] = params
 	}
 	switch snapshot.Status {
+	case toolCallStatusNeedsApproval:
+		approval := map[string]any{}
+		if snapshot.ApprovalID != "" {
+			approval["approvalId"] = snapshot.ApprovalID
+		}
+		view["approval"] = approval
 	case toolCallStatusSuccess:
 		result, err := decodeStoredJSWireValue(snapshot.Result)
 		if err != nil {
@@ -467,6 +675,15 @@ func toolCallSnapshotValue(snapshot toolCallSnapshot) (any, error) {
 		view["error"] = snapshot.Error
 	}
 	return view, nil
+}
+
+func isTerminalToolCallStatus(status toolCallStatus) bool {
+	switch status {
+	case toolCallStatusSuccess, toolCallStatusFailed, toolCallStatusCancelled, toolCallStatusUnknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeStoredJSWireValue(raw []byte) (any, error) {

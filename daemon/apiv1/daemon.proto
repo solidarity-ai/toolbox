@@ -19,6 +19,8 @@ message SessionState {
   string working_dir = 3;
   repeated string prepared_tools = 4;
   repeated PendingApprovalSnapshot pending_approvals = 5;
+  bool locked = 6;
+  string bound_tb_session = 7;
 }
 
 message PendingApprovalSnapshot {
@@ -28,6 +30,7 @@ message PendingApprovalSnapshot {
   string effect_id = 4;
   string status = 5;
   string error = 6;
+  string tb_session = 7;
 }
 
 message ApprovalDecision {
@@ -44,6 +47,8 @@ message ClientSnapshot {
   google.protobuf.Timestamp connected_at = 5;
   google.protobuf.Timestamp last_sync_at = 6;
   repeated PendingApprovalSnapshot pending_approvals = 7;
+  bool locked = 8;
+  string bound_tb_session = 9;
 }
 
 message StateUpdate {

@@ -38,23 +38,58 @@ const (
 	errCodeInternal     = -32603
 )
 
-func codeModeParamsSchema() map[string]any {
+func codeModeParamsSchema(locked bool) map[string]any {
+	properties := map[string]any{
+		codemodesession.TypeScriptCellSourceParam: map[string]any{
+			"type":        "string",
+			"description": "TypeScript code (can be multiline) for next cell.",
+		},
+		codemodesession.TimeoutSecsParam: map[string]any{
+			"type":        "number",
+			"description": fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds()),
+			"default":     codemodesession.DefaultSubmitTimeout.Seconds(),
+			"minimum":     0.001,
+		},
+	}
+	required := []any{codemodesession.TypeScriptCellSourceParam}
+	if !locked {
+		properties[codemodesession.TBSessionParam] = map[string]any{
+			"type":        "string",
+			"description": "Notebook identity. Reuse the same tb_session to continue the same notebook.",
+		}
+		required = append(required, codemodesession.TBSessionParam)
+	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"properties": map[string]any{
-			codemodesession.TypeScriptCellSourceParam: map[string]any{
-				"type":        "string",
-				"description": "TypeScript code (can be multiline) for next cell.",
-			},
-			codemodesession.TimeoutSecsParam: map[string]any{
-				"type":        "number",
-				"description": fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds()),
-				"default":     codemodesession.DefaultSubmitTimeout.Seconds(),
-				"minimum":     0.001,
-			},
-		},
-		"required": []any{codemodesession.TypeScriptCellSourceParam},
+		"properties":           properties,
+		"required":             required,
+	}
+}
+
+func codeModeAwaitParamsSchema(locked bool) map[string]any {
+	properties := map[string]any{}
+	var required []any
+	if !locked {
+		properties[codemodesession.TBSessionParam] = map[string]any{
+			"type":        "string",
+			"description": "Notebook identity. Reuse the same tb_session to continue the same notebook.",
+		}
+		required = []any{codemodesession.TBSessionParam}
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           properties,
+		"required":             required,
+	}
+}
+
+func emptyObjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           map[string]any{},
 	}
 }
 
@@ -91,7 +126,7 @@ type composedToolset struct {
 	mode     ComposeMode
 	prepared toolset.PreparedToolset
 	tools    []ToolDescriptor
-	session  *codemodesession.Session
+	manager  *codemodesession.Manager
 	backend  toolsetctl.ToolsetBackend
 }
 
@@ -234,6 +269,8 @@ func (b *Bridge) handleMethod(ctx context.Context, method string, raw json.RawMe
 			return nil, err
 		}
 		return b.compose(ctx, params)
+	case "codemode.session.new":
+		return b.newCodemodeSession(ctx)
 	case "toolset.search":
 		var params ToolsetSearchParams
 		if err := decodeParams(raw, &params); err != nil {
@@ -319,18 +356,23 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 		cfg = params.Config.toToolsetConfig(b.credentialPolicySource)
 	}
 
-	var session *codemodesession.Session
+	var manager *codemodesession.Manager
 	if params.Mode == ComposeModeCodemode {
-		session, err = codemodesession.OpenMemory(ctx, composeCurrentDir(params.ToolsetFile), codemodesession.SessionConfig{})
-		if err != nil {
-			return ComposeResult{}, err
+		currentDir := composeCurrentDir(params.ToolsetFile)
+		if strings.TrimSpace(params.TBSession) != "" {
+			manager, err = codemodesession.OpenLockedManager(ctx, params.TBSession, currentDir, codemodesession.SessionConfig{})
+			if err != nil {
+				return ComposeResult{}, err
+			}
+		} else {
+			manager = codemodesession.NewUnlockedManager(currentDir, codemodesession.SessionConfig{})
 		}
 	}
 
 	handle := &composedToolset{
 		owner:   b,
 		mode:    params.Mode,
-		session: session,
+		manager: manager,
 	}
 	if strings.TrimSpace(params.ToolsetFile) != "" {
 		backend, err := toolsetctl.NewFileBackend(ctx, toolsetctl.FileBackendOptions{
@@ -379,15 +421,45 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	}, nil
 }
 
-func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, session *codemodesession.Session) []ToolDescriptor {
+func (b *Bridge) newCodemodeSession(ctx context.Context) (CodemodeSessionNewResult, error) {
+	session, err := codemodesession.CreateFresh(ctx, composeCurrentDir(""), codemodesession.SessionConfig{})
+	if err != nil {
+		return CodemodeSessionNewResult{}, err
+	}
+	defer session.Close()
+	return CodemodeSessionNewResult{TBSession: session.TBSession()}, nil
+}
+
+func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, manager *codemodesession.Manager) []ToolDescriptor {
 	if mode == ComposeModeCodemode {
 		metaSession := &codemodesession.Session{}
 		metaSession.SetPreparedTools(prepared)
-		return []ToolDescriptor{{
+		locked := manager != nil && manager.Locked()
+		awaitAvailable := prepared.HasApprovalTools()
+		description := metaSession.InstructionsForSurface(codemodesession.ToolSurfaceModeLocked, awaitAvailable)
+		if !locked {
+			description = metaSession.InstructionsForSurface(codemodesession.ToolSurfaceModeUnlocked, awaitAvailable)
+		}
+		tools := []ToolDescriptor{{
 			Name:         CodeModeToolName,
-			Description:  metaSession.Instructions(),
-			ParamsSchema: codeModeParamsSchema(),
+			Description:  description,
+			ParamsSchema: codeModeParamsSchema(locked),
 		}}
+		if !locked {
+			tools = append([]ToolDescriptor{{
+				Name:         CodeModeNewSessionToolName,
+				Description:  codemodesession.NewSessionToolDescription(awaitAvailable),
+				ParamsSchema: emptyObjectSchema(),
+			}}, tools...)
+		}
+		if prepared.HasApprovalTools() {
+			tools = append(tools, ToolDescriptor{
+				Name:         CodeModeAwaitApprovalsToolName,
+				Description:  "Wait for the outstanding approval(s) to be handled. Returns immediately with (no outstanding approvals). when nothing is waiting. Get as many approvals done as possible before calling, then call again if more are still waiting.",
+				ParamsSchema: codeModeAwaitParamsSchema(locked),
+			})
+		}
+		return tools
 	}
 
 	view := prepared.AgentView()
@@ -412,10 +484,10 @@ func (h *composedToolset) SetPreparedTools(prepared toolset.PreparedToolset) {
 	}
 	h.mu.Lock()
 	h.prepared = prepared
-	if h.session != nil {
-		h.session.SetPreparedTools(prepared)
+	if h.manager != nil {
+		h.manager.SetPreparedTools(prepared)
 	}
-	h.tools = describeTools(h.mode, prepared, h.session)
+	h.tools = describeTools(h.mode, prepared, h.manager)
 	owner := h.owner
 	h.mu.Unlock()
 	if owner != nil {
@@ -441,13 +513,13 @@ func (h *composedToolset) backendSnapshot() toolsetctl.ToolsetBackend {
 	return h.backend
 }
 
-func (h *composedToolset) snapshot() (ComposeMode, toolset.PreparedToolset, *codemodesession.Session) {
+func (h *composedToolset) snapshot() (ComposeMode, toolset.PreparedToolset, *codemodesession.Manager) {
 	if h == nil {
 		return ComposeModeDirect, toolset.PreparedToolset{}, nil
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.mode, h.prepared, h.session
+	return h.mode, h.prepared, h.manager
 }
 
 func (h *composedToolset) toolDescriptors() []ToolDescriptor {
@@ -464,10 +536,10 @@ func (h *composedToolset) close() {
 		return
 	}
 	h.mu.RLock()
-	session := h.session
+	manager := h.manager
 	h.mu.RUnlock()
-	if session != nil {
-		_ = session.Close()
+	if manager != nil {
+		_ = manager.Close()
 	}
 }
 
@@ -484,28 +556,57 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 		return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown toolset_id %q", params.ToolsetID))
 	}
 
-	mode, prepared, session := handle.snapshot()
+	mode, prepared, manager := handle.snapshot()
 	if mode == ComposeModeCodemode {
-		if params.ToolName != CodeModeToolName {
+		if manager == nil {
+			return ToolInvokeResult{}, fmt.Errorf("codemode session manager is not available")
+		}
+		switch params.ToolName {
+		case CodeModeToolName:
+			code, ok := params.Params[codemodesession.TypeScriptCellSourceParam].(string)
+			if !ok || strings.TrimSpace(code) == "" {
+				return ToolInvokeResult{}, invalidParams("codemode tool requires params." + codemodesession.TypeScriptCellSourceParam)
+			}
+			timeout, err := codeModeTimeout(params.Params)
+			if err != nil {
+				return ToolInvokeResult{}, invalidParams(err.Error())
+			}
+			tbSession, err := codeModeTBSession(manager, params.Params)
+			if err != nil {
+				return ToolInvokeResult{}, err
+			}
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			submitCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			content, err := manager.Submit(submitCtx, tbSession, code)
+			if err != nil {
+				return ToolInvokeResult{}, err
+			}
+			return ToolInvokeResult{Content: content}, nil
+		case CodeModeAwaitApprovalsToolName:
+			tbSession, err := codeModeTBSession(manager, params.Params)
+			if err != nil {
+				return ToolInvokeResult{}, err
+			}
+			result, err := manager.AwaitNextApproval(ctx, tbSession)
+			if err != nil {
+				return ToolInvokeResult{}, err
+			}
+			return ToolInvokeResult{Content: result.Text()}, nil
+		case CodeModeNewSessionToolName:
+			if manager.Locked() {
+				return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
+			}
+			tbSession, err := manager.CreateFreshSession(ctx)
+			if err != nil {
+				return ToolInvokeResult{}, err
+			}
+			return ToolInvokeResult{Content: tbSession}, nil
+		default:
 			return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 		}
-		if session == nil {
-			return ToolInvokeResult{}, fmt.Errorf("codemode session is not available")
-		}
-		code, ok := params.Params[codemodesession.TypeScriptCellSourceParam].(string)
-		if !ok || strings.TrimSpace(code) == "" {
-			return ToolInvokeResult{}, invalidParams("codemode tool requires params." + codemodesession.TypeScriptCellSourceParam)
-		}
-		timeout, err := codeModeTimeout(params.Params)
-		if err != nil {
-			return ToolInvokeResult{}, invalidParams(err.Error())
-		}
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		submitCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		return ToolInvokeResult{Content: session.Submit(submitCtx, code)}, nil
 	}
 
 	if tool, ok := prepared.Tool(params.ToolName); !ok || !tool.JSONCallable() {
@@ -845,6 +946,21 @@ func cloneMap(in map[string]any) map[string]any {
 		out[key] = cloneValue(value)
 	}
 	return out
+}
+
+func codeModeTBSession(manager *codemodesession.Manager, params map[string]any) (string, error) {
+	if manager == nil || manager.Locked() {
+		return "", nil
+	}
+	raw, ok := params[codemodesession.TBSessionParam]
+	if !ok || raw == nil {
+		return "", invalidParams("codemode tool requires params." + codemodesession.TBSessionParam)
+	}
+	tbSession, ok := raw.(string)
+	if !ok || strings.TrimSpace(tbSession) == "" {
+		return "", invalidParams("codemode tool requires params." + codemodesession.TBSessionParam)
+	}
+	return strings.TrimSpace(tbSession), nil
 }
 
 func codeModeTimeout(params map[string]any) (time.Duration, error) {

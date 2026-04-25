@@ -55,6 +55,8 @@ func (r *Registry) UpdateClient(id uint64, state SessionState) {
 		return
 	}
 	client.snapshot.Mode = state.Mode
+	client.snapshot.Locked = state.Locked
+	client.snapshot.BoundTBSession = state.BoundTBSession
 	client.snapshot.WorkingDir = state.WorkingDir
 	client.snapshot.PreparedTools = append([]string(nil), state.PreparedTools...)
 	client.snapshot.PendingApprovals = clonePendingApprovals(state.PendingApprovals)
@@ -94,6 +96,9 @@ func (r *Registry) Clients() []ClientSnapshot {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].PID != out[j].PID {
 			return out[i].PID < out[j].PID
+		}
+		if out[i].BoundTBSession != out[j].BoundTBSession {
+			return out[i].BoundTBSession < out[j].BoundTBSession
 		}
 		if out[i].Mode != out[j].Mode {
 			return out[i].Mode < out[j].Mode

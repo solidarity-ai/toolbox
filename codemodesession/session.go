@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,9 +16,9 @@ import (
 
 	repl "github.com/mackross/repljs"
 	storemem "github.com/mackross/repljs/store/mem"
-	replsqlite "github.com/mackross/repljs/store/sqlite"
 	"github.com/solidarity-ai/toolbox/codemodesdks"
 	"github.com/solidarity-ai/toolbox/daemon"
+	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -44,8 +42,72 @@ type preparedState struct {
 	prepared toolset.PreparedToolset
 }
 
+type toolRunState struct {
+	mu      sync.Mutex
+	current *toolRunGeneration
+}
+
+type toolRunGeneration struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
 func newPreparedState(prepared toolset.PreparedToolset) *preparedState {
 	return &preparedState{prepared: prepared}
+}
+
+func newToolRunState() *toolRunState {
+	state := &toolRunState{}
+	state.Reset()
+	return state
+}
+
+func (s *toolRunState) Acquire(parent context.Context) (context.Context, func()) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if s == nil {
+		return parent, func() {}
+	}
+	s.mu.Lock()
+	current := s.current
+	s.mu.Unlock()
+	if current == nil {
+		return parent, func() {}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	stop := context.AfterFunc(current.ctx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+func (s *toolRunState) Reset() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	old := s.current
+	ctx, cancel := context.WithCancel(context.Background())
+	s.current = &toolRunGeneration{ctx: ctx, cancel: cancel}
+	s.mu.Unlock()
+	if old != nil {
+		old.cancel()
+	}
+}
+
+func (s *toolRunState) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	old := s.current
+	s.current = nil
+	s.mu.Unlock()
+	if old != nil {
+		old.cancel()
+	}
 }
 
 func (s *preparedState) Get() toolset.PreparedToolset {
@@ -69,6 +131,7 @@ func (s *preparedState) Set(prepared toolset.PreparedToolset) {
 // SessionConfig controls codemode session startup behavior.
 type SessionConfig struct {
 	PreparedTools toolset.PreparedToolset
+	Executor      *invoke.Executor
 }
 
 // Session is the shared TypeScript submit boundary used by the CLI repl and
@@ -79,79 +142,40 @@ type Session struct {
 	store          repl.Store
 	storeCloser    storeCloser
 	id             repl.SessionID
+	tbSession      string
 	resumed        bool
 	prepared       *preparedState
 	applied        toolset.PreparedToolset
 	toolCalls      toolCallJournal
 	approvals      approvalStore
 	approvalAwaits *approvalAwaitDelegate
+	toolRuns       *toolRunState
+	executor       *invoke.Executor
+	ownExecutor    bool
+	lease          *sessionLease
+	terminalErr    error
 	submitting     atomic.Bool
 	preparedSeq    atomic.Uint64
 	appliedSeq     uint64
 }
 
-// OpenSQLite opens or resumes a persistent TypeScript session backed by SQLite.
-func OpenSQLite(ctx context.Context, sqlitePath, currentDir string, cfgs ...SessionConfig) (*Session, error) {
-	sqlitePath = strings.TrimSpace(sqlitePath)
-	if sqlitePath == "" {
-		sqlitePath = ".toolbox-session"
-	}
-	if !filepath.IsAbs(sqlitePath) && currentDir != "" {
-		sqlitePath = filepath.Join(currentDir, sqlitePath)
-	}
-	if err := os.MkdirAll(filepath.Dir(sqlitePath), 0o755); err != nil {
-		return nil, fmt.Errorf("create session storage dir: %w", err)
-	}
-
-	st, err := replsqlite.Open(ctx, sqlitePath)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite store: %w", err)
-	}
-	toolCalls := newSQLiteToolCallJournal(st, sqlitePath)
-	approvals, err := newSQLiteApprovalStore(st.DB())
-	if err != nil {
-		_ = st.Close()
-		return nil, fmt.Errorf("open approval store: %w", err)
-	}
-
-	cfg := firstConfig(cfgs)
-	prepared := newPreparedState(cfg.PreparedTools)
-	deps := sessionDeps(currentDir, st, prepared.Get, toolCalls, approvals)
-	sess, resumed, err := openOrStartSQLiteSession(ctx, st, deps)
-	if err != nil {
-		_ = st.Close()
-		return nil, err
-	}
-	if err := transitionSessionPreparedTools(ctx, sess, prepared.Get()); err != nil {
-		_ = sess.Close()
-		_ = st.Close()
-		return nil, fmt.Errorf("apply prepared tools: %w", err)
-	}
-	return &Session{
-		session:        sess,
-		store:          st,
-		storeCloser:    st,
-		id:             sess.ID(),
-		resumed:        resumed,
-		prepared:       prepared,
-		applied:        prepared.Get(),
-		toolCalls:      toolCalls,
-		approvals:      approvals,
-		approvalAwaits: newApprovalAwaitDelegate(),
-	}, nil
-}
-
 // OpenMemory opens a new in-memory TypeScript session.
 func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (*Session, error) {
+	cfg := firstConfig(cfgs)
+	executor, ownExecutor := resolveExecutor(cfg.Executor, cfg.PreparedTools)
+
 	st := storemem.New()
 	toolCalls := newMemoryToolCallJournal(st)
 	approvals := newMemoryApprovalStore()
-	cfg := firstConfig(cfgs)
 	prepared := newPreparedState(cfg.PreparedTools)
+	toolRuns := newToolRunState()
 	sess, err := repl.New().StartSession(ctx, repl.SessionConfig{
 		Manifest: repl.Manifest{ID: manifestID},
-	}, sessionDeps(currentDir, st, prepared.Get, toolCalls, approvals))
+	}, sessionDeps(currentDir, st, prepared.Get, toolCalls, approvals, executor, toolRuns.Acquire))
 	if err != nil {
+		if ownExecutor {
+			_ = executor.Close()
+		}
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
@@ -164,6 +188,9 @@ func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (
 		toolCalls:      toolCalls,
 		approvals:      approvals,
 		approvalAwaits: newApprovalAwaitDelegate(),
+		toolRuns:       toolRuns,
+		executor:       executor,
+		ownExecutor:    ownExecutor,
 	}, nil
 }
 
@@ -174,11 +201,18 @@ func firstConfig(cfgs []SessionConfig) SessionConfig {
 	return cfgs[0]
 }
 
-func sessionDeps(currentDir string, st repl.Store, prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore) repl.SessionDeps {
+func resolveExecutor(existing *invoke.Executor, prepared toolset.PreparedToolset) (*invoke.Executor, bool) {
+	if existing != nil {
+		return existing, false
+	}
+	return invoke.NewExecutor(prepared), true
+}
+
+func sessionDeps(currentDir string, st repl.Store, prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore, executor *invoke.Executor, toolContext func(context.Context) (context.Context, func())) repl.SessionDeps {
 	return repl.SessionDeps{
 		Store:             st,
 		RuntimeMode:       repl.RuntimeModePersistent,
-		VMDelegate:        newRuntimeDelegate(prepared, toolCalls, approvals),
+		VMDelegate:        newRuntimeDelegate(prepared, toolCalls, approvals, executor, toolContext),
 		TypeScriptFactory: repl.NewTypeScriptFactory(),
 		TypeScriptEnvProvider: func(_ context.Context, _ repl.TypeScriptEnvContext) (repl.TypeScriptEnv, error) {
 			return typeScriptEnv(currentDir, prepared()), nil
@@ -197,34 +231,20 @@ func transitionSessionPreparedTools(ctx context.Context, sess repl.Session, prep
 	return sess.TransitionToState(ctx, state)
 }
 
-func openOrStartSQLiteSession(ctx context.Context, st *replsqlite.Store, deps repl.SessionDeps) (repl.Session, bool, error) {
-	eng := repl.New()
-	sessionID, err := st.LatestSessionID(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("load latest session: %w", err)
-	}
-	if sessionID != "" {
-		sess, err := eng.OpenSession(ctx, sessionID, deps)
-		if err != nil {
-			return nil, false, fmt.Errorf("open session: %w", err)
-		}
-		return sess, true, nil
-	}
-	sess, err := eng.StartSession(ctx, repl.SessionConfig{
-		Manifest: repl.Manifest{ID: manifestID},
-	}, deps)
-	if err != nil {
-		return nil, false, fmt.Errorf("start session: %w", err)
-	}
-	return sess, false, nil
-}
-
 // ID returns the stable session identifier.
 func (s *Session) ID() string {
 	if s == nil {
 		return ""
 	}
 	return string(s.id)
+}
+
+// TBSession returns the durable notebook identifier for persistent sessions.
+func (s *Session) TBSession() string {
+	if s == nil {
+		return ""
+	}
+	return s.tbSession
 }
 
 // Resumed reports whether the session reopened prior durable state.
@@ -239,6 +259,9 @@ func (s *Session) Resumed() bool {
 func (s *Session) SetPreparedTools(prepared toolset.PreparedToolset) {
 	if s == nil {
 		return
+	}
+	if s.ownExecutor && s.executor != nil {
+		s.executor.SetPrepared(prepared)
 	}
 	if s.submitting.Load() {
 		if s.prepared == nil {
@@ -263,6 +286,30 @@ func (s *Session) SetPreparedTools(prepared toolset.PreparedToolset) {
 
 // Instructions describes how to interact with the codemode session.
 func (s *Session) Instructions() string {
+	return s.instructionsForSurface(ToolSurfaceModeLocked, false)
+}
+
+type ToolSurfaceMode int
+
+const (
+	ToolSurfaceModeLocked ToolSurfaceMode = iota
+	ToolSurfaceModeUnlocked
+)
+
+// InstructionsForMode describes how to interact with the codemode session in
+// either locked or unlocked routing mode.
+func (s *Session) InstructionsForMode(mode ToolSurfaceMode) string {
+	return s.instructionsForSurface(mode, false)
+}
+
+// InstructionsForSurface describes how to interact with the codemode session
+// for one tool surface, including whether approval waiting is available on that
+// surface.
+func (s *Session) InstructionsForSurface(mode ToolSurfaceMode, awaitAvailable bool) string {
+	return s.instructionsForSurface(mode, awaitAvailable)
+}
+
+func (s *Session) instructionsForSurface(mode ToolSurfaceMode, awaitAvailable bool) string {
 	var prepared toolset.PreparedToolset
 	if s != nil {
 		s.mu.Lock()
@@ -274,22 +321,32 @@ func (s *Session) Instructions() string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s submits a code cell to a notebook like environment. The notebook has globally installed tools which connect to outside systems.\n", SuperToolName)
-	fmt.Fprintf(&b, "%s is much more efficient and effective than regular tool calling and should be used when ever possible.\n", SuperToolName)
+	fmt.Fprintf(&b, "%s is much more efficient and effective than regular tool calling and should be used whenever possible.\n", SuperToolName)
 	fmt.Fprintln(&b, "Important Notebook Usage Information:")
 	fmt.Fprintln(&b, "- `console.log(inspect($last))` is automatically added when console.log is NOT in the source.")
 	fmt.Fprintln(&b, "- Variables and state persist between cells. Promises must settle before the timeout or the cell will error.")
 	fmt.Fprintln(&b, "	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (use var or leave global).")
 	fmt.Fprintln(&b, "  - For long cells use unique variable names")
-	fmt.Fprintln(&b, "  - For small cells use it'ss easier to use $last / $val(cell_index) to reuse prior results.")
+	fmt.Fprintln(&b, "  - For small cells it's easier to use $last / $val(cell_index) to reuse prior results.")
 	fmt.Fprintln(&b, "  - Cells ending with console.log, return undefined — end with the variable if you need to reference it later.")
 	fmt.Fprintln(&b, "- There are no imports")
+	if mode == ToolSurfaceModeUnlocked {
+		fmt.Fprintf(&b, "- Start a notebook with `%s`, then pass the same `%s` on every `%s` call to continue that notebook.\n", NewSessionToolName, TBSessionParam, SuperToolName)
+	}
+	if awaitAvailable {
+		if mode == ToolSurfaceModeUnlocked {
+			fmt.Fprintf(&b, "- If a cell pauses for approvals, call `%s` with the same `%s` to wait for the next approval result.\n", AwaitSuperToolApprovalsName, TBSessionParam)
+		} else {
+			fmt.Fprintf(&b, "- If a cell pauses for approvals, call `%s` to wait for the next approval result.\n", AwaitSuperToolApprovalsName)
+		}
+	}
 	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, "===")
 	fmt.Fprintln(&b, "// Notebook Input")
 	fmt.Fprintln(&b, `Object.entries($pkgMetadata).map(([name, meta]) => [`)
 	fmt.Fprintln(&b, "  name, meta.toolCount, (meta.useWhenHint || \"\")")
 	fmt.Fprintln(&b, "])")
-	fmt.Fprintln(&b, "// Notebook Output ")
+	fmt.Fprintln(&b, "// Notebook Output")
 	var names []string
 	var rows []string
 	for _, row := range summarizePreparedTools(prepared) {
@@ -312,7 +369,7 @@ func (s *Session) Instructions() string {
 	fmt.Fprintln(&b, "$val(index : number) : any")
 	fmt.Fprintln(&b, "// $val(<last-cell>) / last value in an expression in prior cell")
 	fmt.Fprintln(&b, "$last : any")
-	fmt.Fprintln(&b, "// truncated object summary for inspecting data shape (limited depth and length traversal) ")
+	fmt.Fprintln(&b, "// truncated object summary for inspecting data shape (limited depth and length traversal)")
 	fmt.Fprintln(&b, "inspect(x : any) : string")
 	fmt.Fprintln(&b, "")
 	fmt.Fprintln(&b, packageDeclarationsDTS())
@@ -420,7 +477,7 @@ type ToolCallTask<T = unknown> = {
 };
 
 type ToolCallPromise<T> = Promise<T> & {
-  task: ToolCallTask<T>;
+  toolCallTask: ToolCallTask<T>;
 };
 
 type ToolCallView<T = unknown> =
@@ -435,6 +492,7 @@ type ToolCallView<T = unknown> =
       toolName: string;
       status: "needsApproval";
       params?: unknown;
+      approval: { approvalId?: string };
     }
   | {
       toolCallId: string;
@@ -449,9 +507,22 @@ type ToolCallView<T = unknown> =
       status: "failed";
       params?: unknown;
       error: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "cancelled";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "unknown";
+      params?: unknown;
     };
 
-declare function $tool_call<T>(ref: ToolCallPromise<T> | ToolCallTask<T>): ToolCallView<T>;
+declare function $tool_call<T>(refOrId: ToolCallTask<T> | string): ToolCallView<T>;
+declare function $tool_call<T>(ref: ToolCallPromise<T>): ToolCallView<T>;
 
 declare const $pkgMetadata: Record<string, {
   toolCount: number;
@@ -496,11 +567,17 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 	if s == nil || strings.TrimSpace(tsSource) == "" {
 		return ""
 	}
+	if err := s.requireLease(ctx); err != nil {
+		return formatSubmitError(repl.SubmitResult{}, err)
+	}
 
 	s.mu.Lock()
-	if s.session == nil {
+	if err := s.activeErrorLocked(); err != nil {
 		s.mu.Unlock()
-		return formatSubmitError(repl.SubmitResult{}, errors.New("session closed"))
+		return formatSubmitError(repl.SubmitResult{}, err)
+	}
+	if s.toolRuns != nil {
+		s.toolRuns.Reset()
 	}
 	s.cancelApprovalAwaitLocked()
 	s.submitting.Store(true)
@@ -536,25 +613,34 @@ func (s *Session) PendingApprovals(ctx context.Context) ([]PendingApproval, erro
 	if s == nil || s.approvals == nil {
 		return nil, nil
 	}
-	return s.approvals.PendingApprovals(ctx, s.id)
+	if err := s.requireLease(ctx); err != nil {
+		return nil, err
+	}
+	return s.pendingApprovalsLocked(ctx)
 }
 
 func (s *Session) ApplyApprovals(ctx context.Context, decisions []ApprovalDecision) error {
 	if s == nil {
 		return nil
 	}
+	if err := s.requireLease(ctx); err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session == nil {
-		return errors.New("session closed")
+	if err := s.activeErrorLocked(); err != nil {
+		return err
 	}
 	if s.approvals == nil {
 		return fmt.Errorf("approvals are unavailable")
 	}
-	results, err := s.approvals.ApplyDecisions(ctx, s.id, decisions, s.prepared.Get(), s.store, s.toolCalls)
+	results, err := s.approvals.ApplyDecisions(ctx, s.id, decisions, s.prepared.Get(), s.store, s.toolCalls, s.executor)
 	if err != nil {
 		return err
+	}
+	for i := range results {
+		results[i].ToolCall.TBSession = s.tbSession
 	}
 	if len(results) > 0 {
 		s.publishApprovalAwaitLocked(approvalAwaitResultFromBatch(results, s.pendingApprovalCountLocked(ctx)))
@@ -593,7 +679,14 @@ func (s *Session) pendingApprovalsLocked(ctx context.Context) ([]PendingApproval
 	if s == nil || s.approvals == nil {
 		return nil, nil
 	}
-	return s.approvals.PendingApprovals(ctx, s.id)
+	approvals, err := s.approvals.PendingApprovals(ctx, s.id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range approvals {
+		approvals[i].TBSession = s.tbSession
+	}
+	return approvals, nil
 }
 
 func withSubmitTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -643,18 +736,99 @@ func (s *Session) Close() error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	session := s.session
+	storeCloser := s.storeCloser
+	lease := s.lease
+	toolRuns := s.toolRuns
+	executor := s.executor
+	ownExecutor := s.ownExecutor
+	s.session = nil
+	s.storeCloser = nil
+	s.lease = nil
+	s.toolRuns = nil
+	s.executor = nil
+	s.ownExecutor = false
+	s.markTerminalLocked(errors.New("session closed"))
+	s.mu.Unlock()
 	var errs []error
-	if s.session != nil {
-		errs = append(errs, s.session.Close())
-		s.session = nil
+	if toolRuns != nil {
+		toolRuns.Close()
 	}
-	if s.storeCloser != nil {
-		errs = append(errs, s.storeCloser.Close())
-		s.storeCloser = nil
+	if lease != nil {
+		errs = append(errs, lease.Close())
+	}
+	if session != nil {
+		errs = append(errs, session.Close())
+	}
+	if storeCloser != nil {
+		errs = append(errs, storeCloser.Close())
+	}
+	if ownExecutor && executor != nil {
+		errs = append(errs, executor.Close())
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Session) requireLease(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	err := s.activeErrorLocked()
+	lease := s.lease
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if lease == nil {
+		return nil
+	}
+	if err := lease.ensureOwned(ctx); err != nil {
+		s.markTerminal(err)
+		return err
+	}
+	return nil
+}
+
+func (s *Session) activeErrorLocked() error {
+	if s == nil {
+		return nil
+	}
+	if s.terminalErr != nil {
+		return s.terminalErr
+	}
+	if s.session == nil {
+		return errors.New("session closed")
+	}
+	return nil
+}
+
+func (s *Session) terminalError() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.terminalErr
+}
+
+func (s *Session) markTerminal(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.markTerminalLocked(err)
+}
+
+func (s *Session) markTerminalLocked(err error) {
+	if s == nil || err == nil || s.terminalErr != nil {
+		return
+	}
+	s.terminalErr = err
+	if s.approvalAwaits != nil {
+		s.approvalAwaits.PublishError(err)
+	}
 }
 
 func formatSubmitResult(ctx context.Context, sess repl.Session, res repl.SubmitResult) string {

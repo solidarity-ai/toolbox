@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -254,29 +255,31 @@ func pendingApprovalGroupsForHTTP(control daemonHTTPControl) []daemonHTTPApprova
 		return nil
 	}
 
-	out := make([]daemonHTTPApprovalGroup, 0, len(clients))
+	grouped := make(map[string]*daemonHTTPApprovalGroup)
 	for _, client := range clients {
-		if len(client.PendingApprovals) == 0 {
-			continue
+		for _, approval := range client.PendingApprovals {
+			tbSession := strings.TrimSpace(approval.TBSession)
+			if tbSession == "" {
+				tbSession = "unknown"
+			}
+			group := grouped[tbSession]
+			if group == nil {
+				group = &daemonHTTPApprovalGroup{
+					ID:    "tb_session:" + tbSession,
+					Label: tbSession,
+				}
+				grouped[tbSession] = group
+			}
+			group.ToolCalls = append(group.ToolCalls, approval)
 		}
-		connectedAt := int64(0)
-		if !client.ConnectedAt.IsZero() {
-			connectedAt = client.ConnectedAt.UnixNano()
-		}
-		group := daemonHTTPApprovalGroup{
-			ID:        fmt.Sprintf("client:%d:%d", client.PID, connectedAt),
-			ToolCalls: append([]daemon.PendingApprovalSnapshot(nil), client.PendingApprovals...),
-		}
-		switch {
-		case strings.TrimSpace(client.Mode) != "" && strings.TrimSpace(client.WorkingDir) != "":
-			group.Label = client.Mode + " " + client.WorkingDir
-		case strings.TrimSpace(client.WorkingDir) != "":
-			group.Label = client.WorkingDir
-		case strings.TrimSpace(client.Mode) != "":
-			group.Label = client.Mode
-		}
-		out = append(out, group)
 	}
+	out := make([]daemonHTTPApprovalGroup, 0, len(grouped))
+	for _, group := range grouped {
+		out = append(out, *group)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

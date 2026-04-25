@@ -97,6 +97,8 @@ func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream
 			}
 			s.registry.UpdateClient(id, SessionState{
 				Mode:             msg.GetMode(),
+				Locked:           msg.GetLocked(),
+				BoundTBSession:   msg.GetBoundTbSession(),
 				WorkingDir:       msg.GetWorkingDir(),
 				PreparedTools:    append([]string(nil), msg.GetPreparedTools()...),
 				PendingApprovals: pendingApprovalsFromProto(msg.GetPendingApprovals()),
@@ -140,6 +142,8 @@ func clientSnapshotsToProto(clients []ClientSnapshot) []*daemonv1.ClientSnapshot
 		snapshot := &daemonv1.ClientSnapshot{
 			Pid:              int32(client.PID),
 			Mode:             client.Mode,
+			Locked:           client.Locked,
+			BoundTbSession:   client.BoundTBSession,
 			WorkingDir:       client.WorkingDir,
 			PreparedTools:    append([]string(nil), client.PreparedTools...),
 			PendingApprovals: pendingApprovalsToProto(client.PendingApprovals),
@@ -163,6 +167,7 @@ func pendingApprovalsFromProto(approvals []*daemonv1.PendingApprovalSnapshot) []
 	for _, approval := range approvals {
 		next := PendingApprovalSnapshot{
 			ToolCallID:    approval.GetToolCallId(),
+			TBSession:     approval.GetTbSession(),
 			ToolName:      approval.GetToolName(),
 			ParamsInspect: approval.GetParamsInspect(),
 			EffectID:      approval.GetEffectId(),
@@ -182,6 +187,7 @@ func pendingApprovalsToProto(approvals []PendingApprovalSnapshot) []*daemonv1.Pe
 	for _, approval := range approvals {
 		next := &daemonv1.PendingApprovalSnapshot{
 			ToolCallId:    approval.ToolCallID,
+			TbSession:     approval.TBSession,
 			ToolName:      approval.ToolName,
 			ParamsInspect: approval.ParamsInspect,
 			EffectId:      approval.EffectID,

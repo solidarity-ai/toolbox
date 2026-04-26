@@ -425,6 +425,7 @@ func approvalPresentationForTool(tool toolset.PreparedTool, params []byte) json.
 	if err != nil {
 		return nil
 	}
+	args = approvalPresentationArgsForTool(tool, args)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var raw string
@@ -447,6 +448,26 @@ func approvalPresentationForTool(tool toolset.PreparedTool, params []byte) json.
 		return nil
 	}
 	return append(json.RawMessage(nil), trimmed...)
+}
+
+func approvalPresentationArgsForTool(tool toolset.PreparedTool, args map[string]any) map[string]any {
+	out := make(map[string]any, len(args)+len(tool.AccountParams()))
+	for k, v := range args {
+		out[k] = v
+	}
+	fullParams, err := tool.ValidateCall(args)
+	if err != nil {
+		fullParams = args
+	}
+	for paramName, account := range tool.SelectedCredentialAccountParams(fullParams) {
+		if current, ok := out[paramName]; ok {
+			if currentString, ok := current.(string); !ok || strings.TrimSpace(currentString) != "" {
+				continue
+			}
+		}
+		out[paramName] = account
+	}
+	return out
 }
 
 func validApprovalPresentation(raw []byte) bool {

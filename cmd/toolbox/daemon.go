@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -549,19 +551,8 @@ func renderDaemonIndex(w io.Writer, state approvalConsoleState) error {
 }
 
 func approvalSummaryFields(call daemon.PendingApprovalSnapshot) [][2]string {
-	if strings.TrimSpace(call.Presentation) == "" {
-		return nil
-	}
-	var presentation struct {
-		Blocks []struct {
-			Type   string `json:"type"`
-			Fields []struct {
-				Label string `json:"label"`
-				Value string `json:"value"`
-			} `json:"fields"`
-		} `json:"blocks"`
-	}
-	if err := json.Unmarshal([]byte(call.Presentation), &presentation); err != nil {
+	presentation, ok := approvalPresentationForConsole(call)
+	if !ok {
 		return nil
 	}
 	var out [][2]string
@@ -577,6 +568,89 @@ func approvalSummaryFields(call daemon.PendingApprovalSnapshot) [][2]string {
 		}
 	}
 	return out
+}
+
+type approvalConsolePresentation struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Icon        *struct {
+		Type            string `json:"type"`
+		MIMEType        string `json:"mime_type"`
+		MIMETypeCamel   string `json:"mimeType"`
+		DataBase64      string `json:"data_base64"`
+		DataBase64Camel string `json:"dataBase64"`
+		Alt             string `json:"alt"`
+	} `json:"icon"`
+	Blocks []struct {
+		Type   string `json:"type"`
+		Fields []struct {
+			Label string `json:"label"`
+			Value string `json:"value"`
+		} `json:"fields"`
+	} `json:"blocks"`
+}
+
+func approvalPresentationForConsole(call daemon.PendingApprovalSnapshot) (approvalConsolePresentation, bool) {
+	var presentation approvalConsolePresentation
+	if strings.TrimSpace(call.Presentation) == "" {
+		return presentation, false
+	}
+	if err := json.Unmarshal([]byte(call.Presentation), &presentation); err != nil {
+		return presentation, false
+	}
+	return presentation, true
+}
+
+func approvalDisplayTitle(call daemon.PendingApprovalSnapshot) string {
+	if presentation, ok := approvalPresentationForConsole(call); ok {
+		if title := strings.TrimSpace(presentation.Title); title != "" {
+			return title
+		}
+	}
+	return firstNonEmpty(call.ToolLabel, call.ToolName)
+}
+
+func approvalDisplayDescription(call daemon.PendingApprovalSnapshot) string {
+	if presentation, ok := approvalPresentationForConsole(call); ok {
+		if description := strings.TrimSpace(presentation.Description); description != "" {
+			return description
+		}
+	}
+	return call.Description
+}
+
+func approvalDisplayIconDataURI(call daemon.PendingApprovalSnapshot) string {
+	presentation, ok := approvalPresentationForConsole(call)
+	if !ok || presentation.Icon == nil {
+		return ""
+	}
+	if iconType := strings.TrimSpace(presentation.Icon.Type); iconType != "" && iconType != "image" {
+		return ""
+	}
+	mimeType := strings.TrimSpace(firstNonEmpty(presentation.Icon.MIMEType, presentation.Icon.MIMETypeCamel))
+	if !strings.EqualFold(mimeType, "image/png") {
+		return ""
+	}
+	raw := strings.TrimSpace(firstNonEmpty(presentation.Icon.DataBase64, presentation.Icon.DataBase64Camel))
+	if raw == "" || len(raw) > 64*1024 {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return ""
+	}
+	pngSignature := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	if len(decoded) < len(pngSignature) || !bytes.Equal(decoded[:len(pngSignature)], pngSignature) {
+		return ""
+	}
+	return "data:image/png;base64," + raw
+}
+
+func approvalDisplayIconAlt(call daemon.PendingApprovalSnapshot) string {
+	if presentation, ok := approvalPresentationForConsole(call); ok && presentation.Icon != nil {
+		return strings.TrimSpace(presentation.Icon.Alt)
+	}
+	return ""
 }
 
 func countConsoleSessionCalls(session approvalConsoleSession) int {
@@ -694,7 +768,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		result := applyApprovalConsoleDrafts(r.Context(), control, req)
 		writeDatastarPatchSignals(w, map[string]any{
 			"liveState":        "Live",
-			"drafts":           map[string]string{},
+			"drafts":           approvalConsoleDraftResetPatch(req.Drafts),
 			"rejectReason":     "",
 			"rejectDialogOpen": false,
 			"rejectSession":    "",

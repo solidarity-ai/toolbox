@@ -56,6 +56,32 @@ func (t PreparedTool) HiddenParams() map[string]bool { return t.hiddenParams }
 
 func (t PreparedTool) AccountParams() []AccountParam { return t.accountParams }
 
+// SelectedCredentialAccountParams returns credential account selections keyed
+// by their agent-facing param names, for example "workspace_account".
+func (t PreparedTool) SelectedCredentialAccountParams(fullParams map[string]any) map[string]string {
+	if len(t.credentialAccounts) == 0 {
+		return nil
+	}
+	credNames := credentialSelectionNames(t)
+	accounts := extractAccountParams(fullParams, credNames)
+	for _, name := range credNames {
+		if _, ok := accounts[name]; ok {
+			continue
+		}
+		if accts := t.credentialAccounts[name]; len(accts) == 1 {
+			accounts[name] = accts[0]
+		}
+	}
+	if len(accounts) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(accounts))
+	for cred, account := range accounts {
+		out[cred+"_account"] = account
+	}
+	return out
+}
+
 func (t PreparedTool) Injector() *transport.CredentialInjector { return t.injector }
 
 func (t PreparedTool) Allowlist() *transport.HostAllowlist { return t.allowlist }
@@ -437,6 +463,18 @@ func credentialNames(creds []tooldef.PackageCredential) []string {
 	for i, c := range creds {
 		names[i] = c.Name
 	}
+	return names
+}
+
+func credentialSelectionNames(tool PreparedTool) []string {
+	if tool.PackageMeta != nil && len(tool.PackageMeta.Credentials) > 0 {
+		return credentialNames(tool.PackageMeta.Credentials)
+	}
+	names := make([]string, 0, len(tool.credentialAccounts))
+	for name := range tool.credentialAccounts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	return names
 }
 

@@ -45,6 +45,17 @@ func approvalConsoleInitialSignals() string {
 	return `{"liveState":"Connecting","settingsOpen":false,"drafts":{},"rejectReason":"","rejectDialogOpen":false,"rejectSession":"","unlockKey":"","message":""}`
 }
 
+func secretStatusClass(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "unlocked":
+		return "ok-text"
+	case "locked":
+		return "danger-text"
+	default:
+		return ""
+	}
+}
+
 func approvalDOMID(prefix, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -55,6 +66,10 @@ func approvalDOMID(prefix, raw string) string {
 
 func approvalSessionID(session approvalConsoleSession) string {
 	return approvalDOMID("approval-session-", session.TBSession)
+}
+
+func approvalSessionTooltipID(session approvalConsoleSession) string {
+	return approvalDOMID("approval-session-tooltip-", session.TBSession)
 }
 
 func approvalPackageID(session approvalConsoleSession, group approvalConsolePackageGroup) string {
@@ -122,20 +137,31 @@ func setSessionDraftsExpr(session approvalConsoleSession, decision string) strin
 	return "$drafts = {" + strings.Join(parts, ",") + "}"
 }
 
+func sessionDraftObjectExpr(session approvalConsoleSession, decision string) string {
+	parts := make([]string, 0, len(sessionToolCallIDs(session)))
+	for _, id := range sessionToolCallIDs(session) {
+		parts = append(parts, jsQuote(id)+":"+jsQuote(decision))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
 func clearSessionDraftsExpr(session approvalConsoleSession) string {
 	return setSessionDraftsExpr(session, "leave")
 }
 
-func decisionClickExpr(toolCallID, decision string) string {
-	return fmt.Sprintf("$drafts = {...$drafts,%s:%s}", jsQuote(toolCallID), jsQuote(decision))
+func decisionToggleExpr(toolCallID, decision string) string {
+	id := jsQuote(toolCallID)
+	value := jsQuote(decision)
+	return fmt.Sprintf("$drafts = {...$drafts,%s:($drafts[%s] === %s ? 'leave' : %s)}", id, id, value, value)
 }
 
 func decisionActiveExpr(toolCallID, decision string) string {
 	ref := "$drafts[" + jsQuote(toolCallID) + "]"
-	if decision == "leave" {
-		return ref + " === undefined || " + ref + " === 'leave'"
-	}
 	return ref + " === " + jsQuote(decision)
+}
+
+func decisionClassExpr(toolCallID, decision string) string {
+	return "{'active': " + decisionActiveExpr(toolCallID, decision) + "}"
 }
 
 func submitSessionExpr(session approvalConsoleSession) string {
@@ -143,6 +169,16 @@ func submitSessionExpr(session approvalConsoleSession) string {
 	sessionID := jsQuote(session.TBSession)
 	payload := "{payload:{session:" + sessionID + ",drafts:$drafts,reason:''}}"
 	return fmt.Sprintf("if ((%s) > 0) { $rejectSession = %s; $rejectDialogOpen = true } else { $rejectReason = ''; @post('/approval-console/decisions', %s) }", reject, sessionID, payload)
+}
+
+func submitAllSessionExpr(session approvalConsoleSession, decision string) string {
+	sessionID := jsQuote(session.TBSession)
+	drafts := sessionDraftObjectExpr(session, decision)
+	return "@post('/approval-console/decisions', {payload:{session:" + sessionID + ",drafts:" + drafts + ",reason:''}})"
+}
+
+func openRejectAllSessionExpr(session approvalConsoleSession) string {
+	return "$drafts = {...$drafts,..." + sessionDraftObjectExpr(session, "reject") + "}; $rejectSession = " + jsQuote(session.TBSession) + "; $rejectDialogOpen = true"
 }
 
 func rejectDialogTitleExpr() string {

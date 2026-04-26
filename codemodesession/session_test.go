@@ -636,6 +636,64 @@ export default async function tool(input: { to: string; subject: string; body: s
 	assertContains(t, presentation, `"Follow-up"`)
 }
 
+func TestPendingApprovalPresentationGetsAutoSelectedCredentialAccount(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/mail", "mail", map[string]string{
+		"tools/send.ts": `export function displayApproval(input: { to: string; subject: string; body: string }) {
+  const account = (globalThis as any).__toolboxApprovalArgs?.workspace_account || "";
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    title: account ? "Send email (" + account + ")" : "Send email",
+    blocks: [
+      {
+        type: "fields",
+        fields: [
+          { label: "To", value: input.to },
+          { label: "Subject", value: input.subject }
+        ]
+      }
+    ]
+  };
+}
+
+export default async function tool(input: { to: string; subject: string; body: string }): Promise<{ ok: boolean }> {
+  return { ok: true };
+}
+`,
+	})
+	tempDir := t.TempDir()
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11003", tempDir, codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+			ToolApprovals: map[string]bool{
+				"mail.send": true,
+			},
+			CredentialPolicySource: credentialrepo.StaticPolicySource{
+				tooldef.ModulePath("example.com/mail"): {
+					CredentialAccounts: map[string][]string{
+						"workspace": {"work@example.com"},
+					},
+				},
+			},
+		}),
+	})
+	defer session.Close()
+
+	out := session.Submit(ctx, `mail.send({
+  to: "sarah@example.com",
+  subject: "Follow-up",
+  body: "Thanks for meeting today."
+})`)
+	assertContains(t, out, `toolCallId`)
+
+	groups := mustPendingApprovalGroups(t, ctx, session)
+	if len(groups) != 1 || len(groups[0].ToolCalls) != 1 {
+		t.Fatalf("pending approval groups = %#v, want one pending tool call", groups)
+	}
+	presentation := string(groups[0].ToolCalls[0].Presentation)
+	assertContains(t, presentation, `"title":"Send email (work@example.com)"`)
+	assertNotContains(t, groups[0].ToolCalls[0].ParamsInspect, "work@example.com")
+}
+
 func TestPersistentSessionAllowsMixedApprovalActionsWithinOneCellGroup(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{

@@ -102,6 +102,18 @@ func applyApprovalConsoleDrafts(ctx context.Context, control daemonHTTPControl, 
 	return result
 }
 
+func approvalConsoleDraftResetPatch(drafts map[string]string) map[string]any {
+	reset := make(map[string]any, len(drafts))
+	for id := range drafts {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		reset[id] = "leave"
+	}
+	return reset
+}
+
 func writeDatastarHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

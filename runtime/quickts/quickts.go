@@ -463,6 +463,9 @@ func approvalPresentationRunnerSource(entry string, args map[string]any, sig *to
 		fmt.Fprintf(&sb, `import tool, * as mod from "./%s";`, entry)
 		sb.WriteString("\n")
 	}
+	argsJSON, _ := json.Marshal(args)
+	fmt.Fprintf(&sb, "const __toolboxApprovalArgs = %s;\n", string(argsJSON))
+	sb.WriteString("(globalThis as any).__toolboxApprovalArgs = __toolboxApprovalArgs;\n")
 	callArgs := approvalPresentationCallArgs(args, sig)
 	if sig != nil {
 		sb.WriteString(`type __ToolboxExactParams<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;

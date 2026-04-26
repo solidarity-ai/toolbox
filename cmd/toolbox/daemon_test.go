@@ -465,6 +465,9 @@ func TestApprovalConsoleDecisionsSubmitDraftBatch(t *testing.T) {
 	if !strings.Contains(string(payload), `"liveState":"Live"`) {
 		t.Fatalf("decision response did not restore live state: %q", string(payload))
 	}
+	if !strings.Contains(string(payload), `"drafts":{"tc-1":"leave","tc-2":"leave","tc-3":"leave"}`) {
+		t.Fatalf("decision response did not reset submitted draft keys to the neutral state: %q", string(payload))
+	}
 
 	control.mu.Lock()
 	defer control.mu.Unlock()
@@ -508,6 +511,112 @@ func TestApprovalConsoleDetailsPreserveOpenAttribute(t *testing.T) {
 	}
 	if !strings.Contains(html, `<pre>{to: &#34;joe@example.com&#34;}</pre>`) {
 		t.Fatalf("approval main missing escaped raw params: %q", html)
+	}
+}
+
+func TestApprovalConsoleUsesPresentationTitleAndDescription(t *testing.T) {
+	const testPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	state := approvalConsoleState{
+		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 1},
+		Sessions: []approvalConsoleSession{{
+			TBSession: "abc123",
+			Active:    true,
+			Intent:    approvalConsoleIntent{Text: "Review pending mail"},
+			PackageGroups: []approvalConsolePackageGroup{{
+				PackageKey:   "gmail",
+				PackageLabel: "Gmail",
+				ToolCalls: []daemon.PendingApprovalSnapshot{{
+					ToolCallID:  "tc-1",
+					ToolName:    "gmail.send",
+					ToolLabel:   "gmail.send",
+					Description: "Package fallback description.",
+					Presentation: `{
+						"schema":"toolbox.approval.presentation.v1",
+						"title":"Send email",
+						"description":"Send Gmail message.",
+						"icon":{"type":"image","mime_type":"image/png","data_base64":"` + testPNGBase64 + `","alt":"Gmail"},
+						"blocks":[{"type":"fields","fields":[{"label":"To","value":"joe@example.com"}]}]
+					}`,
+				}},
+			}},
+		}},
+	}
+	html := componentHTML(ApprovalMain(state))
+	if !strings.Contains(html, `<span class="tool-name-text">Send email</span>`) {
+		t.Fatalf("approval main missing presentation title: %q", html)
+	}
+	if strings.Contains(html, `>gmail.send</span>`) {
+		t.Fatalf("approval main used tool label instead of presentation title: %q", html)
+	}
+	if !strings.Contains(html, ">Send Gmail message.</div>") {
+		t.Fatalf("approval main missing presentation description: %q", html)
+	}
+	if !strings.Contains(html, `class="tool-icon"`) ||
+		!strings.Contains(html, `src="data:image/png;base64,`+testPNGBase64+`"`) ||
+		!strings.Contains(html, `alt="Gmail"`) {
+		t.Fatalf("approval main missing presentation icon: %q", html)
+	}
+}
+
+func TestApprovalConsoleIgnoresInvalidPresentationIcon(t *testing.T) {
+	call := daemon.PendingApprovalSnapshot{
+		ToolCallID: "tc-1",
+		ToolName:   "gmail.send",
+		Presentation: `{
+			"schema":"toolbox.approval.presentation.v1",
+			"title":"Send email",
+			"icon":{"type":"image","mime_type":"text/html","data_base64":"PGltZyBvbmxvYWQ9YWxlcnQoMSk+"}
+		}`,
+	}
+	if got := approvalDisplayIconDataURI(call); got != "" {
+		t.Fatalf("approval display icon accepted invalid icon: %q", got)
+	}
+}
+
+func TestApprovalConsoleDecisionControlIsTwoWayToggle(t *testing.T) {
+	state := approvalConsoleState{
+		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 1},
+		Sessions: []approvalConsoleSession{{
+			TBSession: "abc123",
+			Active:    true,
+			Intent:    approvalConsoleIntent{Text: "Review pending mail"},
+			PackageGroups: []approvalConsolePackageGroup{{
+				PackageKey:   "gmail",
+				PackageLabel: "Gmail",
+				ToolCalls: []daemon.PendingApprovalSnapshot{{
+					ToolCallID:    "tc-1",
+					ToolName:      "gmail.messages.send",
+					ToolLabel:     "messages.send",
+					Description:   "Send Gmail message.",
+					ParamsInspect: `{to: "joe@example.com"}`,
+				}},
+			}},
+		}},
+	}
+	html := componentHTML(ApprovalMain(state))
+	if strings.Contains(html, ">Leave</button>") {
+		t.Fatalf("approval row still renders Leave decision: %q", html)
+	}
+	if !strings.Contains(html, ">Reject</button>") || !strings.Contains(html, ">Approve</button>") {
+		t.Fatalf("approval row missing reject/approve toggles: %q", html)
+	}
+	if !strings.Contains(html, `? &#39;leave&#39; : &#34;reject&#34;`) || !strings.Contains(html, `? &#39;leave&#39; : &#34;approve&#34;`) {
+		t.Fatalf("approval row missing stable neutral toggle state: %q", html)
+	}
+	if strings.Contains(html, `data-class:active`) {
+		t.Fatalf("approval row should use documented Datastar data-class object syntax, not keyed shortcut syntax: %q", html)
+	}
+	if !strings.Contains(html, `data-class="{&#39;active&#39;:`) {
+		t.Fatalf("approval row missing documented Datastar active class binding: %q", html)
+	}
+	if !strings.Contains(html, `Mark all approved`) {
+		t.Fatalf("approval session missing draft-only mark-all link: %q", html)
+	}
+	if !strings.Contains(html, `Approve all`) || !strings.Contains(html, `@post(&#39;/approval-console/decisions&#39;`) {
+		t.Fatalf("approval session missing direct approve-all menu action: %q", html)
+	}
+	if !strings.Contains(html, `Reject all`) || !strings.Contains(html, `$rejectDialogOpen = true`) {
+		t.Fatalf("approval session missing reject-all dialog action: %q", html)
 	}
 }
 

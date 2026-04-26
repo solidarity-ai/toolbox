@@ -14,7 +14,14 @@ export default async function tool(to: string, subject: string, body: string) {
 export function displayApproval(to: string, subject: string, body: string) {
   return {
     schema: "toolbox.approval.presentation.v1",
+    title: "Send email",
     description: "Send Gmail message.",
+    icon: {
+      type: "image",
+      mime_type: "image/png",
+      data_base64: "iVBORw0KGgo...",
+      alt: "Gmail",
+    },
     blocks: [
       {
         type: "fields",
@@ -32,6 +39,10 @@ export function displayApproval(to: string, subject: string, body: string) {
 `displayApproval` receives the same parameters as the default-exported tool function. If the tool is `tool(input)`, then the presenter should be `displayApproval(input)`. If the tool is `tool(a, b)`, then the presenter should be `displayApproval(a, b)`.
 
 The presenter parameter types must match `Parameters<typeof tool>`. Toolbox checks this at TypeScript compile time, but it does not constrain the presenter return type to the tool return type. `displayApproval` should return either `null`/`undefined` to use the default raw parameter display, or an approval presentation object.
+
+Toolbox also installs the full runtime argument map on `globalThis.__toolboxApprovalArgs` before invoking `displayApproval`. Use `(globalThis as any).__toolboxApprovalArgs` for Toolbox-owned injected metadata that is not part of the tool signature, such as credential account selection fields.
+
+Credential account selections are exposed as `{credential_name}_account`, for example `workspace_account`. This includes accounts the caller selected explicitly and single-account credentials Toolbox auto-selects for execution.
 
 ## Runtime Rules
 
@@ -55,7 +66,15 @@ type ApprovalPresentation = {
   schema: "toolbox.approval.presentation.v1";
   title?: string;
   description?: string;
+  icon?: ApprovalPresentationIcon;
   blocks?: ApprovalPresentationBlock[];
+};
+
+type ApprovalPresentationIcon = {
+  type: "image";
+  mime_type: "image/png";
+  data_base64: string;
+  alt?: string;
 };
 
 type ApprovalPresentationBlock = FieldsBlock | TextBlock | ListBlock;
@@ -95,6 +114,9 @@ type ListBlock = {
 The approval console owns all rendering. Tool packages only provide structured text data.
 
 - The row summary uses the first important `fields` values.
+- The row title uses `title` when present, falling back to the tool label.
+- The row description uses `description` when present, falling back to the package tool description.
+- The row icon uses `icon` when present and valid. Provide a 48x48 PNG encoded as base64; the console renders it at 24x24 CSS pixels for @2x displays.
 - Expanded details always include raw `params_inspect`.
 - All package-provided strings are HTML-escaped.
 - Raw params are rendered as text, never as HTML.

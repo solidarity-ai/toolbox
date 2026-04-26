@@ -22,30 +22,49 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				button { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 0.42rem 0.7rem; cursor: pointer; }
 				button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 				button:disabled { opacity: .5; cursor: not-allowed; }
-				.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1rem; padding: .8rem 1rem; background: #fff; border-bottom: 1px solid var(--border); }
-				.brand { font-weight: 700; font-size: 16px; margin-right: auto; }
-				.pill { color: var(--muted); white-space: nowrap; }
+				.link-button { border:0; background:transparent; color:#0957d0; padding:.2rem .35rem; }
+				.icon-button { width:32px; height:32px; display:inline-grid; place-items:center; padding:0; border-radius:8px; color:#243047; background:#fff; }
+				.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1.35rem; padding: .75rem 1.5rem; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--border); }
+				.brand { display:flex; align-items:center; gap:.65rem; font-weight: 700; font-size: 16px; margin-right: auto; }
+				.brand-mark { width:28px; height:28px; display:inline-grid; place-items:center; border-radius:7px; background:#111827; color:#fff; font-weight:800; line-height:1; }
+				.pill { display:inline-flex; align-items:center; gap:.4rem; color: var(--muted); white-space: nowrap; }
+				.ok-text { color:#0b8f43; }
+				.danger-text { color:var(--danger); }
 				.dot { display:inline-block; width:.55rem; height:.55rem; border-radius:999px; background: var(--ok); margin-right:.35rem; }
 				.dot.warn { background:#c77700; } .dot.off { background:#9aa2ad; }
-				main { max-width: 1100px; margin: 1rem auto 3rem; padding: 0 1rem; }
+				main { max-width: none; margin: .9rem auto 3rem; padding: 0 1.25rem; }
 				.message { min-height: 1.3rem; color: var(--danger); white-space: pre-wrap; }
 				.secret-panel { display:none; margin:.75rem 0; padding:.75rem; border:1px solid var(--border); background:#fff; border-radius:8px; }
 				.secret-panel.open { display:block; }
 				.secret-panel form { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 				.secret-panel input { min-width: 16rem; border:1px solid var(--border); border-radius:6px; padding:.42rem .55rem; }
-				.intent { background:#fff; border:1px solid var(--border); border-radius:8px; margin:1rem 0; overflow:hidden; }
-				.intent-head { display:flex; align-items:flex-start; gap:.75rem; padding:1rem 1rem .65rem; border-bottom:1px solid var(--border); }
+				.intent { background:#fff; border:1px solid var(--border); border-radius:8px; margin:1rem 0; padding:1rem 1rem 0; overflow:hidden; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+				.intent-head { display:block; margin-bottom:.75rem; }
+				.intent-primary { display:flex; align-items:center; gap:.65rem; }
 				.intent-title { font-size:16px; font-weight:650; flex:1; min-width:0; }
-				.intent-meta { color:var(--muted); font-size:13px; margin-top:.2rem; font-weight:400; }
-				.session-info { color:var(--muted); font-size:12px; white-space:pre-line; text-align:right; }
-				.package { padding: .7rem 1rem 0; }
-				.package-title { display:flex; align-items:center; gap:.45rem; font-weight:700; padding-bottom:.45rem; border-bottom:1px solid var(--border); }
+				.intent-meta-row { display:flex; align-items:center; gap:.75rem; margin-top:.55rem; padding-left:1.45rem; }
+				.intent-meta { color:var(--muted); font-size:13px; font-weight:400; margin-right:auto; }
+				.session-popover { position:relative; }
+				.session-tooltip { position:absolute; right:0; top:calc(100% + .45rem); z-index:20; display:none; width:max-content; max-width:min(28rem, calc(100vw - 2rem)); padding:.7rem .8rem; border:1px solid var(--border); border-radius:8px; background:#111827; color:#fff; box-shadow:0 8px 24px rgba(15,23,42,.22); font-size:12px; line-height:1.5; white-space:pre-line; }
+				.session-popover:hover .session-tooltip, .session-popover:focus-within .session-tooltip { display:block; }
+				.intent-menu { position:relative; margin:0; }
+				.intent-menu summary { list-style:none; }
+				.intent-menu summary::-webkit-details-marker { display:none; }
+				.intent-menu summary::after { content:""; margin:0; }
+				.menu-panel { position:absolute; right:0; top:calc(100% + .35rem); z-index:15; min-width:11rem; padding:.35rem; border:1px solid var(--border); border-radius:8px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.16); }
+				.menu-panel button { width:100%; border:0; text-align:left; background:#fff; padding:.42rem .55rem; }
+				.menu-panel button:hover { background:#f5f7fa; }
+				.package { margin:.55rem 0 .9rem; padding:.8rem .75rem .35rem; border:1px solid #e5e9ef; border-radius:7px; background:#fff; }
+				.package-title { display:flex; align-items:center; gap:.55rem; font-weight:700; padding-bottom:.55rem; border-bottom:1px solid var(--border); font-size:15px; }
+				.count-badge { min-width:1.35rem; height:1.35rem; display:inline-grid; place-items:center; padding:0 .4rem; border-radius:999px; background:#eef4ff; color:#0b57d0; font-size:12px; font-weight:700; }
 				.row { padding:.75rem 0; border-bottom:1px solid #edf0f3; }
 				.row-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.8rem; align-items:center; }
-				.tool-name { font-weight:650; white-space:nowrap; }
+				.tool-name { display:flex; align-items:center; gap:.45rem; font-weight:650; white-space:nowrap; min-width:0; }
+				.tool-name-text { overflow:hidden; text-overflow:ellipsis; }
+				.tool-icon { width:24px; height:24px; object-fit:contain; flex:0 0 24px; }
 				.desc { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 				.seg { display:inline-flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; height:32px; background:#fff; }
-				.seg button { border:0; border-right:1px solid var(--border); border-radius:0; padding:0 .55rem; font-size:13px; }
+				.seg button { border:0; border-right:1px solid var(--border); border-radius:0; padding:0 .55rem; width:5.4rem; font-size:13px; }
 				.seg button:last-child { border-right:0; }
 				.seg button.active { background:#eaf2ff; color:#174ea6; font-weight:650; }
 				.seg button.reject.active { background:#fff0ee; color:var(--danger); }
@@ -54,17 +73,20 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.label { color:var(--muted); }
 				.value { overflow-wrap:anywhere; }
 				details { margin-top:.45rem; }
-				summary { color:var(--accent); cursor:pointer; width:fit-content; }
+				summary { color:var(--accent); cursor:pointer; width:fit-content; list-style:none; }
+				summary::-webkit-details-marker { display:none; }
+				summary::after { content:"v"; margin-left:.45rem; font-size:12px; }
+				details[open] summary::after { content:"^"; }
 				pre { margin:.35rem 0 0; padding:.75rem; background:#f4f6f8; border:1px solid var(--border); border-radius:6px; overflow:auto; white-space:pre-wrap; }
 				.details-grid { display:grid; grid-template-columns:9rem minmax(0,1fr); gap:.35rem .8rem; margin-top:.6rem; }
-				.footer { position:sticky; bottom:0; display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem; background:#fbfcfd; border-top:1px solid var(--border); }
+				.footer { position:sticky; bottom:0; display:flex; align-items:center; gap:.75rem; margin:.25rem -1rem 0; padding:.75rem 1rem; background:#fbfcfd; border-top:1px solid var(--border); box-shadow:0 -1px 2px rgba(15,23,42,.04); }
 				.footer .counts { margin-right:auto; color:var(--muted); }
 				.empty { text-align:center; color:var(--muted); padding:4rem 1rem; border:1px dashed var(--border); background:#fff; border-radius:8px; }
 				dialog { border:1px solid var(--border); border-radius:8px; padding:1rem; max-width:420px; width:calc(100% - 2rem); }
 				dialog textarea { width:100%; min-height:5rem; margin:.5rem 0; border:1px solid var(--border); border-radius:6px; padding:.5rem; }
 				dialog::backdrop { background: rgba(20, 24, 29, .25); }
 				.dialog-actions { display:flex; justify-content:flex-end; gap:.5rem; }
-				@media (max-width: 700px) { .topbar { flex-wrap:wrap; } .row-head { grid-template-columns:1fr; } .desc { display:none; } .summary,.details-grid { grid-template-columns:1fr; } .session-info { text-align:left; } .footer { flex-wrap:wrap; } }
+				@media (max-width: 700px) { .topbar { flex-wrap:wrap; padding:.75rem 1rem; } main { padding:0 .75rem; } .intent-meta-row { align-items:flex-start; flex-wrap:wrap; padding-left:0; } .row-head { grid-template-columns:1fr; } .desc { display:none; } .summary,.details-grid { grid-template-columns:1fr; } .footer { flex-wrap:wrap; } }
 			</style>
 			<script type="module" src="/assets/datastar-v1.0.1.js"></script>
 		</head>
@@ -87,14 +109,14 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 
 templ ApprovalTopbar(state approvalConsoleState) {
 	<header class="topbar" id="approval-topbar">
-		<div class="brand">Toolbox Approvals</div>
+		<div class="brand"><span class="brand-mark" aria-hidden="true">T</span><span>Toolbox Approvals</span></div>
 		<div class="pill" id="live-state">
 			<span class="dot" data-class:warn={ liveDotWarnExpr() } data-class:off={ liveDotOffExpr() }></span><span data-text="$liveState">Connecting</span>
 		</div>
-		<div class="pill" id="secret-state">{ titleCase(state.SecretStore.Status) }</div>
+		<div class="pill" id="secret-state"><span class={ secretStatusClass(state.SecretStore.Status) }>{ titleCase(state.SecretStore.Status) }</span></div>
 		<div class="pill" id="client-count">{ fmt.Sprintf("%d clients", state.Summary.ActiveClients) }</div>
 		<div class="pill" id="pending-count">{ fmt.Sprintf("%d pending", state.Summary.PendingApprovals) }</div>
-		<button type="button" title="Settings" data-on:click="$settingsOpen = !$settingsOpen">Settings</button>
+		<button type="button" class="icon-button" aria-label="Settings" title="Settings" data-on:click="$settingsOpen = !$settingsOpen">...</button>
 	</header>
 }
 
@@ -136,17 +158,35 @@ templ ApprovalMain(state approvalConsoleState) {
 templ ApprovalSession(session approvalConsoleSession) {
 	<section class="intent" id={ approvalSessionID(session) } data-session={ session.TBSession }>
 		<div class="intent-head">
-			if session.Active {
-				<span class="dot"></span>
-			} else {
-				<span class="dot off"></span>
-			}
-			<div class="intent-title">
-				"{ session.Intent.Text }"
-				<div class="intent-meta">{ fmt.Sprintf("%d pending - updated %s", countConsoleSessionCalls(session), displayTime(session.UpdatedAt)) }</div>
+			<div class="intent-primary">
+				if session.Active {
+					<span class="dot"></span>
+				} else {
+					<span class="dot off"></span>
+				}
+				<div class="intent-title">"{ session.Intent.Text }"</div>
+				<div class="session-popover">
+					<button type="button" class="icon-button" aria-label="Session details" aria-describedby={ approvalSessionTooltipID(session) }>i</button>
+					<div class="session-tooltip" id={ approvalSessionTooltipID(session) } role="tooltip">
+						if session.Active {
+							Session { session.TBSession }&#10;{ firstNonEmpty(session.Details.Mode, "codemode") } - PID { fmt.Sprintf("%d", session.Details.PID) }&#10;{ session.Details.WorkingDir }&#10;Synced { displayTime(session.Details.LastSyncAt) }
+						} else {
+							Session disconnected&#10;Last sync { displayTime(session.Details.LastSyncAt) }
+						}
+					</div>
+				</div>
 			</div>
-			<button type="button" data-on:click={ setSessionDraftsExpr(session, "approve") }>Mark all approve</button>
-			<div class="session-info">Session { session.TBSession }&#10;{ firstNonEmpty(session.Details.Mode, "codemode") } - PID { fmt.Sprintf("%d", session.Details.PID) }&#10;{ session.Details.WorkingDir }&#10;Synced { displayTime(session.Details.LastSyncAt) }</div>
+			<div class="intent-meta-row">
+				<div class="intent-meta">{ fmt.Sprintf("%d pending", countConsoleSessionCalls(session)) } &middot; Updated { displayTime(session.UpdatedAt) }</div>
+				<button type="button" class="link-button" data-on:click={ setSessionDraftsExpr(session, "approve") }>Mark all approved</button>
+				<details class="intent-menu" data-preserve-attr="open">
+					<summary class="icon-button" aria-label="More actions" title="More actions">...</summary>
+					<div class="menu-panel">
+						<button type="button" data-on:click={ submitAllSessionExpr(session, "approve") }>Approve all</button>
+						<button type="button" data-on:click={ openRejectAllSessionExpr(session) }>Reject all</button>
+					</div>
+				</details>
+			</div>
 		</div>
 		for _, group := range session.PackageGroups {
 			@ApprovalPackage(session, group)
@@ -157,7 +197,10 @@ templ ApprovalSession(session approvalConsoleSession) {
 
 templ ApprovalPackage(session approvalConsoleSession, group approvalConsolePackageGroup) {
 	<section class="package" id={ approvalPackageID(session, group) }>
-		<div class="package-title">{ firstNonEmpty(group.PackageLabel, group.PackageKey) } { fmt.Sprintf("%d", len(group.ToolCalls)) }</div>
+		<div class="package-title">
+			<span>{ firstNonEmpty(group.PackageLabel, group.PackageKey) }</span>
+			<span class="count-badge">{ fmt.Sprintf("%d", len(group.ToolCalls)) }</span>
+		</div>
 		for _, call := range group.ToolCalls {
 			@ApprovalRow(call)
 		}
@@ -167,15 +210,19 @@ templ ApprovalPackage(session approvalConsoleSession, group approvalConsolePacka
 templ ApprovalRow(call daemon.PendingApprovalSnapshot) {
 	<div class="row" id={ approvalRowID(call.ToolCallID) } data-tool-call-id={ call.ToolCallID }>
 		<div class="row-head">
-			<div class="tool-name">{ firstNonEmpty(call.ToolLabel, call.ToolName) }</div>
-			<div class="desc">{ call.Description }</div>
+			<div class="tool-name">
+				if iconURI := approvalDisplayIconDataURI(call); iconURI != "" {
+					<img class="tool-icon" src={ iconURI } alt={ approvalDisplayIconAlt(call) } width="24" height="24"/>
+				}
+				<span class="tool-name-text">{ approvalDisplayTitle(call) }</span>
+			</div>
+			<div class="desc">{ approvalDisplayDescription(call) }</div>
 			if call.QueuedDecision != nil {
 				<div class="sent">Decision sent - Waiting for session...</div>
 			} else {
 				<div class="seg">
-					<button type="button" data-on:click={ decisionClickExpr(call.ToolCallID, "leave") } data-class:active={ decisionActiveExpr(call.ToolCallID, "leave") }>Leave</button>
-					<button type="button" class="reject" data-on:click={ decisionClickExpr(call.ToolCallID, "reject") } data-class:active={ decisionActiveExpr(call.ToolCallID, "reject") }>Reject</button>
-					<button type="button" data-on:click={ decisionClickExpr(call.ToolCallID, "approve") } data-class:active={ decisionActiveExpr(call.ToolCallID, "approve") }>Approve</button>
+					<button type="button" class="reject" data-on:click={ decisionToggleExpr(call.ToolCallID, "reject") } data-class={ decisionClassExpr(call.ToolCallID, "reject") }>Reject</button>
+					<button type="button" data-on:click={ decisionToggleExpr(call.ToolCallID, "approve") } data-class={ decisionClassExpr(call.ToolCallID, "approve") }>Approve</button>
 				</div>
 			}
 		</div>

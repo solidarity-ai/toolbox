@@ -171,6 +171,54 @@ export function displayApproval(a: number, b: string) {
 	}
 }
 
+func TestRunApprovalPresentationCanReadInjectedAccountArgument(t *testing.T) {
+	source := `
+type GmailSendInput = {
+  to: string;
+};
+
+export default function tool(input: GmailSendInput) {
+  return input.to;
+}
+
+export function displayApproval(input: GmailSendInput) {
+  const account = (globalThis as any).__toolboxApprovalArgs?.workspace_account || "";
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    title: account ? "Send email (" + account + ")" : "Send email",
+    blocks: [
+      { type: "fields", fields: [{ label: "To", value: input.to }] },
+    ],
+  };
+}
+`
+	def := tooldef.TSToolDef{
+		Entry: "tools/gmail.send.ts",
+		Files: fstest.MapFS{
+			"tools/gmail.send.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+	got, err := quickts.RunApprovalPresentation(context.Background(), def, map[string]any{
+		"input": map[string]any{
+			"to": "sarah@example.com",
+		},
+		"workspace_account": "work@example.com",
+	}, nil, tooltest.NewTSSig(t, source))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var presentation struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(got), &presentation); err != nil {
+		t.Fatalf("approval presentation was not JSON: %v\n%s", err, got)
+	}
+	if presentation.Title != "Send email (work@example.com)" {
+		t.Fatalf("title = %q, want account-aware title; raw=%s", presentation.Title, got)
+	}
+}
+
 func TestRunApprovalPresentationMissingExportFallsBackEmpty(t *testing.T) {
 	source := `
 export default function tool(a: number, b: string) {
@@ -237,6 +285,8 @@ func TestApprovalPresentationRunnerSourceChecksDisplayApprovalParams(t *testing.
 	)
 
 	for _, want := range []string{
+		`const __toolboxApprovalArgs = {"a":7,"b":4};`,
+		"(globalThis as any).__toolboxApprovalArgs = __toolboxApprovalArgs;",
 		"type __ToolboxDisplayApprovalParams = typeof mod extends { displayApproval: (...args: infer P) => any } ? P : Parameters<typeof tool>;",
 		"const __toolboxDisplayApprovalParamsCheck: __ToolboxExactParams<__ToolboxDisplayApprovalParams, Parameters<typeof tool>> = true;",
 		"await __displayApproval((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]))",

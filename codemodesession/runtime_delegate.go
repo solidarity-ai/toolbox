@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/dop251/goja"
@@ -16,6 +17,7 @@ import (
 	"github.com/mackross/repljs/jswire"
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/invoke"
+	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -288,7 +290,15 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			}
 		}
 		if binding.approvals != nil {
-			if err := binding.approvals.RecordPendingToolCall(sessionID, toolCallID, toolCallID, binding.state.Name, reviewedToolKey, params); err != nil {
+			call := approvalCallState{
+				ToolCallID:      toolCallID,
+				EffectID:        toolCallID,
+				ToolName:        binding.state.Name,
+				ReviewedToolKey: reviewedToolKey,
+				Params:          params,
+			}
+			enrichApprovalCallState(&call, binding.prepared(), binding.state.Name)
+			if err := binding.approvals.RecordPendingToolCall(sessionID, call); err != nil {
 				return nil, err
 			}
 		}
@@ -389,6 +399,81 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 	wrapped := rt.ToValue(wrapper)
 	replengine.SetIndexedValueMetadata(wrapped, replengine.IndexedValueMetadata{StaleMessage: staleMessage})
 	return wrapped, nil
+}
+
+func enrichApprovalCallState(call *approvalCallState, prepared toolset.PreparedToolset, toolName string) {
+	if call == nil {
+		return
+	}
+	tool, ok := prepared.Tool(toolName)
+	if !ok {
+		call.FullToolName = toolName
+		call.ToolLabel = toolName
+		return
+	}
+	pkg := preparedToolPackageName(tool)
+	call.PackageKey = pkg
+	call.PackageLabel = pkg
+	call.ToolLabel = tool.Name
+	call.FullToolName = tool.ToolApprovalKey()
+	call.Description = strings.TrimSpace(tool.Description)
+	call.Presentation = approvalPresentationForTool(tool, call.Params)
+}
+
+func approvalPresentationForTool(tool toolset.PreparedTool, params []byte) json.RawMessage {
+	args, err := decodeRuntimeArgs(params)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var raw string
+	switch {
+	case tool.TS != nil:
+		raw, err = quickts.RunApprovalPresentation(ctx, *tool.TS, args, nil, tool.Sig)
+	case tool.TSWasm != nil:
+		raw, err = quickts.RunApprovalPresentation(ctx, tool.TSWasm.TSToolDef, args, nil, tool.Sig)
+	default:
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || !json.Valid([]byte(trimmed)) {
+		return nil
+	}
+	if !validApprovalPresentation([]byte(trimmed)) {
+		return nil
+	}
+	return append(json.RawMessage(nil), trimmed...)
+}
+
+func validApprovalPresentation(raw []byte) bool {
+	var value struct {
+		Schema string            `json:"schema"`
+		Blocks []json.RawMessage `json:"blocks"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	if value.Schema != "toolbox.approval.presentation.v1" {
+		return false
+	}
+	for _, blockRaw := range value.Blocks {
+		var block struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(blockRaw, &block); err != nil {
+			return false
+		}
+		switch block.Type {
+		case "fields", "text", "list":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (b runtimeBinding) replay() repl.ReplayPolicy {

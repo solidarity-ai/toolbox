@@ -447,9 +447,19 @@ func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, manager *
 		}}
 		if !locked {
 			tools = append([]ToolDescriptor{{
-				Name:         CodeModeNewSessionToolName,
-				Description:  codemodesession.NewSessionToolDescription(awaitAvailable),
-				ParamsSchema: emptyObjectSchema(),
+				Name:        CodeModeNewSessionToolName,
+				Description: codemodesession.NewSessionToolDescription(awaitAvailable),
+				ParamsSchema: map[string]any{
+					"type":     "object",
+					"required": []string{codemodesession.IntentParam},
+					"properties": map[string]any{
+						codemodesession.IntentParam: map[string]any{
+							"type":        "string",
+							"description": "User-facing task intent for this notebook. This appears as the approval-console context.",
+						},
+					},
+					"additionalProperties": false,
+				},
 			}}, tools...)
 		}
 		if prepared.HasApprovalTools() {
@@ -599,7 +609,11 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 			if manager.Locked() {
 				return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 			}
-			tbSession, err := manager.CreateFreshSession(ctx)
+			intent, _ := params.Params[codemodesession.IntentParam].(string)
+			if strings.TrimSpace(intent) == "" {
+				return ToolInvokeResult{}, invalidParams("new_super_tool_session requires params." + codemodesession.IntentParam)
+			}
+			tbSession, err := manager.CreateFreshSession(ctx, intent)
 			if err != nil {
 				return ToolInvokeResult{}, err
 			}

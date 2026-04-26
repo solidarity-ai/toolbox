@@ -576,7 +576,9 @@ func TestBridgeComposeUnlockedCodemodeRequiresTBSessionAndSupportsFreshSessions(
 	freshAny, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
 		ToolsetID: composed.ToolsetID,
 		ToolName:  CodeModeNewSessionToolName,
-		Params:    map[string]any{},
+		Params: map[string]any{
+			codemodesession.IntentParam: "test intent",
+		},
 	}))
 	if err != nil {
 		t.Fatalf("tool.invoke new_super_tool_session: %v", err)

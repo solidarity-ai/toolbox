@@ -119,6 +119,9 @@ type SessionState struct {
 	PendingApprovals []*PendingApprovalSnapshot `protobuf:"bytes,5,rep,name=pending_approvals,json=pendingApprovals,proto3" json:"pending_approvals,omitempty"`
 	Locked           bool                       `protobuf:"varint,6,opt,name=locked,proto3" json:"locked,omitempty"`
 	BoundTbSession   string                     `protobuf:"bytes,7,opt,name=bound_tb_session,json=boundTbSession,proto3" json:"bound_tb_session,omitempty"`
+	IntentText       string                     `protobuf:"bytes,8,opt,name=intent_text,json=intentText,proto3" json:"intent_text,omitempty"`
+	IntentSource     string                     `protobuf:"bytes,9,opt,name=intent_source,json=intentSource,proto3" json:"intent_source,omitempty"`
+	IntentUpdatedAt  string                     `protobuf:"bytes,10,opt,name=intent_updated_at,json=intentUpdatedAt,proto3" json:"intent_updated_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -202,17 +205,50 @@ func (x *SessionState) GetBoundTbSession() string {
 	return ""
 }
 
+func (x *SessionState) GetIntentText() string {
+	if x != nil {
+		return x.IntentText
+	}
+	return ""
+}
+
+func (x *SessionState) GetIntentSource() string {
+	if x != nil {
+		return x.IntentSource
+	}
+	return ""
+}
+
+func (x *SessionState) GetIntentUpdatedAt() string {
+	if x != nil {
+		return x.IntentUpdatedAt
+	}
+	return ""
+}
+
 type PendingApprovalSnapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ToolCallId    string                 `protobuf:"bytes,1,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
-	ToolName      string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
-	ParamsInspect string                 `protobuf:"bytes,3,opt,name=params_inspect,json=paramsInspect,proto3" json:"params_inspect,omitempty"`
-	EffectId      string                 `protobuf:"bytes,4,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
-	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
-	TbSession     string                 `protobuf:"bytes,7,opt,name=tb_session,json=tbSession,proto3" json:"tb_session,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ToolCallId      string                 `protobuf:"bytes,1,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	ToolName        string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	ParamsInspect   string                 `protobuf:"bytes,3,opt,name=params_inspect,json=paramsInspect,proto3" json:"params_inspect,omitempty"`
+	EffectId        string                 `protobuf:"bytes,4,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
+	Status          string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	Error           string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	TbSession       string                 `protobuf:"bytes,7,opt,name=tb_session,json=tbSession,proto3" json:"tb_session,omitempty"`
+	CellId          string                 `protobuf:"bytes,8,opt,name=cell_id,json=cellId,proto3" json:"cell_id,omitempty"`
+	FullToolName    string                 `protobuf:"bytes,9,opt,name=full_tool_name,json=fullToolName,proto3" json:"full_tool_name,omitempty"`
+	PackageKey      string                 `protobuf:"bytes,10,opt,name=package_key,json=packageKey,proto3" json:"package_key,omitempty"`
+	PackageLabel    string                 `protobuf:"bytes,11,opt,name=package_label,json=packageLabel,proto3" json:"package_label,omitempty"`
+	ToolLabel       string                 `protobuf:"bytes,12,opt,name=tool_label,json=toolLabel,proto3" json:"tool_label,omitempty"`
+	Description     string                 `protobuf:"bytes,13,opt,name=description,proto3" json:"description,omitempty"`
+	Presentation    string                 `protobuf:"bytes,14,opt,name=presentation,proto3" json:"presentation,omitempty"`
+	CreatedAt       string                 `protobuf:"bytes,15,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt       string                 `protobuf:"bytes,16,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	IntentText      string                 `protobuf:"bytes,17,opt,name=intent_text,json=intentText,proto3" json:"intent_text,omitempty"`
+	IntentSource    string                 `protobuf:"bytes,18,opt,name=intent_source,json=intentSource,proto3" json:"intent_source,omitempty"`
+	IntentUpdatedAt string                 `protobuf:"bytes,19,opt,name=intent_updated_at,json=intentUpdatedAt,proto3" json:"intent_updated_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PendingApprovalSnapshot) Reset() {
@@ -294,13 +330,99 @@ func (x *PendingApprovalSnapshot) GetTbSession() string {
 	return ""
 }
 
+func (x *PendingApprovalSnapshot) GetCellId() string {
+	if x != nil {
+		return x.CellId
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetFullToolName() string {
+	if x != nil {
+		return x.FullToolName
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetPackageKey() string {
+	if x != nil {
+		return x.PackageKey
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetPackageLabel() string {
+	if x != nil {
+		return x.PackageLabel
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetToolLabel() string {
+	if x != nil {
+		return x.ToolLabel
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetPresentation() string {
+	if x != nil {
+		return x.Presentation
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetUpdatedAt() string {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetIntentText() string {
+	if x != nil {
+		return x.IntentText
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetIntentSource() string {
+	if x != nil {
+		return x.IntentSource
+	}
+	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetIntentUpdatedAt() string {
+	if x != nil {
+		return x.IntentUpdatedAt
+	}
+	return ""
+}
+
 type ApprovalDecision struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
-	ToolCallId    string                 `protobuf:"bytes,2,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Action           string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	ToolCallId       string                 `protobuf:"bytes,2,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	Message          string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	ClientDecisionId string                 `protobuf:"bytes,4,opt,name=client_decision_id,json=clientDecisionId,proto3" json:"client_decision_id,omitempty"`
+	QueuedAt         string                 `protobuf:"bytes,5,opt,name=queued_at,json=queuedAt,proto3" json:"queued_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ApprovalDecision) Reset() {
@@ -354,6 +476,20 @@ func (x *ApprovalDecision) GetMessage() string {
 	return ""
 }
 
+func (x *ApprovalDecision) GetClientDecisionId() string {
+	if x != nil {
+		return x.ClientDecisionId
+	}
+	return ""
+}
+
+func (x *ApprovalDecision) GetQueuedAt() string {
+	if x != nil {
+		return x.QueuedAt
+	}
+	return ""
+}
+
 type ClientSnapshot struct {
 	state            protoimpl.MessageState     `protogen:"open.v1"`
 	Pid              int32                      `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
@@ -365,6 +501,9 @@ type ClientSnapshot struct {
 	PendingApprovals []*PendingApprovalSnapshot `protobuf:"bytes,7,rep,name=pending_approvals,json=pendingApprovals,proto3" json:"pending_approvals,omitempty"`
 	Locked           bool                       `protobuf:"varint,8,opt,name=locked,proto3" json:"locked,omitempty"`
 	BoundTbSession   string                     `protobuf:"bytes,9,opt,name=bound_tb_session,json=boundTbSession,proto3" json:"bound_tb_session,omitempty"`
+	IntentText       string                     `protobuf:"bytes,10,opt,name=intent_text,json=intentText,proto3" json:"intent_text,omitempty"`
+	IntentSource     string                     `protobuf:"bytes,11,opt,name=intent_source,json=intentSource,proto3" json:"intent_source,omitempty"`
+	IntentUpdatedAt  string                     `protobuf:"bytes,12,opt,name=intent_updated_at,json=intentUpdatedAt,proto3" json:"intent_updated_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -458,6 +597,27 @@ func (x *ClientSnapshot) GetLocked() bool {
 func (x *ClientSnapshot) GetBoundTbSession() string {
 	if x != nil {
 		return x.BoundTbSession
+	}
+	return ""
+}
+
+func (x *ClientSnapshot) GetIntentText() string {
+	if x != nil {
+		return x.IntentText
+	}
+	return ""
+}
+
+func (x *ClientSnapshot) GetIntentSource() string {
+	if x != nil {
+		return x.IntentSource
+	}
+	return ""
+}
+
+func (x *ClientSnapshot) GetIntentUpdatedAt() string {
+	if x != nil {
+		return x.IntentUpdatedAt
 	}
 	return ""
 }
@@ -1026,7 +1186,7 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12\x18\n" +
 	"\apayload\x18\x01 \x01(\tR\apayload\x12\x10\n" +
-	"\x03pid\x18\x02 \x01(\x05R\x03pid\"\x97\x02\n" +
+	"\x03pid\x18\x02 \x01(\x05R\x03pid\"\x89\x03\n" +
 	"\fSessionState\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\x12\x1f\n" +
@@ -1035,7 +1195,12 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\x0eprepared_tools\x18\x04 \x03(\tR\rpreparedTools\x12W\n" +
 	"\x11pending_approvals\x18\x05 \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\x12\x16\n" +
 	"\x06locked\x18\x06 \x01(\bR\x06locked\x12(\n" +
-	"\x10bound_tb_session\x18\a \x01(\tR\x0eboundTbSession\"\xe9\x01\n" +
+	"\x10bound_tb_session\x18\a \x01(\tR\x0eboundTbSession\x12\x1f\n" +
+	"\vintent_text\x18\b \x01(\tR\n" +
+	"intentText\x12#\n" +
+	"\rintent_source\x18\t \x01(\tR\fintentSource\x12*\n" +
+	"\x11intent_updated_at\x18\n" +
+	" \x01(\tR\x0fintentUpdatedAt\"\x83\x05\n" +
 	"\x17PendingApprovalSnapshot\x12 \n" +
 	"\ftool_call_id\x18\x01 \x01(\tR\n" +
 	"toolCallId\x12\x1b\n" +
@@ -1045,12 +1210,32 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12\x14\n" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1d\n" +
 	"\n" +
-	"tb_session\x18\a \x01(\tR\ttbSession\"f\n" +
+	"tb_session\x18\a \x01(\tR\ttbSession\x12\x17\n" +
+	"\acell_id\x18\b \x01(\tR\x06cellId\x12$\n" +
+	"\x0efull_tool_name\x18\t \x01(\tR\ffullToolName\x12\x1f\n" +
+	"\vpackage_key\x18\n" +
+	" \x01(\tR\n" +
+	"packageKey\x12#\n" +
+	"\rpackage_label\x18\v \x01(\tR\fpackageLabel\x12\x1d\n" +
+	"\n" +
+	"tool_label\x18\f \x01(\tR\ttoolLabel\x12 \n" +
+	"\vdescription\x18\r \x01(\tR\vdescription\x12\"\n" +
+	"\fpresentation\x18\x0e \x01(\tR\fpresentation\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x0f \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x10 \x01(\tR\tupdatedAt\x12\x1f\n" +
+	"\vintent_text\x18\x11 \x01(\tR\n" +
+	"intentText\x12#\n" +
+	"\rintent_source\x18\x12 \x01(\tR\fintentSource\x12*\n" +
+	"\x11intent_updated_at\x18\x13 \x01(\tR\x0fintentUpdatedAt\"\xb1\x01\n" +
 	"\x10ApprovalDecision\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12 \n" +
 	"\ftool_call_id\x18\x02 \x01(\tR\n" +
 	"toolCallId\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\x96\x03\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12,\n" +
+	"\x12client_decision_id\x18\x04 \x01(\tR\x10clientDecisionId\x12\x1b\n" +
+	"\tqueued_at\x18\x05 \x01(\tR\bqueuedAt\"\x88\x04\n" +
 	"\x0eClientSnapshot\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\tR\x04mode\x12\x1f\n" +
@@ -1062,7 +1247,12 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"lastSyncAt\x12W\n" +
 	"\x11pending_approvals\x18\a \x03(\v2*.toolbox.daemon.v1.PendingApprovalSnapshotR\x10pendingApprovals\x12\x16\n" +
 	"\x06locked\x18\b \x01(\bR\x06locked\x12(\n" +
-	"\x10bound_tb_session\x18\t \x01(\tR\x0eboundTbSession\"\xc1\x01\n" +
+	"\x10bound_tb_session\x18\t \x01(\tR\x0eboundTbSession\x12\x1f\n" +
+	"\vintent_text\x18\n" +
+	" \x01(\tR\n" +
+	"intentText\x12#\n" +
+	"\rintent_source\x18\v \x01(\tR\fintentSource\x12*\n" +
+	"\x11intent_updated_at\x18\f \x01(\tR\x0fintentUpdatedAt\"\xc1\x01\n" +
 	"\vStateUpdate\x12;\n" +
 	"\aclients\x18\x01 \x03(\v2!.toolbox.daemon.v1.ClientSnapshotR\aclients\x12!\n" +
 	"\fsecret_epoch\x18\x02 \x01(\tR\vsecretEpoch\x12R\n" +

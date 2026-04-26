@@ -105,11 +105,15 @@ func (s *ManagedServer) SetPreparedTools(prepared toolset.PreparedToolset) {
 	s.server.SetTools(s.tools(prepared)...)
 }
 
-func (s *ManagedServer) SetAfterSubmit(fn func()) {
+func (s *ManagedServer) SetAfterChange(fn func()) {
 	if s == nil {
 		return
 	}
 	s.afterChange = fn
+}
+
+func (s *ManagedServer) SetAfterSubmit(fn func()) {
+	s.SetAfterChange(fn)
 }
 
 func (s *ManagedServer) PendingApprovals(ctx context.Context) ([]codemodesession.PendingApproval, error) {
@@ -190,7 +194,11 @@ func (s *ManagedServer) newAwaitSuperToolApprovalsTool() mcp.Tool {
 }
 
 func (s *ManagedServer) newSessionTool(awaitAvailable bool) mcp.Tool {
-	return mcp.NewTool(ToolNewSession, mcp.WithDescription(codemodesession.NewSessionToolDescription(awaitAvailable)))
+	return mcp.NewTool(
+		ToolNewSession,
+		mcp.WithDescription(codemodesession.NewSessionToolDescription(awaitAvailable)),
+		mcp.WithString(codemodesession.IntentParam, mcp.Required(), mcp.Description("User-facing task intent for this notebook. This appears as the approval-console context.")),
+	)
 }
 
 func (s *ManagedServer) handleSuperTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -227,6 +235,12 @@ func (s *ManagedServer) handleAwaitSuperToolApprovals(ctx context.Context, reque
 			return nil, err
 		}
 	}
+	if s.manager != nil {
+		if err := s.manager.EnsureSession(ctx, tbSession); err != nil {
+			return nil, err
+		}
+		s.notifyChange()
+	}
 	result, err := s.manager.AwaitNextApproval(ctx, tbSession)
 	if err != nil {
 		return nil, err
@@ -234,8 +248,12 @@ func (s *ManagedServer) handleAwaitSuperToolApprovals(ctx context.Context, reque
 	return mcp.NewToolResultText(result.Text()), nil
 }
 
-func (s *ManagedServer) handleNewSession(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	tbSession, err := s.manager.CreateFreshSession(ctx)
+func (s *ManagedServer) handleNewSession(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	intent, err := request.RequireString(codemodesession.IntentParam)
+	if err != nil {
+		return nil, err
+	}
+	tbSession, err := s.manager.CreateFreshSession(ctx, intent)
 	if err != nil {
 		return nil, err
 	}

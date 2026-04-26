@@ -149,6 +149,20 @@ func (m *Manager) AwaitNextApproval(ctx context.Context, tbSession string) (Appr
 	return result, err
 }
 
+func (m *Manager) EnsureSession(ctx context.Context, tbSession string) error {
+	session, err := m.sessionForRequest(ctx, tbSession)
+	if err != nil {
+		return err
+	}
+	if err := m.refreshApprovalOwners(ctx, session); err != nil {
+		if errors.Is(err, ErrSessionLeaseLost) {
+			m.dropSession(session, true)
+		}
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) PendingApprovals(ctx context.Context) ([]PendingApproval, error) {
 	if m == nil {
 		return nil, nil
@@ -211,11 +225,11 @@ func (m *Manager) ApplyApprovals(ctx context.Context, decisions []ApprovalDecisi
 	return nil
 }
 
-func (m *Manager) CreateFreshSession(ctx context.Context) (string, error) {
+func (m *Manager) CreateFreshSession(ctx context.Context, intent string) (string, error) {
 	if m == nil {
 		return "", errors.New("session manager is unavailable")
 	}
-	session, err := CreateFresh(ctx, m.currentDir, SessionConfig{PreparedTools: m.preparedSnapshot(), Executor: m.executor})
+	session, err := CreateFreshWithIntent(ctx, m.currentDir, intent, SessionConfig{PreparedTools: m.preparedSnapshot(), Executor: m.executor})
 	if err != nil {
 		return "", err
 	}

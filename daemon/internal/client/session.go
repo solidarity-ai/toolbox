@@ -30,7 +30,7 @@ type SessionRegistration struct {
 	secretEpoch              string
 	pendingSecretEpochChange bool
 	onSecretEpochChange      func()
-	onApproval               func(daemonserver.ApprovalDecision)
+	onApprovalBatch          func([]daemonserver.ApprovalDecision)
 	pendingApprovals         []daemonserver.ApprovalDecision
 	seenApprovals            map[string]struct{}
 
@@ -114,24 +114,22 @@ func (r *SessionRegistration) SetSecretEpochHandler(fn func()) {
 	}
 }
 
-func (r *SessionRegistration) SetApprovalHandler(fn func(daemonserver.ApprovalDecision)) {
+func (r *SessionRegistration) SetApprovalBatchHandler(fn func([]daemonserver.ApprovalDecision)) {
 	if r == nil {
 		return
 	}
 
 	var pending []daemonserver.ApprovalDecision
 	r.mu.Lock()
-	r.onApproval = fn
+	r.onApprovalBatch = fn
 	if fn != nil && len(r.pendingApprovals) > 0 {
 		pending = append([]daemonserver.ApprovalDecision(nil), r.pendingApprovals...)
 		r.pendingApprovals = nil
 	}
 	r.mu.Unlock()
 
-	if fn != nil {
-		for _, decision := range pending {
-			fn(decision)
-		}
+	if fn != nil && len(pending) > 0 {
+		fn(pending)
 	}
 }
 
@@ -262,10 +260,31 @@ func (r *SessionRegistration) ensureStream(state daemonserver.SessionState) erro
 		return nil
 	}
 
+	if r.client == nil {
+		client, err := EnsureConnection()
+		if err != nil {
+			return err
+		}
+		r.socketPath = client.socketPath
+		r.client = daemonv1connect.NewSessionServiceClient(transport.NewUnixHTTPClient(client.socketPath), sessionServiceBaseURL)
+		_ = client.Close()
+	}
+
 	stream := r.client.SyncState(context.Background())
 	if err := stream.Send(sessionStateToProto(state)); err != nil {
 		_ = stream.CloseResponse()
-		return err
+		client, reconnectErr := EnsureConnection()
+		if reconnectErr != nil {
+			return errors.Join(err, reconnectErr)
+		}
+		r.socketPath = client.socketPath
+		r.client = daemonv1connect.NewSessionServiceClient(transport.NewUnixHTTPClient(client.socketPath), sessionServiceBaseURL)
+		_ = client.Close()
+		stream = r.client.SyncState(context.Background())
+		if retryErr := stream.Send(sessionStateToProto(state)); retryErr != nil {
+			_ = stream.CloseResponse()
+			return retryErr
+		}
 	}
 	r.stream = stream
 	return nil
@@ -293,6 +312,9 @@ func sessionStateToProto(state daemonserver.SessionState) *daemonv1.SessionState
 		Mode:             state.Mode,
 		Locked:           state.Locked,
 		BoundTbSession:   state.BoundTBSession,
+		IntentText:       state.IntentText,
+		IntentSource:     state.IntentSource,
+		IntentUpdatedAt:  state.IntentUpdatedAt,
 		WorkingDir:       state.WorkingDir,
 		PreparedTools:    append([]string(nil), state.PreparedTools...),
 		PendingApprovals: pendingApprovalsToProto(state.PendingApprovals),
@@ -305,16 +327,17 @@ func (r *SessionRegistration) handleApprovalDecisions(decisions []*daemonv1.Appr
 	}
 
 	var pending []daemonserver.ApprovalDecision
-	var callback func(daemonserver.ApprovalDecision)
+	var batchCallback func([]daemonserver.ApprovalDecision)
 	r.mu.Lock()
 	if r.seenApprovals == nil {
 		r.seenApprovals = make(map[string]struct{})
 	}
 	for _, decision := range decisions {
 		next := daemonserver.ApprovalDecision{
-			Action:     strings.TrimSpace(decision.GetAction()),
-			ToolCallID: strings.TrimSpace(decision.GetToolCallId()),
-			Message:    decision.GetMessage(),
+			Action:           strings.TrimSpace(decision.GetAction()),
+			ToolCallID:       strings.TrimSpace(decision.GetToolCallId()),
+			Message:          decision.GetMessage(),
+			ClientDecisionID: strings.TrimSpace(decision.GetClientDecisionId()),
 		}
 		key := approvalDecisionKey(next)
 		if key == "" {
@@ -324,19 +347,17 @@ func (r *SessionRegistration) handleApprovalDecisions(decisions []*daemonv1.Appr
 			continue
 		}
 		r.seenApprovals[key] = struct{}{}
-		if r.onApproval != nil {
+		if r.onApprovalBatch != nil {
 			pending = append(pending, next)
 		} else {
 			r.pendingApprovals = append(r.pendingApprovals, next)
 		}
 	}
-	callback = r.onApproval
+	batchCallback = r.onApprovalBatch
 	r.mu.Unlock()
 
-	if callback != nil {
-		for _, decision := range pending {
-			callback(decision)
-		}
+	if batchCallback != nil && len(pending) > 0 {
+		batchCallback(pending)
 	}
 }
 
@@ -356,13 +377,25 @@ func pendingApprovalsToProto(approvals []daemonserver.PendingApprovalSnapshot) [
 	out := make([]*daemonv1.PendingApprovalSnapshot, 0, len(approvals))
 	for _, approval := range approvals {
 		next := &daemonv1.PendingApprovalSnapshot{
-			ToolCallId:    approval.ToolCallID,
-			TbSession:     approval.TBSession,
-			ToolName:      approval.ToolName,
-			ParamsInspect: approval.ParamsInspect,
-			EffectId:      approval.EffectID,
-			Status:        approval.Status,
-			Error:         approval.Error,
+			ToolCallId:      approval.ToolCallID,
+			TbSession:       approval.TBSession,
+			IntentText:      approval.IntentText,
+			IntentSource:    approval.IntentSource,
+			IntentUpdatedAt: approval.IntentUpdatedAt,
+			ToolName:        approval.ToolName,
+			FullToolName:    approval.FullToolName,
+			PackageKey:      approval.PackageKey,
+			PackageLabel:    approval.PackageLabel,
+			ToolLabel:       approval.ToolLabel,
+			Description:     approval.Description,
+			ParamsInspect:   approval.ParamsInspect,
+			Presentation:    approval.Presentation,
+			EffectId:        approval.EffectID,
+			CellId:          approval.CellID,
+			Status:          approval.Status,
+			Error:           approval.Error,
+			CreatedAt:       approval.CreatedAt,
+			UpdatedAt:       approval.UpdatedAt,
 		}
 		out = append(out, next)
 	}

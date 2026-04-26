@@ -21,6 +21,7 @@ import (
 
 const (
 	TBSessionParam      = "tb_session"
+	IntentParam         = "intent"
 	NewSessionToolName  = "new_super_tool_session"
 	sessionsDirEnv      = "TOOLBOX_SESSIONS_DIR"
 	tbSessionLength     = 6
@@ -33,6 +34,14 @@ func NewSessionToolDescription(awaitAvailable bool) string {
 		return "Create a fresh notebook and return its tb_session. Reuse that same tb_session on later super_tool and await_super_tool_approvals calls."
 	}
 	return "Create a fresh notebook and return its tb_session. Reuse that same tb_session on later super_tool calls."
+}
+
+func normalizeSessionIntent(intent string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" {
+		return defaultSessionIntent
+	}
+	return intent
 }
 
 var (
@@ -52,11 +61,16 @@ var (
 )
 
 type persistentSessionMetadata struct {
-	TBSession    string
-	REPLSession  string
-	CreatedAt    time.Time
-	LastOpenedAt time.Time
+	TBSession       string
+	REPLSession     string
+	IntentText      string
+	IntentSource    string
+	IntentUpdatedAt time.Time
+	CreatedAt       time.Time
+	LastOpenedAt    time.Time
 }
+
+const defaultSessionIntent = "Manual Toolbox session"
 
 type sessionLease struct {
 	db         *sql.DB
@@ -128,13 +142,17 @@ func SessionDBPath(tbSession string) (string, error) {
 }
 
 func CreateFresh(ctx context.Context, currentDir string, cfgs ...SessionConfig) (*Session, error) {
+	return CreateFreshWithIntent(ctx, currentDir, defaultSessionIntent, cfgs...)
+}
+
+func CreateFreshWithIntent(ctx context.Context, currentDir, intent string, cfgs ...SessionConfig) (*Session, error) {
 	var lastErr error
 	for attempt := 0; attempt < 32; attempt++ {
 		tbSession, err := GenerateTBSession()
 		if err != nil {
 			return nil, err
 		}
-		session, err := CreateNew(ctx, tbSession, currentDir, cfgs...)
+		session, err := CreateNewWithIntent(ctx, tbSession, currentDir, intent, cfgs...)
 		if err == nil {
 			return session, nil
 		}
@@ -150,11 +168,15 @@ func CreateFresh(ctx context.Context, currentDir string, cfgs ...SessionConfig) 
 }
 
 func CreateNew(ctx context.Context, tbSession, currentDir string, cfgs ...SessionConfig) (*Session, error) {
+	return CreateNewWithIntent(ctx, tbSession, currentDir, defaultSessionIntent, cfgs...)
+}
+
+func CreateNewWithIntent(ctx context.Context, tbSession, currentDir, intent string, cfgs ...SessionConfig) (*Session, error) {
 	dbPath, err := reserveSessionDB(tbSession)
 	if err != nil {
 		return nil, err
 	}
-	return openPersistentSession(ctx, dbPath, tbSession, currentDir, firstConfig(cfgs), true)
+	return openPersistentSession(ctx, dbPath, tbSession, currentDir, normalizeSessionIntent(intent), firstConfig(cfgs), true)
 }
 
 func OpenExisting(ctx context.Context, tbSession, currentDir string, cfgs ...SessionConfig) (*Session, error) {
@@ -168,7 +190,7 @@ func OpenExisting(ctx context.Context, tbSession, currentDir string, cfgs ...Ses
 		}
 		return nil, fmt.Errorf("stat tb_session db: %w", err)
 	}
-	return openPersistentSession(ctx, dbPath, tbSession, currentDir, firstConfig(cfgs), false)
+	return openPersistentSession(ctx, dbPath, tbSession, currentDir, "", firstConfig(cfgs), false)
 }
 
 func reserveSessionDB(tbSession string) (string, error) {
@@ -193,7 +215,7 @@ func reserveSessionDB(tbSession string) (string, error) {
 	return dbPath, nil
 }
 
-func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir string, cfg SessionConfig, create bool) (*Session, error) {
+func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir, intent string, cfg SessionConfig, create bool) (*Session, error) {
 	if err := ValidateTBSession(tbSession); err != nil {
 		return nil, err
 	}
@@ -238,6 +260,7 @@ func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir st
 	var (
 		sess    repl.Session
 		resumed bool
+		meta    persistentSessionMetadata
 	)
 	if create {
 		sess, err = repl.New().StartSession(ctx, repl.SessionConfig{
@@ -247,20 +270,25 @@ func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir st
 			return cleanupLease(fmt.Errorf("start session: %w", err))
 		}
 		now := leaseNow()
-		if err := writeSessionMetadata(ctx, st.DB(), persistentSessionMetadata{
-			TBSession:    tbSession,
-			REPLSession:  string(sess.ID()),
-			CreatedAt:    now,
-			LastOpenedAt: now,
-		}); err != nil {
+		meta = persistentSessionMetadata{
+			TBSession:       tbSession,
+			REPLSession:     string(sess.ID()),
+			IntentText:      normalizeSessionIntent(intent),
+			IntentSource:    "user",
+			IntentUpdatedAt: now,
+			CreatedAt:       now,
+			LastOpenedAt:    now,
+		}
+		if err := writeSessionMetadata(ctx, st.DB(), meta); err != nil {
 			_ = sess.Close()
 			return cleanupLease(err)
 		}
 	} else {
-		meta, err := loadSessionMetadata(ctx, st.DB())
+		loadedMeta, err := loadSessionMetadata(ctx, st.DB())
 		if err != nil {
 			return cleanupLease(err)
 		}
+		meta = loadedMeta
 		if meta.TBSession != tbSession {
 			return cleanupLease(fmt.Errorf("%w: requested %q, stored %q", errPersistentSessionState, tbSession, meta.TBSession))
 		}
@@ -269,6 +297,11 @@ func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir st
 			return cleanupLease(fmt.Errorf("open session %q: %w", meta.REPLSession, err))
 		}
 		meta.LastOpenedAt = leaseNow()
+		if strings.TrimSpace(meta.IntentText) == "" {
+			meta.IntentText = defaultSessionIntent
+			meta.IntentSource = "fallback"
+			meta.IntentUpdatedAt = meta.LastOpenedAt
+		}
 		if err := writeSessionMetadata(ctx, st.DB(), meta); err != nil {
 			_ = sess.Close()
 			return cleanupLease(err)
@@ -296,21 +329,24 @@ func openPersistentSession(ctx context.Context, dbPath, tbSession, currentDir st
 	}
 
 	session := &Session{
-		session:        sess,
-		store:          st,
-		storeCloser:    st,
-		id:             sess.ID(),
-		tbSession:      tbSession,
-		resumed:        resumed,
-		prepared:       prepared,
-		applied:        prepared.Get(),
-		toolCalls:      toolCalls,
-		approvals:      approvals,
-		approvalAwaits: newApprovalAwaitDelegate(),
-		toolRuns:       toolRuns,
-		executor:       executor,
-		ownExecutor:    ownExecutor,
-		lease:          lease,
+		session:         sess,
+		store:           st,
+		storeCloser:     st,
+		id:              sess.ID(),
+		tbSession:       tbSession,
+		intentText:      normalizeSessionIntent(meta.IntentText),
+		intentSource:    strings.TrimSpace(meta.IntentSource),
+		intentUpdatedAt: meta.IntentUpdatedAt,
+		resumed:         resumed,
+		prepared:        prepared,
+		applied:         prepared.Get(),
+		toolCalls:       toolCalls,
+		approvals:       approvals,
+		approvalAwaits:  newApprovalAwaitDelegate(),
+		toolRuns:        toolRuns,
+		executor:        executor,
+		ownExecutor:     ownExecutor,
+		lease:           lease,
 	}
 	lease.start(func(err error) {
 		session.markTerminal(err)
@@ -327,6 +363,9 @@ CREATE TABLE IF NOT EXISTS toolbox_session_metadata (
   singleton_id    INTEGER PRIMARY KEY CHECK (singleton_id = 1),
   tb_session      TEXT NOT NULL,
   repl_session_id TEXT NOT NULL,
+  intent_text     TEXT NOT NULL DEFAULT '',
+  intent_source   TEXT NOT NULL DEFAULT '',
+  intent_updated_at TEXT NOT NULL DEFAULT '',
   created_at      TEXT NOT NULL,
   last_opened_at  TEXT NOT NULL
 );
@@ -343,24 +382,34 @@ CREATE TABLE IF NOT EXISTS session_lease (
 	if err != nil {
 		return fmt.Errorf("migrate persistent session schema: %w", err)
 	}
+	for _, stmt := range []string{
+		`ALTER TABLE toolbox_session_metadata ADD COLUMN intent_text TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE toolbox_session_metadata ADD COLUMN intent_source TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE toolbox_session_metadata ADD COLUMN intent_updated_at TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, alterErr := db.ExecContext(ctx, stmt); alterErr != nil && !strings.Contains(alterErr.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate persistent session schema: %w", alterErr)
+		}
+	}
 	return nil
 }
 
 func loadSessionMetadata(ctx context.Context, db *sql.DB) (persistentSessionMetadata, error) {
 	row := db.QueryRowContext(ctx, `
-SELECT tb_session, repl_session_id, created_at, last_opened_at
+SELECT tb_session, repl_session_id, intent_text, intent_source, intent_updated_at, created_at, last_opened_at
 FROM toolbox_session_metadata
 WHERE singleton_id = ?`,
 		metadataSingletonID,
 	)
 	var meta persistentSessionMetadata
-	var createdAt, lastOpenedAt string
-	if err := row.Scan(&meta.TBSession, &meta.REPLSession, &createdAt, &lastOpenedAt); err != nil {
+	var intentUpdatedAt, createdAt, lastOpenedAt string
+	if err := row.Scan(&meta.TBSession, &meta.REPLSession, &meta.IntentText, &meta.IntentSource, &intentUpdatedAt, &createdAt, &lastOpenedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return persistentSessionMetadata{}, errPersistentSessionState
 		}
 		return persistentSessionMetadata{}, fmt.Errorf("load persistent session metadata: %w", err)
 	}
+	meta.IntentUpdatedAt = parseLeaseTime(intentUpdatedAt)
 	meta.CreatedAt = parseLeaseTime(createdAt)
 	meta.LastOpenedAt = parseLeaseTime(lastOpenedAt)
 	if meta.TBSession == "" || meta.REPLSession == "" {
@@ -373,21 +422,34 @@ func writeSessionMetadata(ctx context.Context, db *sql.DB, meta persistentSessio
 	if meta.CreatedAt.IsZero() {
 		meta.CreatedAt = leaseNow()
 	}
+	meta.IntentText = normalizeSessionIntent(meta.IntentText)
+	if strings.TrimSpace(meta.IntentSource) == "" {
+		meta.IntentSource = "fallback"
+	}
+	if meta.IntentUpdatedAt.IsZero() {
+		meta.IntentUpdatedAt = meta.CreatedAt
+	}
 	if meta.LastOpenedAt.IsZero() {
 		meta.LastOpenedAt = leaseNow()
 	}
 	_, err := db.ExecContext(ctx, `
 INSERT INTO toolbox_session_metadata
-  (singleton_id, tb_session, repl_session_id, created_at, last_opened_at)
-VALUES (?, ?, ?, ?, ?)
+  (singleton_id, tb_session, repl_session_id, intent_text, intent_source, intent_updated_at, created_at, last_opened_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(singleton_id) DO UPDATE SET
   tb_session = excluded.tb_session,
   repl_session_id = excluded.repl_session_id,
+  intent_text = excluded.intent_text,
+  intent_source = excluded.intent_source,
+  intent_updated_at = excluded.intent_updated_at,
   created_at = excluded.created_at,
   last_opened_at = excluded.last_opened_at`,
 		metadataSingletonID,
 		meta.TBSession,
 		meta.REPLSession,
+		meta.IntentText,
+		meta.IntentSource,
+		meta.IntentUpdatedAt.Format(time.RFC3339Nano),
 		meta.CreatedAt.Format(time.RFC3339Nano),
 		meta.LastOpenedAt.Format(time.RFC3339Nano),
 	)

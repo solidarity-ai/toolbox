@@ -56,6 +56,36 @@ func TestToolRunStateAcquireCancelsWithParentContext(t *testing.T) {
 	}
 }
 
+func TestApprovalAwaitBatchTextListsEveryRejectedDecision(t *testing.T) {
+	result := approvalAwaitResultFromBatch([]appliedApprovalResult{{
+		Status: ApprovalAwaitStatusRejected,
+		ToolCall: PendingApproval{
+			ToolCallID: "tc-1",
+			ToolName:   "gmail.send",
+			Error:      "wrong recipient",
+		},
+	}, {
+		Status: ApprovalAwaitStatusRejected,
+		ToolCall: PendingApproval{
+			ToolCallID: "tc-2",
+			ToolName:   "calendar.create",
+			Error:      "wrong time",
+		},
+	}}, 0)
+
+	text := result.Text()
+	for _, want := range []string{
+		"2 approval decisions applied (0 approved, 2 rejected).",
+		"- gmail.send [tc-1] rejected: wrong recipient",
+		"- calendar.create [tc-2] rejected: wrong time",
+		"(no outstanding approvals).",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("result text missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestToolRunStateResetCancelsRunningToolsWithoutWaiting(t *testing.T) {
 	state := newToolRunState()
 	ctx, release := state.Acquire(context.Background())
@@ -265,7 +295,7 @@ func (s *blockingApprovalStore) BeginSubmit(repl.SessionID) {}
 
 func (s *blockingApprovalStore) AbortSubmit(repl.SessionID) {}
 
-func (s *blockingApprovalStore) RecordPendingToolCall(repl.SessionID, string, string, string, string, []byte) error {
+func (s *blockingApprovalStore) RecordPendingToolCall(repl.SessionID, approvalCallState) error {
 	return errors.New("unexpected call")
 }
 

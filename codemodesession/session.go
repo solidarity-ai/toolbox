@@ -137,26 +137,29 @@ type SessionConfig struct {
 // Session is the shared TypeScript submit boundary used by the CLI repl and
 // codemode MCP surface.
 type Session struct {
-	mu             sync.Mutex
-	session        repl.Session
-	store          repl.Store
-	storeCloser    storeCloser
-	id             repl.SessionID
-	tbSession      string
-	resumed        bool
-	prepared       *preparedState
-	applied        toolset.PreparedToolset
-	toolCalls      toolCallJournal
-	approvals      approvalStore
-	approvalAwaits *approvalAwaitDelegate
-	toolRuns       *toolRunState
-	executor       *invoke.Executor
-	ownExecutor    bool
-	lease          *sessionLease
-	terminalErr    error
-	submitting     atomic.Bool
-	preparedSeq    atomic.Uint64
-	appliedSeq     uint64
+	mu              sync.Mutex
+	session         repl.Session
+	store           repl.Store
+	storeCloser     storeCloser
+	id              repl.SessionID
+	tbSession       string
+	intentText      string
+	intentSource    string
+	intentUpdatedAt time.Time
+	resumed         bool
+	prepared        *preparedState
+	applied         toolset.PreparedToolset
+	toolCalls       toolCallJournal
+	approvals       approvalStore
+	approvalAwaits  *approvalAwaitDelegate
+	toolRuns        *toolRunState
+	executor        *invoke.Executor
+	ownExecutor     bool
+	lease           *sessionLease
+	terminalErr     error
+	submitting      atomic.Bool
+	preparedSeq     atomic.Uint64
+	appliedSeq      uint64
 }
 
 // OpenMemory opens a new in-memory TypeScript session.
@@ -180,17 +183,20 @@ func OpenMemory(ctx context.Context, currentDir string, cfgs ...SessionConfig) (
 	}
 
 	return &Session{
-		session:        sess,
-		store:          st,
-		id:             sess.ID(),
-		prepared:       prepared,
-		applied:        prepared.Get(),
-		toolCalls:      toolCalls,
-		approvals:      approvals,
-		approvalAwaits: newApprovalAwaitDelegate(),
-		toolRuns:       toolRuns,
-		executor:       executor,
-		ownExecutor:    ownExecutor,
+		session:         sess,
+		store:           st,
+		id:              sess.ID(),
+		intentText:      defaultSessionIntent,
+		intentSource:    "fallback",
+		intentUpdatedAt: time.Now().UTC(),
+		prepared:        prepared,
+		applied:         prepared.Get(),
+		toolCalls:       toolCalls,
+		approvals:       approvals,
+		approvalAwaits:  newApprovalAwaitDelegate(),
+		toolRuns:        toolRuns,
+		executor:        executor,
+		ownExecutor:     ownExecutor,
 	}, nil
 }
 
@@ -245,6 +251,20 @@ func (s *Session) TBSession() string {
 		return ""
 	}
 	return s.tbSession
+}
+
+func (s *Session) Intent() (text, source string, updatedAt time.Time) {
+	if s == nil {
+		return defaultSessionIntent, "fallback", time.Time{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	text = normalizeSessionIntent(s.intentText)
+	source = strings.TrimSpace(s.intentSource)
+	if source == "" {
+		source = "fallback"
+	}
+	return text, source, s.intentUpdatedAt
 }
 
 // Resumed reports whether the session reopened prior durable state.
@@ -685,6 +705,9 @@ func (s *Session) pendingApprovalsLocked(ctx context.Context) ([]PendingApproval
 	}
 	for i := range approvals {
 		approvals[i].TBSession = s.tbSession
+		approvals[i].IntentText = normalizeSessionIntent(s.intentText)
+		approvals[i].IntentSource = strings.TrimSpace(s.intentSource)
+		approvals[i].IntentUpdatedAt = s.intentUpdatedAt
 	}
 	return approvals, nil
 }

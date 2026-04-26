@@ -8,9 +8,10 @@ import (
 )
 
 type Registry struct {
-	mu      sync.RWMutex
-	nextID  uint64
-	clients map[uint64]*trackedClient
+	mu       sync.RWMutex
+	nextID   uint64
+	revision uint64
+	clients  map[uint64]*trackedClient
 }
 
 type trackedClient struct {
@@ -57,12 +58,16 @@ func (r *Registry) UpdateClient(id uint64, state SessionState) {
 	client.snapshot.Mode = state.Mode
 	client.snapshot.Locked = state.Locked
 	client.snapshot.BoundTBSession = state.BoundTBSession
+	client.snapshot.IntentText = state.IntentText
+	client.snapshot.IntentSource = state.IntentSource
+	client.snapshot.IntentUpdatedAt = state.IntentUpdatedAt
 	client.snapshot.WorkingDir = state.WorkingDir
 	client.snapshot.PreparedTools = append([]string(nil), state.PreparedTools...)
 	client.snapshot.PendingApprovals = clonePendingApprovals(state.PendingApprovals)
 	client.snapshot.LastSyncAt = time.Now().UTC()
 	client.decisions = filterApprovalDecisions(client.decisions, client.snapshot.PendingApprovals)
 	client.registered = true
+	r.revision++
 }
 
 func (r *Registry) RemoveClient(id uint64) {
@@ -73,6 +78,7 @@ func (r *Registry) RemoveClient(id uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.clients, id)
+	r.revision++
 }
 
 func (r *Registry) Clients() []ClientSnapshot {
@@ -91,6 +97,7 @@ func (r *Registry) Clients() []ClientSnapshot {
 		snapshot := client.snapshot
 		snapshot.PreparedTools = append([]string(nil), snapshot.PreparedTools...)
 		snapshot.PendingApprovals = clonePendingApprovals(snapshot.PendingApprovals)
+		attachQueuedDecisions(snapshot.PendingApprovals, client.decisions)
 		out = append(out, snapshot)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -121,7 +128,9 @@ func (r *Registry) PendingApprovals() []PendingApprovalSnapshot {
 		if !client.registered {
 			continue
 		}
-		out = append(out, clonePendingApprovals(client.snapshot.PendingApprovals)...)
+		approvals := clonePendingApprovals(client.snapshot.PendingApprovals)
+		attachQueuedDecisions(approvals, client.decisions)
+		out = append(out, approvals...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ToolCallID < out[j].ToolCallID
@@ -151,13 +160,24 @@ func (r *Registry) QueueApprovalDecision(decision ApprovalDecision) error {
 			}
 			if queued.ToolCallID == decision.ToolCallID {
 				client.decisions[i] = decision
+				r.revision++
 				return nil
 			}
 		}
 		client.decisions = append(client.decisions, decision)
+		r.revision++
 		return nil
 	}
 	return nil
+}
+
+func (r *Registry) Revision() uint64 {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.revision
 }
 
 func (r *Registry) ApprovalDecisions(id uint64) []ApprovalDecision {
@@ -181,6 +201,28 @@ func clonePendingApprovals(approvals []PendingApprovalSnapshot) []PendingApprova
 	out := make([]PendingApprovalSnapshot, len(approvals))
 	copy(out, approvals)
 	return out
+}
+
+func attachQueuedDecisions(approvals []PendingApprovalSnapshot, decisions []ApprovalDecision) {
+	if len(approvals) == 0 || len(decisions) == 0 {
+		return
+	}
+	byID := make(map[string]ApprovalDecision, len(decisions))
+	for _, decision := range decisions {
+		byID[decision.ToolCallID] = decision
+	}
+	for i := range approvals {
+		decision, ok := byID[approvals[i].ToolCallID]
+		if !ok {
+			continue
+		}
+		approvals[i].QueuedDecision = &QueuedApprovalDecision{
+			Action:           decision.Action,
+			Message:          decision.Message,
+			ClientDecisionID: decision.ClientDecisionID,
+			QueuedAt:         decision.QueuedAt,
+		}
+	}
 }
 
 func filterApprovalDecisions(decisions []ApprovalDecision, approvals []PendingApprovalSnapshot) []ApprovalDecision {
@@ -213,6 +255,10 @@ func normalizeApprovalDecision(decision ApprovalDecision) ApprovalDecision {
 	decision.Action = strings.TrimSpace(decision.Action)
 	decision.ToolCallID = strings.TrimSpace(decision.ToolCallID)
 	decision.Message = strings.TrimSpace(decision.Message)
+	decision.ClientDecisionID = strings.TrimSpace(decision.ClientDecisionID)
+	if decision.QueuedAt.IsZero() {
+		decision.QueuedAt = time.Now().UTC()
+	}
 	return decision
 }
 

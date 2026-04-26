@@ -81,7 +81,7 @@ func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout
 	bindApprovalExecution(sessionDelegate, stderr, managed, func() error {
 		return syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 	})
-	managed.SetAfterSubmit(func() {
+	managed.SetAfterChange(func() {
 		syncSessionBinding(sessionDelegate, managed)
 		_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 	})

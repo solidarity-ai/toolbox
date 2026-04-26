@@ -59,17 +59,17 @@ func TestHandleStateUpdateFiresInstalledHandlerForNewEpochChange(t *testing.T) {
 	}
 }
 
-func TestHandleStateUpdateFiresInstalledApprovalHandlerForNewDecision(t *testing.T) {
+func TestHandleStateUpdateFiresInstalledApprovalBatchHandlerForNewDecision(t *testing.T) {
 	reg := &SessionRegistration{}
 
 	var (
-		mu        sync.Mutex
-		decisions []ApprovalDecision
+		mu      sync.Mutex
+		batches [][]ApprovalDecision
 	)
-	reg.SetApprovalHandler(func(decision ApprovalDecision) {
+	reg.SetApprovalBatchHandler(func(decisions []ApprovalDecision) {
 		mu.Lock()
 		defer mu.Unlock()
-		decisions = append(decisions, decision)
+		batches = append(batches, append([]ApprovalDecision(nil), decisions...))
 	})
 
 	reg.handleStateUpdate(&daemonv1.StateUpdate{
@@ -82,16 +82,57 @@ func TestHandleStateUpdateFiresInstalledApprovalHandlerForNewDecision(t *testing
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(decisions) != 1 {
-		t.Fatalf("decisions len = %d, want 1", len(decisions))
+	if len(batches) != 1 {
+		t.Fatalf("batches len = %d, want 1", len(batches))
 	}
-	if decisions[0].Action != "reject" {
-		t.Fatalf("decisions[0].Action = %q, want %q", decisions[0].Action, "reject")
+	if len(batches[0]) != 1 {
+		t.Fatalf("batches[0] len = %d, want 1", len(batches[0]))
 	}
-	if decisions[0].ToolCallID != "tc-1" {
-		t.Fatalf("decisions[0].ToolCallID = %q, want %q", decisions[0].ToolCallID, "tc-1")
+	if batches[0][0].Action != "reject" {
+		t.Fatalf("batches[0][0].Action = %q, want %q", batches[0][0].Action, "reject")
 	}
-	if decisions[0].Message != "blocked" {
-		t.Fatalf("decisions[0].Message = %q, want %q", decisions[0].Message, "blocked")
+	if batches[0][0].ToolCallID != "tc-1" {
+		t.Fatalf("batches[0][0].ToolCallID = %q, want %q", batches[0][0].ToolCallID, "tc-1")
+	}
+	if batches[0][0].Message != "blocked" {
+		t.Fatalf("batches[0][0].Message = %q, want %q", batches[0][0].Message, "blocked")
+	}
+}
+
+func TestHandleStateUpdatePreservesApprovalDecisionBatch(t *testing.T) {
+	reg := &SessionRegistration{}
+
+	var (
+		mu      sync.Mutex
+		batches [][]ApprovalDecision
+	)
+	reg.SetApprovalBatchHandler(func(decisions []ApprovalDecision) {
+		mu.Lock()
+		defer mu.Unlock()
+		batches = append(batches, append([]ApprovalDecision(nil), decisions...))
+	})
+
+	reg.handleStateUpdate(&daemonv1.StateUpdate{
+		ApprovalDecisions: []*daemonv1.ApprovalDecision{{
+			Action:     "reject",
+			ToolCallId: "tc-1",
+			Message:    "first",
+		}, {
+			Action:     "reject",
+			ToolCallId: "tc-2",
+			Message:    "second",
+		}},
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(batches) != 1 {
+		t.Fatalf("batches len = %d, want 1", len(batches))
+	}
+	if len(batches[0]) != 2 {
+		t.Fatalf("batches[0] len = %d, want 2", len(batches[0]))
+	}
+	if batches[0][0].ToolCallID != "tc-1" || batches[0][1].ToolCallID != "tc-2" {
+		t.Fatalf("batch tool call ids = %#v, want tc-1/tc-2", batches[0])
 	}
 }

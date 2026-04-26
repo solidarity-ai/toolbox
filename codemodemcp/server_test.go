@@ -300,6 +300,108 @@ tasks.map((task) => $tool_call(task).status)`,
 	}
 }
 
+func TestUnlockedMCPAwaitOldSessionPublishesPendingApprovalsBeforeBlocking(t *testing.T) {
+	tempDir := t.TempDir()
+	dir := writeApprovalPackage(t)
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"issues.get": true,
+		},
+	})
+
+	original, err := codemodemcp.OpenManagedNamed(context.Background(), "example", tempDir)
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(original): %v", err)
+	}
+	original.SetPreparedTools(prepared)
+	h1 := mcptest.NewHarness(t, original.Server())
+	tbSession := mustNewTBSession(t, h1)
+
+	result := h1.CallTool(codemodemcp.ToolSuperTool, map[string]any{
+		codemodesession.TBSessionParam:            tbSession,
+		codemodesession.TypeScriptCellSourceParam: `issues.get("I-1")`,
+	})
+	if result.IsError {
+		t.Fatalf("super_tool expected non-error result")
+	}
+	if err := original.Close(); err != nil {
+		t.Fatalf("Close(original): %v", err)
+	}
+
+	resumed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", tempDir)
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(resumed): %v", err)
+	}
+	defer resumed.Close()
+	resumed.SetPreparedTools(prepared)
+
+	type syncSnapshot struct {
+		approvals []codemodesession.PendingApproval
+		err       error
+	}
+	syncCh := make(chan syncSnapshot, 1)
+	resumed.SetAfterChange(func() {
+		approvals, err := resumed.PendingApprovals(context.Background())
+		select {
+		case syncCh <- syncSnapshot{approvals: approvals, err: err}:
+		default:
+		}
+	})
+
+	h2 := mcptest.NewHarness(t, resumed.Server())
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	waitCh := make(chan callResult, 1)
+	go func() {
+		res, err := h2.Client.CallTool(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{
+				Name: codemodemcp.ToolAwaitSuperToolApprovals,
+				Arguments: map[string]any{
+					codemodesession.TBSessionParam: tbSession,
+				},
+			},
+		})
+		waitCh <- callResult{result: res, err: err}
+	}()
+
+	var approvals []codemodesession.PendingApproval
+	select {
+	case got := <-syncCh:
+		if got.err != nil {
+			t.Fatalf("PendingApprovals during sync: %v", got.err)
+		}
+		approvals = got.approvals
+	case got := <-waitCh:
+		t.Fatalf("await returned before publishing pending approvals: %#v", got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("await did not publish pending approvals before blocking")
+	}
+	if len(approvals) != 1 {
+		t.Fatalf("published approvals len = %d, want 1: %#v", len(approvals), approvals)
+	}
+	if approvals[0].TBSession != tbSession {
+		t.Fatalf("published approval tb_session = %q, want %q", approvals[0].TBSession, tbSession)
+	}
+
+	if err := resumed.ApplyApprovals(context.Background(), []codemodesession.ApprovalDecision{{
+		ToolCallID: approvals[0].ToolCallID,
+		Approved:   true,
+	}}); err != nil {
+		t.Fatalf("ApplyApprovals(): %v", err)
+	}
+	select {
+	case got := <-waitCh:
+		if got.err != nil {
+			t.Fatalf("await call error: %v", got.err)
+		}
+		assertTextContains(t, resultText(t, got.result), "approved")
+	case <-time.After(2 * time.Second):
+		t.Fatal("await did not return after approval")
+	}
+}
+
 func TestUnlockedMCPAwaitSuperToolApprovalsOnlyObservesRequestedSession(t *testing.T) {
 	dir := writeApprovalPackage(t)
 	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
@@ -412,7 +514,9 @@ func resultText(t testing.TB, result *mcp.CallToolResult) string {
 
 func mustNewTBSession(t testing.TB, h *mcptest.Harness) string {
 	t.Helper()
-	result := h.CallTool(codemodemcp.ToolNewSession, nil)
+	result := h.CallTool(codemodemcp.ToolNewSession, map[string]any{
+		codemodesession.IntentParam: "test intent",
+	})
 	if result.IsError {
 		t.Fatalf("new_super_tool_session expected non-error result")
 	}

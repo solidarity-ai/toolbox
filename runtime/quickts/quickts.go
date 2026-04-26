@@ -84,6 +84,17 @@ func RunWithSessionContext(ctx context.Context, def tooldef.TSToolDef, args map[
 	return RunWithHostContext(ctx, def, args, Host{}, session, sig)
 }
 
+// RunApprovalPresentation calls an optional displayApproval export from the
+// tool module with no host functions installed. When sig is available,
+// displayApproval receives the same positional arguments as the default tool.
+// It returns an empty string when the export is absent or returns null/undefined.
+func RunApprovalPresentation(ctx context.Context, def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return RunModuleSourceWithHostContext(ctx, def, approvalPresentationRunnerSource(def.Entry, args, sig), Host{}, session)
+}
+
 // RunWithHost is the same minimal runtime seam with optional host imports.
 // If *session is non-nil the TypeScript checker reuses it for incremental
 // checking. On first call the created session is written back through the pointer.
@@ -95,6 +106,10 @@ func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session 
 
 // RunWithHostContext is RunWithHost with cancellation support.
 func RunWithHostContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (result string, err error) {
+	return RunModuleSourceWithHostContext(ctx, def, runnerSource(def.Entry, args, sig), host, session)
+}
+
+func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, source string, host Host, session **toolbox.CheckSession) (result string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -112,7 +127,7 @@ func RunWithHostContext(ctx context.Context, def tooldef.TSToolDef, args map[str
 	if session != nil {
 		checkSession = *session
 	}
-	files, err := withRunner(def.Files, runnerSource(def.Entry, args, sig))
+	files, err := withRunner(def.Files, source)
 	if err != nil {
 		return "", err
 	}
@@ -439,6 +454,54 @@ func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature)
 	return sb.String()
 }
 
+func approvalPresentationRunnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
+	var sb strings.Builder
+	if sig == nil {
+		fmt.Fprintf(&sb, `import * as mod from "./%s";`, entry)
+		sb.WriteString("\n")
+	} else {
+		fmt.Fprintf(&sb, `import tool, * as mod from "./%s";`, entry)
+		sb.WriteString("\n")
+	}
+	callArgs := approvalPresentationCallArgs(args, sig)
+	if sig != nil {
+		sb.WriteString(`type __ToolboxExactParams<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+type __ToolboxDisplayApprovalParams = typeof mod extends { displayApproval: (...args: infer P) => any } ? P : Parameters<typeof tool>;
+const __toolboxDisplayApprovalParamsCheck: __ToolboxExactParams<__ToolboxDisplayApprovalParams, Parameters<typeof tool>> = true;
+`)
+	}
+	fmt.Fprintf(&sb, `const __displayApproval = (mod as any).displayApproval;
+const __r = typeof __displayApproval === "function" ? await __displayApproval(%s) : "";
+export default (__r === undefined || __r === null) ? "" : (typeof __r === "string" ? __r : JSON.stringify(__r));
+`, callArgs)
+	return sb.String()
+}
+
+func approvalPresentationCallArgs(args map[string]any, sig *toolbox.FuncSignature) string {
+	if sig == nil {
+		argsJSON, _ := json.Marshal(args)
+		return string(argsJSON)
+	}
+	params := sig.Params()
+	if len(params) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for i, p := range params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		val, ok := args[p.Name()]
+		if !ok {
+			sb.WriteString("undefined")
+			continue
+		}
+		valJSON, _ := json.Marshal(val)
+		fmt.Fprintf(&sb, "(%s satisfies Parameters<typeof tool>[%d])", string(valJSON), i)
+	}
+	return sb.String()
+}
+
 func prepareRunnerSource(entry string) string {
 	return fmt.Sprintf("import tool from \"./%s\";\nexport default typeof tool;\n", entry)
 }
@@ -549,6 +612,12 @@ func loaderForPath(file string) api.Loader {
 // RunnerSourceForTest exposes the generated runner source for narrow unit tests.
 func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
 	return runnerSource(entry, args, sig)
+}
+
+// ApprovalPresentationRunnerSourceForTest exposes the generated approval
+// presentation runner source for narrow unit tests.
+func ApprovalPresentationRunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
+	return approvalPresentationRunnerSource(entry, args, sig)
 }
 
 // EmitBundle runs esbuild bundling on a tool definition and returns the bundled JS.

@@ -13,7 +13,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2
 	github.com/jinzhu/inflection v1.0.0
 	github.com/klauspost/compress v1.18.5
-	github.com/mackross/repljs v0.0.0-20260425110339-984d91d94da5
+	github.com/mackross/repljs v0.0.0-20260426000108-684d87c9e2c8
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
 	github.com/vmihailenco/msgpack/v5 v5.4.1

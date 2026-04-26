@@ -21,6 +21,9 @@ message SessionState {
   repeated PendingApprovalSnapshot pending_approvals = 5;
   bool locked = 6;
   string bound_tb_session = 7;
+  string intent_text = 8;
+  string intent_source = 9;
+  string intent_updated_at = 10;
 }
 
 message PendingApprovalSnapshot {
@@ -31,12 +34,26 @@ message PendingApprovalSnapshot {
   string status = 5;
   string error = 6;
   string tb_session = 7;
+  string cell_id = 8;
+  string full_tool_name = 9;
+  string package_key = 10;
+  string package_label = 11;
+  string tool_label = 12;
+  string description = 13;
+  string presentation = 14;
+  string created_at = 15;
+  string updated_at = 16;
+  string intent_text = 17;
+  string intent_source = 18;
+  string intent_updated_at = 19;
 }
 
 message ApprovalDecision {
   string action = 1;
   string tool_call_id = 2;
   string message = 3;
+  string client_decision_id = 4;
+  string queued_at = 5;
 }
 
 message ClientSnapshot {
@@ -49,6 +66,9 @@ message ClientSnapshot {
   repeated PendingApprovalSnapshot pending_approvals = 7;
   bool locked = 8;
   string bound_tb_session = 9;
+  string intent_text = 10;
+  string intent_source = 11;
+  string intent_updated_at = 12;
 }
 
 message StateUpdate {

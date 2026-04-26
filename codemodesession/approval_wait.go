@@ -98,6 +98,24 @@ func approvalAwaitResultFromBatch(results []appliedApprovalResult, remaining int
 		}
 	}
 	out.Message = fmt.Sprintf("%d approval decisions applied (%d approved, %d rejected).", len(results), approved, rejected)
+	for _, result := range results {
+		name := strings.TrimSpace(result.ToolCall.ToolName)
+		if name == "" {
+			name = "tool call"
+		}
+		status := string(result.Status)
+		if status == "" {
+			status = "resolved"
+		}
+		if result.ToolCall.ToolCallID != "" {
+			out.Message += fmt.Sprintf("\n- %s [%s] %s", name, result.ToolCall.ToolCallID, status)
+		} else {
+			out.Message += fmt.Sprintf("\n- %s %s", name, status)
+		}
+		if result.Status == ApprovalAwaitStatusRejected && strings.TrimSpace(result.ToolCall.Error) != "" {
+			out.Message += fmt.Sprintf(": %s", strings.TrimSpace(result.ToolCall.Error))
+		}
+	}
 	if rejected > 0 && approved == 0 {
 		out.Status = ApprovalAwaitStatusRejected
 	} else {

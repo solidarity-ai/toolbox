@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
@@ -72,6 +73,55 @@ func TestRunUnavailableToolReturnsTypedError(t *testing.T) {
 	_, err = invoke.Run(prepared, "locked.noop", nil)
 	if err == nil {
 		t.Fatal("Run() error = nil, want unavailable error")
+	}
+
+	var unavailable *toolset.ToolUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("Run() error = %v, want ToolUnavailableError", err)
+	}
+	if unavailable.Reason != toolset.ToolUnavailableReasonSecretStoreLocked {
+		t.Fatalf("Reason = %q, want %q", unavailable.Reason, toolset.ToolUnavailableReasonSecretStoreLocked)
+	}
+}
+
+func TestRunUnavailableTSToolDoesNotExecute(t *testing.T) {
+	pkg := tooldef.Package{
+		Module:  tooldef.ModulePath("example.com/locked-ts"),
+		Name:    "locked",
+		Runtime: tooldef.RuntimeTypeScriptSandbox,
+	}
+
+	prepared, err := toolset.PrepareTools(context.Background(), []assembler.LoadedTool{
+		{
+			Name:        "locked.run",
+			Description: "Locked TS tool",
+			PackageMeta: &pkg,
+			TS: &tooldef.TSToolDef{
+				Entry: "tool.ts",
+				Files: fstest.MapFS{
+					"tool.ts": &fstest.MapFile{Data: []byte(`export default async function tool(): Promise<string> { return "ran"; }`)},
+				},
+			},
+		},
+	}, toolset.Config{
+		CredentialPolicySource: invokeErrPolicySource{
+			pkg.Module: secrets.ErrLocked,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareTools() error: %v", err)
+	}
+	tool, ok := prepared.Tool("locked.run")
+	if !ok {
+		t.Fatal("prepared.Tool(locked.run) missing")
+	}
+	if tool.TS == nil {
+		t.Fatal("unavailable TS tool lost its source; displayApproval needs source to remain available")
+	}
+
+	got, err := invoke.Run(prepared, "locked.run", nil)
+	if err == nil {
+		t.Fatalf("Run() = %q, nil error; want unavailable error before TS execution", got)
 	}
 
 	var unavailable *toolset.ToolUnavailableError

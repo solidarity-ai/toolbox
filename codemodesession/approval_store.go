@@ -3,6 +3,7 @@ package codemodesession
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,14 +26,25 @@ const (
 )
 
 type PendingApproval struct {
-	TBSession     string
-	ToolCallID    string
-	CellID        string
-	ToolName      string
-	ParamsInspect string
-	EffectID      string
-	Status        string
-	Error         string
+	TBSession       string
+	IntentText      string
+	IntentSource    string
+	IntentUpdatedAt time.Time
+	ToolCallID      string
+	CellID          string
+	ToolName        string
+	FullToolName    string
+	PackageKey      string
+	PackageLabel    string
+	ToolLabel       string
+	Description     string
+	ParamsInspect   string
+	Presentation    json.RawMessage
+	EffectID        string
+	Status          string
+	Error           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type ApprovalDecision struct {
@@ -44,7 +56,7 @@ type ApprovalDecision struct {
 type approvalStore interface {
 	BeginSubmit(sessionID repl.SessionID)
 	AbortSubmit(sessionID repl.SessionID)
-	RecordPendingToolCall(sessionID repl.SessionID, toolCallID, effectID, toolName, reviewedToolKey string, params []byte) error
+	RecordPendingToolCall(sessionID repl.SessionID, call approvalCallState) error
 	CommitSubmit(sessionID repl.SessionID, cellID repl.CellID) error
 	PendingApprovals(ctx context.Context, sessionID repl.SessionID) ([]PendingApproval, error)
 	ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) ([]appliedApprovalResult, error)
@@ -56,8 +68,14 @@ type approvalCallState struct {
 	EffectID        string
 	CellID          repl.CellID
 	ToolName        string
+	FullToolName    string
+	PackageKey      string
+	PackageLabel    string
+	ToolLabel       string
+	Description     string
 	ReviewedToolKey string
 	Params          []byte
+	Presentation    json.RawMessage
 	Status          string
 	Error           string
 	CreatedAt       time.Time
@@ -100,23 +118,19 @@ func (s *memoryApprovalStore) AbortSubmit(sessionID repl.SessionID) {
 	}
 }
 
-func (s *memoryApprovalStore) RecordPendingToolCall(sessionID repl.SessionID, toolCallID, effectID, toolName, reviewedToolKey string, params []byte) error {
+func (s *memoryApprovalStore) RecordPendingToolCall(sessionID repl.SessionID, call approvalCallState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil || s.active.Session != sessionID {
 		return nil
 	}
 	now := time.Now().UTC()
-	s.active.Calls = append(s.active.Calls, approvalCallState{
-		ToolCallID:      toolCallID,
-		EffectID:        effectID,
-		ToolName:        toolName,
-		ReviewedToolKey: reviewedToolKey,
-		Params:          append([]byte(nil), params...),
-		Status:          approvalCallStatusPending,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	})
+	call.Params = append([]byte(nil), call.Params...)
+	call.Presentation = cloneRawJSON(call.Presentation)
+	call.Status = approvalCallStatusPending
+	call.CreatedAt = now
+	call.UpdatedAt = now
+	s.active.Calls = append(s.active.Calls, call)
 	return nil
 }
 
@@ -208,23 +222,19 @@ func (s *sqliteApprovalStore) AbortSubmit(sessionID repl.SessionID) {
 	}
 }
 
-func (s *sqliteApprovalStore) RecordPendingToolCall(sessionID repl.SessionID, toolCallID, effectID, toolName, reviewedToolKey string, params []byte) error {
+func (s *sqliteApprovalStore) RecordPendingToolCall(sessionID repl.SessionID, call approvalCallState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil || s.active.Session != sessionID {
 		return nil
 	}
 	now := time.Now().UTC()
-	s.active.Calls = append(s.active.Calls, approvalCallState{
-		ToolCallID:      toolCallID,
-		EffectID:        effectID,
-		ToolName:        toolName,
-		ReviewedToolKey: reviewedToolKey,
-		Params:          append([]byte(nil), params...),
-		Status:          approvalCallStatusPending,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	})
+	call.Params = append([]byte(nil), call.Params...)
+	call.Presentation = cloneRawJSON(call.Presentation)
+	call.Status = approvalCallStatusPending
+	call.CreatedAt = now
+	call.UpdatedAt = now
+	s.active.Calls = append(s.active.Calls, call)
 	return nil
 }
 
@@ -254,15 +264,21 @@ func (s *sqliteApprovalStore) CommitSubmit(sessionID repl.SessionID, cellID repl
 	for _, call := range active.Calls {
 		if _, err := tx.ExecContext(context.Background(), `
 INSERT OR REPLACE INTO approval_tool_calls
-  (tool_call_id, session, cell_id, effect_id, tool_name, reviewed_tool_key, params, status, error, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  (tool_call_id, session, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, reviewed_tool_key, params, presentation, status, error, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			call.ToolCallID,
 			string(sessionID),
 			string(cellID),
 			call.EffectID,
 			call.ToolName,
+			call.FullToolName,
+			call.PackageKey,
+			call.PackageLabel,
+			call.ToolLabel,
+			call.Description,
 			call.ReviewedToolKey,
 			call.Params,
+			[]byte(call.Presentation),
 			call.Status,
 			call.Error,
 			call.CreatedAt.Format(time.RFC3339Nano),
@@ -280,7 +296,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 func (s *sqliteApprovalStore) PendingApprovals(ctx context.Context, sessionID repl.SessionID) ([]PendingApproval, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT tool_call_id, cell_id, tool_name, params, effect_id, status, error, created_at, updated_at
+SELECT tool_call_id, cell_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, params, presentation, effect_id, status, error, created_at, updated_at
 FROM approval_tool_calls
 WHERE session = ? AND status = ?
 ORDER BY created_at ASC, tool_call_id ASC`,
@@ -295,16 +311,23 @@ ORDER BY created_at ASC, tool_call_id ASC`,
 	var out []PendingApproval
 	for rows.Next() {
 		var (
-			call      approvalCallState
-			cell      string
-			createdAt string
-			updatedAt string
+			call         approvalCallState
+			cell         string
+			presentation sql.NullString
+			createdAt    string
+			updatedAt    string
 		)
 		if err := rows.Scan(
 			&call.ToolCallID,
 			&cell,
 			&call.ToolName,
+			&call.FullToolName,
+			&call.PackageKey,
+			&call.PackageLabel,
+			&call.ToolLabel,
+			&call.Description,
 			&call.Params,
+			&presentation,
 			&call.EffectID,
 			&call.Status,
 			&call.Error,
@@ -314,6 +337,9 @@ ORDER BY created_at ASC, tool_call_id ASC`,
 			return nil, fmt.Errorf("scan pending approvals: %w", err)
 		}
 		call.CellID = repl.CellID(cell)
+		if presentation.Valid {
+			call.Presentation = json.RawMessage(presentation.String)
+		}
 		call.CreatedAt = parseApprovalTime(createdAt)
 		call.UpdatedAt = parseApprovalTime(updatedAt)
 		out = append(out, pendingApprovalFromState(call))
@@ -408,8 +434,14 @@ CREATE TABLE IF NOT EXISTS approval_tool_calls (
   cell_id           TEXT NOT NULL,
   effect_id         TEXT NOT NULL DEFAULT '',
   tool_name         TEXT NOT NULL,
+  full_tool_name    TEXT NOT NULL DEFAULT '',
+  package_key       TEXT NOT NULL DEFAULT '',
+  package_label     TEXT NOT NULL DEFAULT '',
+  tool_label        TEXT NOT NULL DEFAULT '',
+  description       TEXT NOT NULL DEFAULT '',
   reviewed_tool_key TEXT NOT NULL DEFAULT '',
   params            BLOB NOT NULL,
+  presentation      BLOB,
   status            TEXT NOT NULL DEFAULT 'pending',
   error             TEXT NOT NULL DEFAULT '',
   created_at        TEXT NOT NULL,
@@ -420,6 +452,18 @@ CREATE INDEX IF NOT EXISTS idx_approval_tool_calls_session ON approval_tool_call
 `)
 	if err != nil {
 		return fmt.Errorf("migrate approval tables: %w", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE approval_tool_calls ADD COLUMN full_tool_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN package_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN package_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN tool_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN presentation BLOB`,
+	} {
+		if _, alterErr := s.db.ExecContext(context.Background(), stmt); alterErr != nil && !strings.Contains(alterErr.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate approval tables: %w", alterErr)
+		}
 	}
 	return nil
 }
@@ -479,7 +523,7 @@ func (s *sqliteApprovalStore) loadDecisionCalls(ctx context.Context, sessionID r
 
 func (s *sqliteApprovalStore) loadCall(ctx context.Context, sessionID repl.SessionID, toolCallID string) (approvalCallState, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT tool_call_id, cell_id, effect_id, tool_name, reviewed_tool_key, params, status, error, created_at, updated_at
+SELECT tool_call_id, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, reviewed_tool_key, params, presentation, status, error, created_at, updated_at
 FROM approval_tool_calls
 WHERE session = ? AND tool_call_id = ? AND status = ?`,
 		string(sessionID),
@@ -488,18 +532,25 @@ WHERE session = ? AND tool_call_id = ? AND status = ?`,
 	)
 
 	var (
-		call      approvalCallState
-		cell      string
-		createdAt string
-		updatedAt string
+		call         approvalCallState
+		cell         string
+		presentation sql.NullString
+		createdAt    string
+		updatedAt    string
 	)
 	if err := row.Scan(
 		&call.ToolCallID,
 		&cell,
 		&call.EffectID,
 		&call.ToolName,
+		&call.FullToolName,
+		&call.PackageKey,
+		&call.PackageLabel,
+		&call.ToolLabel,
+		&call.Description,
 		&call.ReviewedToolKey,
 		&call.Params,
+		&presentation,
 		&call.Status,
 		&call.Error,
 		&createdAt,
@@ -511,6 +562,9 @@ WHERE session = ? AND tool_call_id = ? AND status = ?`,
 		return approvalCallState{}, fmt.Errorf("load approval tool call %q: %w", toolCallID, err)
 	}
 	call.CellID = repl.CellID(cell)
+	if presentation.Valid {
+		call.Presentation = json.RawMessage(presentation.String)
+	}
 	call.CreatedAt = parseApprovalTime(createdAt)
 	call.UpdatedAt = parseApprovalTime(updatedAt)
 	return call, nil
@@ -535,6 +589,7 @@ func normalizeApprovalDecisions(decisions []ApprovalDecision) []ApprovalDecision
 func cloneApprovalCallState(in approvalCallState) approvalCallState {
 	out := in
 	out.Params = append([]byte(nil), in.Params...)
+	out.Presentation = cloneRawJSON(in.Presentation)
 	return out
 }
 
@@ -567,11 +622,33 @@ func pendingApprovalFromState(call approvalCallState) PendingApproval {
 		ToolCallID:    call.ToolCallID,
 		CellID:        string(call.CellID),
 		ToolName:      call.ToolName,
+		FullToolName:  fallbackString(call.FullToolName, call.ToolName),
+		PackageKey:    call.PackageKey,
+		PackageLabel:  call.PackageLabel,
+		ToolLabel:     fallbackString(call.ToolLabel, call.ToolName),
+		Description:   call.Description,
 		ParamsInspect: inspectApprovalParams(call.Params),
+		Presentation:  cloneRawJSON(call.Presentation),
 		EffectID:      call.EffectID,
 		Status:        call.Status,
 		Error:         call.Error,
+		CreatedAt:     call.CreatedAt,
+		UpdatedAt:     call.UpdatedAt,
 	}
+}
+
+func cloneRawJSON(in json.RawMessage) json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), in...)
+}
+
+func fallbackString(primary, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return primary
+	}
+	return fallback
 }
 
 func inspectApprovalParams(raw []byte) string {
@@ -600,8 +677,16 @@ func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call a
 			ToolCallID:    call.ToolCallID,
 			CellID:        string(call.CellID),
 			ToolName:      call.ToolName,
+			FullToolName:  fallbackString(call.FullToolName, call.ToolName),
+			PackageKey:    call.PackageKey,
+			PackageLabel:  call.PackageLabel,
+			ToolLabel:     fallbackString(call.ToolLabel, call.ToolName),
+			Description:   call.Description,
 			ParamsInspect: inspectApprovalParams(call.Params),
+			Presentation:  cloneRawJSON(call.Presentation),
 			EffectID:      call.EffectID,
+			CreatedAt:     call.CreatedAt,
+			UpdatedAt:     call.UpdatedAt,
 		},
 	}
 

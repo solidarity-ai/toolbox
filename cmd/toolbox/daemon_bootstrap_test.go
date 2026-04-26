@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"io"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
@@ -29,13 +31,14 @@ type fakeSessionDaemon struct{}
 
 func (fakeSessionDaemon) SetPreparedTools(toolset.PreparedToolset) {}
 
-func (fakeSessionDaemon) SetSessionBinding(string, bool) {}
+func (fakeSessionDaemon) SetSessionBinding(string, bool)          {}
+func (fakeSessionDaemon) SetSessionIntent(string, string, string) {}
 
 func (fakeSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
 
 func (fakeSessionDaemon) SetSecretEpochHandler(func()) {}
 
-func (fakeSessionDaemon) SetApprovalHandler(func(daemon.ApprovalDecision)) {}
+func (fakeSessionDaemon) SetApprovalBatchHandler(func([]daemon.ApprovalDecision)) {}
 
 func (fakeSessionDaemon) Close() error { return nil }
 
@@ -66,8 +69,49 @@ func TestBindSecretEpochReloadLogsFailures(t *testing.T) {
 	}
 }
 
+func TestBindApprovalExecutionAppliesDecisionBatchTogether(t *testing.T) {
+	delegate := &recordingSessionDaemon{}
+	executor := &recordingApprovalExecutor{calls: make(chan []codemodesession.ApprovalDecision, 1)}
+
+	bindApprovalExecution(delegate, io.Discard, executor, nil)
+	delegate.fireApprovalBatch([]daemon.ApprovalDecision{{
+		Action:     daemon.ApprovalActionReject,
+		ToolCallID: "tc-1",
+		Message:    "blocked",
+	}, {
+		Action:     daemon.ApprovalActionReject,
+		ToolCallID: "tc-2",
+		Message:    "blocked",
+	}})
+
+	select {
+	case got := <-executor.calls:
+		if len(got) != 2 {
+			t.Fatalf("ApplyApprovals batch len = %d, want 2: %#v", len(got), got)
+		}
+		if got[0].ToolCallID != "tc-1" || got[1].ToolCallID != "tc-2" {
+			t.Fatalf("ApplyApprovals tool call ids = %#v, want tc-1/tc-2", got)
+		}
+		if got[0].Approved || got[1].Approved {
+			t.Fatalf("ApplyApprovals approved flags = %#v, want both false", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ApplyApprovals was not called")
+	}
+}
+
+type recordingApprovalExecutor struct {
+	calls chan []codemodesession.ApprovalDecision
+}
+
+func (e *recordingApprovalExecutor) ApplyApprovals(_ context.Context, decisions []codemodesession.ApprovalDecision) error {
+	e.calls <- append([]codemodesession.ApprovalDecision(nil), decisions...)
+	return nil
+}
+
 type recordingSessionDaemon struct {
 	handler        atomic.Value
+	approvalBatch  atomic.Value
 	boundTBSession string
 	locked         bool
 }
@@ -78,6 +122,7 @@ func (d *recordingSessionDaemon) SetSessionBinding(boundTBSession string, locked
 	d.boundTBSession = boundTBSession
 	d.locked = locked
 }
+func (d *recordingSessionDaemon) SetSessionIntent(string, string, string) {}
 
 func (d *recordingSessionDaemon) SetPendingApprovals([]daemon.PendingApprovalSnapshot) {}
 
@@ -85,7 +130,9 @@ func (d *recordingSessionDaemon) SetSecretEpochHandler(fn func()) {
 	d.handler.Store(fn)
 }
 
-func (d *recordingSessionDaemon) SetApprovalHandler(func(daemon.ApprovalDecision)) {}
+func (d *recordingSessionDaemon) SetApprovalBatchHandler(fn func([]daemon.ApprovalDecision)) {
+	d.approvalBatch.Store(fn)
+}
 
 func (d *recordingSessionDaemon) Close() error { return nil }
 
@@ -95,6 +142,14 @@ func (d *recordingSessionDaemon) fire() {
 		return
 	}
 	value.(func())()
+}
+
+func (d *recordingSessionDaemon) fireApprovalBatch(decisions []daemon.ApprovalDecision) {
+	value := d.approvalBatch.Load()
+	if value == nil {
+		return
+	}
+	value.(func([]daemon.ApprovalDecision))(decisions)
 }
 
 func waitForAtomic(t *testing.T, value *atomic.Int32, want int32) {

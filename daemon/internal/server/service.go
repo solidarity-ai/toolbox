@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
 	connect "connectrpc.com/connect"
 	daemonv1 "github.com/solidarity-ai/toolbox/daemon/apiv1"
@@ -99,6 +100,9 @@ func (s *SessionService) SyncState(_ context.Context, stream *connect.BidiStream
 				Mode:             msg.GetMode(),
 				Locked:           msg.GetLocked(),
 				BoundTBSession:   msg.GetBoundTbSession(),
+				IntentText:       msg.GetIntentText(),
+				IntentSource:     msg.GetIntentSource(),
+				IntentUpdatedAt:  msg.GetIntentUpdatedAt(),
 				WorkingDir:       msg.GetWorkingDir(),
 				PreparedTools:    append([]string(nil), msg.GetPreparedTools()...),
 				PendingApprovals: pendingApprovalsFromProto(msg.GetPendingApprovals()),
@@ -144,6 +148,9 @@ func clientSnapshotsToProto(clients []ClientSnapshot) []*daemonv1.ClientSnapshot
 			Mode:             client.Mode,
 			Locked:           client.Locked,
 			BoundTbSession:   client.BoundTBSession,
+			IntentText:       client.IntentText,
+			IntentSource:     client.IntentSource,
+			IntentUpdatedAt:  client.IntentUpdatedAt,
 			WorkingDir:       client.WorkingDir,
 			PreparedTools:    append([]string(nil), client.PreparedTools...),
 			PendingApprovals: pendingApprovalsToProto(client.PendingApprovals),
@@ -166,13 +173,25 @@ func pendingApprovalsFromProto(approvals []*daemonv1.PendingApprovalSnapshot) []
 	out := make([]PendingApprovalSnapshot, 0, len(approvals))
 	for _, approval := range approvals {
 		next := PendingApprovalSnapshot{
-			ToolCallID:    approval.GetToolCallId(),
-			TBSession:     approval.GetTbSession(),
-			ToolName:      approval.GetToolName(),
-			ParamsInspect: approval.GetParamsInspect(),
-			EffectID:      approval.GetEffectId(),
-			Status:        approval.GetStatus(),
-			Error:         approval.GetError(),
+			ToolCallID:      approval.GetToolCallId(),
+			TBSession:       approval.GetTbSession(),
+			IntentText:      approval.GetIntentText(),
+			IntentSource:    approval.GetIntentSource(),
+			IntentUpdatedAt: approval.GetIntentUpdatedAt(),
+			ToolName:        approval.GetToolName(),
+			FullToolName:    approval.GetFullToolName(),
+			PackageKey:      approval.GetPackageKey(),
+			PackageLabel:    approval.GetPackageLabel(),
+			ToolLabel:       approval.GetToolLabel(),
+			Description:     approval.GetDescription(),
+			ParamsInspect:   approval.GetParamsInspect(),
+			Presentation:    approval.GetPresentation(),
+			EffectID:        approval.GetEffectId(),
+			CellID:          approval.GetCellId(),
+			Status:          approval.GetStatus(),
+			Error:           approval.GetError(),
+			CreatedAt:       approval.GetCreatedAt(),
+			UpdatedAt:       approval.GetUpdatedAt(),
 		}
 		out = append(out, next)
 	}
@@ -186,13 +205,25 @@ func pendingApprovalsToProto(approvals []PendingApprovalSnapshot) []*daemonv1.Pe
 	out := make([]*daemonv1.PendingApprovalSnapshot, 0, len(approvals))
 	for _, approval := range approvals {
 		next := &daemonv1.PendingApprovalSnapshot{
-			ToolCallId:    approval.ToolCallID,
-			TbSession:     approval.TBSession,
-			ToolName:      approval.ToolName,
-			ParamsInspect: approval.ParamsInspect,
-			EffectId:      approval.EffectID,
-			Status:        approval.Status,
-			Error:         approval.Error,
+			ToolCallId:      approval.ToolCallID,
+			TbSession:       approval.TBSession,
+			IntentText:      approval.IntentText,
+			IntentSource:    approval.IntentSource,
+			IntentUpdatedAt: approval.IntentUpdatedAt,
+			ToolName:        approval.ToolName,
+			FullToolName:    approval.FullToolName,
+			PackageKey:      approval.PackageKey,
+			PackageLabel:    approval.PackageLabel,
+			ToolLabel:       approval.ToolLabel,
+			Description:     approval.Description,
+			ParamsInspect:   approval.ParamsInspect,
+			Presentation:    approval.Presentation,
+			EffectId:        approval.EffectID,
+			CellId:          approval.CellID,
+			Status:          approval.Status,
+			Error:           approval.Error,
+			CreatedAt:       approval.CreatedAt,
+			UpdatedAt:       approval.UpdatedAt,
 		}
 		out = append(out, next)
 	}
@@ -206,9 +237,11 @@ func approvalDecisionsToProto(decisions []ApprovalDecision) []*daemonv1.Approval
 	out := make([]*daemonv1.ApprovalDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		out = append(out, &daemonv1.ApprovalDecision{
-			Action:     decision.Action,
-			ToolCallId: decision.ToolCallID,
-			Message:    decision.Message,
+			Action:           decision.Action,
+			ToolCallId:       decision.ToolCallID,
+			Message:          decision.Message,
+			ClientDecisionId: decision.ClientDecisionID,
+			QueuedAt:         decision.QueuedAt.Format(time.RFC3339Nano),
 		})
 	}
 	return out

@@ -577,6 +577,65 @@ tasks.map((task) => $tool_call(task).status)`)
 	assertContains(t, inspect, `"id":"I-2"`)
 }
 
+func TestPendingApprovalPresentationWorksWhenSecretStoreLocked(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/mail", "mail", map[string]string{
+		"tools/send.ts": `export function displayApproval(input: { to: string; subject: string; body: string }) {
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    description: "Send email.",
+    blocks: [
+      {
+        type: "fields",
+        fields: [
+          { label: "To", value: input.to },
+          { label: "Subject", value: input.subject },
+          { label: "Body", value: input.body, multiline: true }
+        ]
+      }
+    ]
+  };
+}
+
+export default async function tool(input: { to: string; subject: string; body: string }): Promise<{ ok: boolean }> {
+  return { ok: true };
+}
+`,
+	})
+	tempDir := t.TempDir()
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		ToolApprovals: map[string]bool{
+			"mail.send": true,
+		},
+		CredentialPolicySource: lockedPolicySource{},
+	})
+	if tool, ok := prepared.Tool("send"); !ok || !tool.Unavailable() {
+		t.Fatalf("prepared.Tool(send).Unavailable() = %v, %v; want unavailable locked tool", ok, tool.Unavailable())
+	}
+
+	session := mustCreatePersistentSession(t, ctx, tempDir, "a11002", tempDir, codemodesession.SessionConfig{
+		PreparedTools: prepared,
+	})
+	defer session.Close()
+
+	out := session.Submit(ctx, `mail.send({
+  to: "sarah@example.com",
+  subject: "Follow-up",
+  body: "Thanks for meeting today."
+})`)
+	assertContains(t, out, `toolCallId`)
+
+	groups := mustPendingApprovalGroups(t, ctx, session)
+	if len(groups) != 1 || len(groups[0].ToolCalls) != 1 {
+		t.Fatalf("pending approval groups = %#v, want one pending tool call", groups)
+	}
+	presentation := string(groups[0].ToolCalls[0].Presentation)
+	assertContains(t, presentation, `"schema":"toolbox.approval.presentation.v1"`)
+	assertContains(t, presentation, `"To"`)
+	assertContains(t, presentation, `"sarah@example.com"`)
+	assertContains(t, presentation, `"Follow-up"`)
+}
+
 func TestPersistentSessionAllowsMixedApprovalActionsWithinOneCellGroup(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSessionPackage(t, t.TempDir(), "example.com/issues", "issues", map[string]string{

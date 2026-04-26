@@ -22,6 +22,7 @@ import (
 	clienttransport "github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/credpath"
 	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/invoke"
@@ -1125,6 +1126,9 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 
 	newReq := mcp.CallToolRequest{}
 	newReq.Params.Name = "new_super_tool_session"
+	newReq.Params.Arguments = map[string]any{
+		codemodesession.IntentParam: "test intent",
+	}
 	newSessionResult, err := c.CallTool(ctx, newReq)
 	if err != nil {
 		t.Fatalf("CallTool(new_super_tool_session): %v", err)

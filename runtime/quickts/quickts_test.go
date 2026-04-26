@@ -2,6 +2,7 @@ package quickts_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -67,6 +68,182 @@ func TestRunCalcAsyncAddStub(t *testing.T) {
 	}
 	if got != "11" {
 		t.Fatalf("expected 11, got %q", got)
+	}
+}
+
+func TestRunApprovalPresentationUsesToolSignature(t *testing.T) {
+	source := `
+type GmailSendInput = {
+  to: string;
+  subject: string;
+  body: string;
+};
+
+export default async function tool(input: GmailSendInput) {
+  return input.to;
+}
+
+export function displayApproval(input: GmailSendInput) {
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    blocks: [
+      {
+        type: "fields",
+        fields: [
+          { label: "To", value: input.to },
+          { label: "Subject", value: input.subject },
+          { label: "Body", value: input.body, multiline: true },
+        ],
+      },
+    ],
+  };
+}
+`
+	def := tooldef.TSToolDef{
+		Entry: "tools/gmail.send.ts",
+		Files: fstest.MapFS{
+			"tools/gmail.send.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+	got, err := quickts.RunApprovalPresentation(context.Background(), def, map[string]any{
+		"input": map[string]any{
+			"to":      "sarah@example.com",
+			"subject": "Follow-up from today",
+			"body":    "Hi Sarah",
+		},
+	}, nil, tooltest.NewTSSig(t, source))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var presentation struct {
+		Blocks []struct {
+			Fields []struct {
+				Label string `json:"label"`
+				Value string `json:"value"`
+			} `json:"fields"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(got), &presentation); err != nil {
+		t.Fatalf("approval presentation was not JSON: %v\n%s", err, got)
+	}
+	if len(presentation.Blocks) != 1 || len(presentation.Blocks[0].Fields) < 2 {
+		t.Fatalf("unexpected approval presentation: %s", got)
+	}
+	if presentation.Blocks[0].Fields[0].Value != "sarah@example.com" {
+		t.Fatalf("displayApproval received wrong input shape: %s", got)
+	}
+	if presentation.Blocks[0].Fields[1].Value != "Follow-up from today" {
+		t.Fatalf("displayApproval received wrong subject: %s", got)
+	}
+}
+
+func TestRunApprovalPresentationSpreadsMultipleToolParams(t *testing.T) {
+	source := `
+export default function tool(a: number, b: string) {
+  return String(a) + ":" + b;
+}
+
+export function displayApproval(a: number, b: string) {
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    blocks: [
+      { type: "text", text: String(a) + ":" + b },
+    ],
+  };
+}
+`
+	def := tooldef.TSToolDef{
+		Entry: "tools/multi.ts",
+		Files: fstest.MapFS{
+			"tools/multi.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+	got, err := quickts.RunApprovalPresentation(context.Background(), def, map[string]any{
+		"a": 7,
+		"b": "four",
+	}, nil, tooltest.NewTSSig(t, source))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(got, `"text":"7:four"`) {
+		t.Fatalf("displayApproval did not receive spread params: %s", got)
+	}
+}
+
+func TestRunApprovalPresentationMissingExportFallsBackEmpty(t *testing.T) {
+	source := `
+export default function tool(a: number, b: string) {
+  return String(a) + ":" + b;
+}
+`
+	def := tooldef.TSToolDef{
+		Entry: "tools/no-approval.ts",
+		Files: fstest.MapFS{
+			"tools/no-approval.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+	got, err := quickts.RunApprovalPresentation(context.Background(), def, map[string]any{
+		"a": 7,
+		"b": "four",
+	}, nil, tooltest.NewTSSig(t, source))
+	if err != nil {
+		t.Fatalf("expected missing displayApproval to fall back without TS error, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected empty fallback, got %q", got)
+	}
+}
+
+func TestRunApprovalPresentationRejectsMismatchedDisplayApprovalParams(t *testing.T) {
+	source := `
+export default function tool(a: number, b: string) {
+  return String(a) + ":" + b;
+}
+
+export function displayApproval(a: string, b: string) {
+  return {
+    schema: "toolbox.approval.presentation.v1",
+    blocks: [
+      { type: "text", text: a + ":" + b },
+    ],
+  };
+}
+`
+	def := tooldef.TSToolDef{
+		Entry: "tools/mismatch.ts",
+		Files: fstest.MapFS{
+			"tools/mismatch.ts": &fstest.MapFile{Data: []byte(source)},
+		},
+	}
+	_, err := quickts.RunApprovalPresentation(context.Background(), def, map[string]any{
+		"a": 7,
+		"b": "four",
+	}, nil, tooltest.NewTSSig(t, source))
+	if err == nil {
+		t.Fatal("expected mismatched displayApproval params to fail TypeScript check")
+	}
+	if !strings.Contains(err.Error(), "not assignable to type 'never'") {
+		t.Fatalf("expected displayApproval parameter check failure, got %v", err)
+	}
+}
+
+func TestApprovalPresentationRunnerSourceChecksDisplayApprovalParams(t *testing.T) {
+	tool := calcTool(t, "calc.add")
+	got := quickts.ApprovalPresentationRunnerSourceForTest(
+		"tools/calc.add.ts",
+		map[string]any{"a": 7, "b": 4},
+		tool.Sig,
+	)
+
+	for _, want := range []string{
+		"type __ToolboxDisplayApprovalParams = typeof mod extends { displayApproval: (...args: infer P) => any } ? P : Parameters<typeof tool>;",
+		"const __toolboxDisplayApprovalParamsCheck: __ToolboxExactParams<__ToolboxDisplayApprovalParams, Parameters<typeof tool>> = true;",
+		"await __displayApproval((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]))",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("approval runner source missing %q:\n%s", want, got)
+		}
 	}
 }
 

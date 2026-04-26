@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/daemon"
@@ -88,6 +89,10 @@ type sessionBindingProvider interface {
 	Locked() bool
 }
 
+type sessionIntentProvider interface {
+	Intent() (text, source string, updatedAt time.Time)
+}
+
 func syncPendingApprovals(ctx context.Context, provider pendingApprovalProvider, delegate daemon.SessionDelegate, stderr io.Writer) error {
 	if provider == nil || delegate == nil {
 		return nil
@@ -107,25 +112,29 @@ func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, ex
 	if delegate == nil || executor == nil {
 		return
 	}
-	delegate.SetApprovalHandler(func(decision daemon.ApprovalDecision) {
+	delegate.SetApprovalBatchHandler(func(decisions []daemon.ApprovalDecision) {
 		go func() {
-			approved := false
-			switch decision.Action {
-			case daemon.ApprovalActionApprove:
-				approved = true
-			case daemon.ApprovalActionReject:
-			default:
-				err := fmt.Errorf("unknown approval action %q", decision.Action)
-				if stderr != nil {
-					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
+			batch := make([]codemodesession.ApprovalDecision, 0, len(decisions))
+			for _, decision := range decisions {
+				approved := false
+				switch decision.Action {
+				case daemon.ApprovalActionApprove:
+					approved = true
+				case daemon.ApprovalActionReject:
+				default:
+					err := fmt.Errorf("unknown approval action %q", decision.Action)
+					if stderr != nil {
+						_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
+					}
+					return
 				}
-				return
+				batch = append(batch, codemodesession.ApprovalDecision{
+					ToolCallID: decision.ToolCallID,
+					Approved:   approved,
+					Reason:     decision.Message,
+				})
 			}
-			err := executor.ApplyApprovals(context.Background(), []codemodesession.ApprovalDecision{{
-				ToolCallID: decision.ToolCallID,
-				Approved:   approved,
-				Reason:     decision.Message,
-			}})
+			err := executor.ApplyApprovals(context.Background(), batch)
 			if err != nil {
 				if stderr != nil {
 					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
@@ -155,6 +164,18 @@ func syncSessionBinding(delegate daemon.SessionDelegate, provider sessionBinding
 	delegate.SetSessionBinding(provider.BoundTBSession(), provider.Locked())
 }
 
+func syncSessionIntent(delegate daemon.SessionDelegate, provider sessionIntentProvider) {
+	if delegate == nil || provider == nil {
+		return
+	}
+	text, source, updatedAt := provider.Intent()
+	updated := ""
+	if !updatedAt.IsZero() {
+		updated = updatedAt.Format(time.RFC3339Nano)
+	}
+	delegate.SetSessionIntent(text, source, updated)
+}
+
 func toDaemonApprovals(approvals []codemodesession.PendingApproval) []daemon.PendingApprovalSnapshot {
 	if len(approvals) == 0 {
 		return nil
@@ -162,15 +183,34 @@ func toDaemonApprovals(approvals []codemodesession.PendingApproval) []daemon.Pen
 	out := make([]daemon.PendingApprovalSnapshot, 0, len(approvals))
 	for _, approval := range approvals {
 		next := daemon.PendingApprovalSnapshot{
-			ToolCallID:    approval.ToolCallID,
-			TBSession:     approval.TBSession,
-			ToolName:      approval.ToolName,
-			ParamsInspect: approval.ParamsInspect,
-			EffectID:      approval.EffectID,
-			Status:        approval.Status,
-			Error:         approval.Error,
+			ToolCallID:      approval.ToolCallID,
+			TBSession:       approval.TBSession,
+			IntentText:      approval.IntentText,
+			IntentSource:    approval.IntentSource,
+			IntentUpdatedAt: formatApprovalTime(approval.IntentUpdatedAt),
+			ToolName:        approval.ToolName,
+			FullToolName:    approval.FullToolName,
+			PackageKey:      approval.PackageKey,
+			PackageLabel:    approval.PackageLabel,
+			ToolLabel:       approval.ToolLabel,
+			Description:     approval.Description,
+			ParamsInspect:   approval.ParamsInspect,
+			Presentation:    string(approval.Presentation),
+			EffectID:        approval.EffectID,
+			CellID:          approval.CellID,
+			Status:          approval.Status,
+			Error:           approval.Error,
+			CreatedAt:       formatApprovalTime(approval.CreatedAt),
+			UpdatedAt:       formatApprovalTime(approval.UpdatedAt),
 		}
 		out = append(out, next)
 	}
 	return out
+}
+
+func formatApprovalTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
 }

@@ -81,6 +81,13 @@ func (s *Server) PendingApprovals() []PendingApprovalSnapshot {
 	return s.registry.PendingApprovals()
 }
 
+func (s *Server) Revision() uint64 {
+	if s == nil || s.registry == nil {
+		return 0
+	}
+	return s.registry.Revision()
+}
+
 func (s *Server) Registry() *Registry {
 	if s == nil {
 		return nil

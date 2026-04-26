@@ -30,6 +30,7 @@ func runRepl(cmd replCmd, opts secretStoreOptions, stdin io.Reader, stdout, stde
 	}
 	defer session.Close()
 	setSessionBinding(sessionDelegate, session.TBSession(), true)
+	syncSessionIntent(sessionDelegate, session)
 	bindApprovalExecution(sessionDelegate, stderr, session, func() error {
 		return syncPendingApprovals(context.Background(), session, sessionDelegate, stderr)
 	})

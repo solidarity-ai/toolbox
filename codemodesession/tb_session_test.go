@@ -341,7 +341,7 @@ func TestUnlockedManagerPendingApprovalsStayHiddenAfterRestartUntilSessionReload
 	prepared := prepareIssuesApprovalToolset(t)
 
 	first := NewUnlockedManager(currentDir, SessionConfig{PreparedTools: prepared})
-	tbSession, err := first.CreateFreshSession(ctx)
+	tbSession, err := first.CreateFreshSession(ctx, "test intent")
 	if err != nil {
 		t.Fatalf("CreateFreshSession(): %v", err)
 	}
@@ -387,7 +387,7 @@ func TestUnlockedManagerApplyApprovalsRequiresLoadedSessionAfterRestart(t *testi
 	prepared := prepareIssuesApprovalToolset(t)
 
 	first := NewUnlockedManager(currentDir, SessionConfig{PreparedTools: prepared})
-	tbSession, err := first.CreateFreshSession(ctx)
+	tbSession, err := first.CreateFreshSession(ctx, "test intent")
 	if err != nil {
 		t.Fatalf("CreateFreshSession(): %v", err)
 	}

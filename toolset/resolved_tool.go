@@ -407,8 +407,6 @@ func buildPreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBi
 func buildUnavailablePreparedTool(tool assembler.LoadedTool, bindings map[string]compiledBinding, hidden map[string]bool, context map[string]any, reason ToolUnavailableReason) (PreparedTool, error) {
 	stripped := tool
 	stripped.BuiltIn = nil
-	stripped.TS = nil
-	stripped.TSWasm = nil
 
 	prepared, err := buildPreparedTool(stripped, bindings, hidden, context, PackageCredentialPolicy{})
 	if err != nil {

@@ -36,8 +36,9 @@ type ApprovalDecision = daemonserver.ApprovalDecision
 type SessionDelegate interface {
 	toolsetctl.PreparedToolConsumer
 	SetSessionBinding(boundTBSession string, locked bool)
+	SetSessionIntent(text, source, updatedAt string)
 	SetPendingApprovals([]PendingApprovalSnapshot)
-	SetApprovalHandler(func(ApprovalDecision))
+	SetApprovalBatchHandler(func([]ApprovalDecision))
 	SetSecretEpochHandler(func())
 	Close() error
 }
@@ -106,6 +107,21 @@ func (d *sessionDelegate) SetSessionBinding(boundTBSession string, locked bool) 
 	}
 }
 
+func (d *sessionDelegate) SetSessionIntent(text, source, updatedAt string) {
+	if d == nil || d.reg == nil {
+		return
+	}
+	state := d.reg.currentState()
+	state.Mode = d.mode
+	state.WorkingDir = d.cwd
+	state.IntentText = text
+	state.IntentSource = source
+	state.IntentUpdatedAt = updatedAt
+	if err := d.reg.Update(state); err != nil && d.stderr != nil {
+		_, _ = fmt.Fprintf(d.stderr, "toolbox daemon sync error: %v\n", err)
+	}
+}
+
 func (d *sessionDelegate) SetPendingApprovals(approvals []PendingApprovalSnapshot) {
 	if d == nil || d.reg == nil {
 		return
@@ -133,11 +149,11 @@ func (d *sessionDelegate) SetSecretEpochHandler(fn func()) {
 	d.reg.SetSecretEpochHandler(fn)
 }
 
-func (d *sessionDelegate) SetApprovalHandler(fn func(ApprovalDecision)) {
+func (d *sessionDelegate) SetApprovalBatchHandler(fn func([]ApprovalDecision)) {
 	if d == nil || d.reg == nil {
 		return
 	}
-	d.reg.SetApprovalHandler(fn)
+	d.reg.SetApprovalBatchHandler(fn)
 }
 
 func (noopSessionDelegate) SetPreparedTools(toolset.PreparedToolset) {}
@@ -145,9 +161,10 @@ func (noopSessionDelegate) SetPreparedTools(toolset.PreparedToolset) {}
 func (noopSessionDelegate) SetSessionBinding(string, bool) {}
 
 func (noopSessionDelegate) SetPendingApprovals([]PendingApprovalSnapshot) {}
+func (noopSessionDelegate) SetSessionIntent(string, string, string)       {}
 
 func (noopSessionDelegate) SetSecretEpochHandler(func()) {}
 
-func (noopSessionDelegate) SetApprovalHandler(func(ApprovalDecision)) {}
+func (noopSessionDelegate) SetApprovalBatchHandler(func([]ApprovalDecision)) {}
 
 func (noopSessionDelegate) Close() error { return nil }

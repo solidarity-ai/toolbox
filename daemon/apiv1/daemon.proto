@@ -46,6 +46,7 @@ message PendingApprovalSnapshot {
   string intent_text = 17;
   string intent_source = 18;
   string intent_updated_at = 19;
+  bool requires_credentials = 20;
 }
 
 message ApprovalDecision {

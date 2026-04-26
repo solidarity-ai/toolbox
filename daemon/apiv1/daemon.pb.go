@@ -227,28 +227,29 @@ func (x *SessionState) GetIntentUpdatedAt() string {
 }
 
 type PendingApprovalSnapshot struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	ToolCallId      string                 `protobuf:"bytes,1,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
-	ToolName        string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
-	ParamsInspect   string                 `protobuf:"bytes,3,opt,name=params_inspect,json=paramsInspect,proto3" json:"params_inspect,omitempty"`
-	EffectId        string                 `protobuf:"bytes,4,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
-	Status          string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
-	Error           string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
-	TbSession       string                 `protobuf:"bytes,7,opt,name=tb_session,json=tbSession,proto3" json:"tb_session,omitempty"`
-	CellId          string                 `protobuf:"bytes,8,opt,name=cell_id,json=cellId,proto3" json:"cell_id,omitempty"`
-	FullToolName    string                 `protobuf:"bytes,9,opt,name=full_tool_name,json=fullToolName,proto3" json:"full_tool_name,omitempty"`
-	PackageKey      string                 `protobuf:"bytes,10,opt,name=package_key,json=packageKey,proto3" json:"package_key,omitempty"`
-	PackageLabel    string                 `protobuf:"bytes,11,opt,name=package_label,json=packageLabel,proto3" json:"package_label,omitempty"`
-	ToolLabel       string                 `protobuf:"bytes,12,opt,name=tool_label,json=toolLabel,proto3" json:"tool_label,omitempty"`
-	Description     string                 `protobuf:"bytes,13,opt,name=description,proto3" json:"description,omitempty"`
-	Presentation    string                 `protobuf:"bytes,14,opt,name=presentation,proto3" json:"presentation,omitempty"`
-	CreatedAt       string                 `protobuf:"bytes,15,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt       string                 `protobuf:"bytes,16,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	IntentText      string                 `protobuf:"bytes,17,opt,name=intent_text,json=intentText,proto3" json:"intent_text,omitempty"`
-	IntentSource    string                 `protobuf:"bytes,18,opt,name=intent_source,json=intentSource,proto3" json:"intent_source,omitempty"`
-	IntentUpdatedAt string                 `protobuf:"bytes,19,opt,name=intent_updated_at,json=intentUpdatedAt,proto3" json:"intent_updated_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ToolCallId          string                 `protobuf:"bytes,1,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	ToolName            string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	ParamsInspect       string                 `protobuf:"bytes,3,opt,name=params_inspect,json=paramsInspect,proto3" json:"params_inspect,omitempty"`
+	EffectId            string                 `protobuf:"bytes,4,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
+	Status              string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	Error               string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	TbSession           string                 `protobuf:"bytes,7,opt,name=tb_session,json=tbSession,proto3" json:"tb_session,omitempty"`
+	CellId              string                 `protobuf:"bytes,8,opt,name=cell_id,json=cellId,proto3" json:"cell_id,omitempty"`
+	FullToolName        string                 `protobuf:"bytes,9,opt,name=full_tool_name,json=fullToolName,proto3" json:"full_tool_name,omitempty"`
+	PackageKey          string                 `protobuf:"bytes,10,opt,name=package_key,json=packageKey,proto3" json:"package_key,omitempty"`
+	PackageLabel        string                 `protobuf:"bytes,11,opt,name=package_label,json=packageLabel,proto3" json:"package_label,omitempty"`
+	ToolLabel           string                 `protobuf:"bytes,12,opt,name=tool_label,json=toolLabel,proto3" json:"tool_label,omitempty"`
+	Description         string                 `protobuf:"bytes,13,opt,name=description,proto3" json:"description,omitempty"`
+	Presentation        string                 `protobuf:"bytes,14,opt,name=presentation,proto3" json:"presentation,omitempty"`
+	CreatedAt           string                 `protobuf:"bytes,15,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt           string                 `protobuf:"bytes,16,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	IntentText          string                 `protobuf:"bytes,17,opt,name=intent_text,json=intentText,proto3" json:"intent_text,omitempty"`
+	IntentSource        string                 `protobuf:"bytes,18,opt,name=intent_source,json=intentSource,proto3" json:"intent_source,omitempty"`
+	IntentUpdatedAt     string                 `protobuf:"bytes,19,opt,name=intent_updated_at,json=intentUpdatedAt,proto3" json:"intent_updated_at,omitempty"`
+	RequiresCredentials bool                   `protobuf:"varint,20,opt,name=requires_credentials,json=requiresCredentials,proto3" json:"requires_credentials,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PendingApprovalSnapshot) Reset() {
@@ -412,6 +413,13 @@ func (x *PendingApprovalSnapshot) GetIntentUpdatedAt() string {
 		return x.IntentUpdatedAt
 	}
 	return ""
+}
+
+func (x *PendingApprovalSnapshot) GetRequiresCredentials() bool {
+	if x != nil {
+		return x.RequiresCredentials
+	}
+	return false
 }
 
 type ApprovalDecision struct {
@@ -1200,7 +1208,7 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"intentText\x12#\n" +
 	"\rintent_source\x18\t \x01(\tR\fintentSource\x12*\n" +
 	"\x11intent_updated_at\x18\n" +
-	" \x01(\tR\x0fintentUpdatedAt\"\x83\x05\n" +
+	" \x01(\tR\x0fintentUpdatedAt\"\xb6\x05\n" +
 	"\x17PendingApprovalSnapshot\x12 \n" +
 	"\ftool_call_id\x18\x01 \x01(\tR\n" +
 	"toolCallId\x12\x1b\n" +
@@ -1228,7 +1236,8 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\vintent_text\x18\x11 \x01(\tR\n" +
 	"intentText\x12#\n" +
 	"\rintent_source\x18\x12 \x01(\tR\fintentSource\x12*\n" +
-	"\x11intent_updated_at\x18\x13 \x01(\tR\x0fintentUpdatedAt\"\xb1\x01\n" +
+	"\x11intent_updated_at\x18\x13 \x01(\tR\x0fintentUpdatedAt\x121\n" +
+	"\x14requires_credentials\x18\x14 \x01(\bR\x13requiresCredentials\"\xb1\x01\n" +
 	"\x10ApprovalDecision\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12 \n" +
 	"\ftool_call_id\x18\x02 \x01(\tR\n" +

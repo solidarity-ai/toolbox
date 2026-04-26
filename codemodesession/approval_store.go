@@ -26,25 +26,26 @@ const (
 )
 
 type PendingApproval struct {
-	TBSession       string
-	IntentText      string
-	IntentSource    string
-	IntentUpdatedAt time.Time
-	ToolCallID      string
-	CellID          string
-	ToolName        string
-	FullToolName    string
-	PackageKey      string
-	PackageLabel    string
-	ToolLabel       string
-	Description     string
-	ParamsInspect   string
-	Presentation    json.RawMessage
-	EffectID        string
-	Status          string
-	Error           string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	TBSession           string
+	IntentText          string
+	IntentSource        string
+	IntentUpdatedAt     time.Time
+	ToolCallID          string
+	CellID              string
+	ToolName            string
+	FullToolName        string
+	PackageKey          string
+	PackageLabel        string
+	ToolLabel           string
+	Description         string
+	RequiresCredentials bool
+	ParamsInspect       string
+	Presentation        json.RawMessage
+	EffectID            string
+	Status              string
+	Error               string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type ApprovalDecision struct {
@@ -64,22 +65,23 @@ type approvalStore interface {
 }
 
 type approvalCallState struct {
-	ToolCallID      string
-	EffectID        string
-	CellID          repl.CellID
-	ToolName        string
-	FullToolName    string
-	PackageKey      string
-	PackageLabel    string
-	ToolLabel       string
-	Description     string
-	ReviewedToolKey string
-	Params          []byte
-	Presentation    json.RawMessage
-	Status          string
-	Error           string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ToolCallID          string
+	EffectID            string
+	CellID              repl.CellID
+	ToolName            string
+	FullToolName        string
+	PackageKey          string
+	PackageLabel        string
+	ToolLabel           string
+	Description         string
+	RequiresCredentials bool
+	ReviewedToolKey     string
+	Params              []byte
+	Presentation        json.RawMessage
+	Status              string
+	Error               string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type approvalSubmitCollection struct {
@@ -166,6 +168,9 @@ func (s *memoryApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl
 	ordered, err := validateApprovalDecisionsLocked(s.calls[sessionID], decisions)
 	s.mu.Unlock()
 	if err != nil {
+		return nil, err
+	}
+	if err := validateApprovalDecisionsApplyable(ordered, prepared); err != nil {
 		return nil, err
 	}
 
@@ -264,8 +269,8 @@ func (s *sqliteApprovalStore) CommitSubmit(sessionID repl.SessionID, cellID repl
 	for _, call := range active.Calls {
 		if _, err := tx.ExecContext(context.Background(), `
 INSERT OR REPLACE INTO approval_tool_calls
-  (tool_call_id, session, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, reviewed_tool_key, params, presentation, status, error, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  (tool_call_id, session, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, requires_credentials, reviewed_tool_key, params, presentation, status, error, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			call.ToolCallID,
 			string(sessionID),
 			string(cellID),
@@ -276,6 +281,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			call.PackageLabel,
 			call.ToolLabel,
 			call.Description,
+			call.RequiresCredentials,
 			call.ReviewedToolKey,
 			call.Params,
 			[]byte(call.Presentation),
@@ -296,7 +302,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 func (s *sqliteApprovalStore) PendingApprovals(ctx context.Context, sessionID repl.SessionID) ([]PendingApproval, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT tool_call_id, cell_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, params, presentation, effect_id, status, error, created_at, updated_at
+SELECT tool_call_id, cell_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, requires_credentials, params, presentation, effect_id, status, error, created_at, updated_at
 FROM approval_tool_calls
 WHERE session = ? AND status = ?
 ORDER BY created_at ASC, tool_call_id ASC`,
@@ -326,6 +332,7 @@ ORDER BY created_at ASC, tool_call_id ASC`,
 			&call.PackageLabel,
 			&call.ToolLabel,
 			&call.Description,
+			&call.RequiresCredentials,
 			&call.Params,
 			&presentation,
 			&call.EffectID,
@@ -353,6 +360,9 @@ ORDER BY created_at ASC, tool_call_id ASC`,
 func (s *sqliteApprovalStore) ApplyDecisions(ctx context.Context, sessionID repl.SessionID, decisions []ApprovalDecision, prepared toolset.PreparedToolset, st repl.Store, toolCalls toolCallJournal, executor *invoke.Executor) ([]appliedApprovalResult, error) {
 	ordered, err := s.loadDecisionCalls(ctx, sessionID, decisions)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateApprovalDecisionsApplyable(ordered, prepared); err != nil {
 		return nil, err
 	}
 
@@ -439,6 +449,7 @@ CREATE TABLE IF NOT EXISTS approval_tool_calls (
   package_label     TEXT NOT NULL DEFAULT '',
   tool_label        TEXT NOT NULL DEFAULT '',
   description       TEXT NOT NULL DEFAULT '',
+  requires_credentials INTEGER NOT NULL DEFAULT 0,
   reviewed_tool_key TEXT NOT NULL DEFAULT '',
   params            BLOB NOT NULL,
   presentation      BLOB,
@@ -459,6 +470,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_tool_calls_session ON approval_tool_call
 		`ALTER TABLE approval_tool_calls ADD COLUMN package_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE approval_tool_calls ADD COLUMN tool_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE approval_tool_calls ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE approval_tool_calls ADD COLUMN requires_credentials INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE approval_tool_calls ADD COLUMN presentation BLOB`,
 	} {
 		if _, alterErr := s.db.ExecContext(context.Background(), stmt); alterErr != nil && !strings.Contains(alterErr.Error(), "duplicate column name") {
@@ -471,6 +483,30 @@ CREATE INDEX IF NOT EXISTS idx_approval_tool_calls_session ON approval_tool_call
 type decisionWithCall struct {
 	decision ApprovalDecision
 	call     approvalCallState
+}
+
+func validateApprovalDecisionsApplyable(items []decisionWithCall, prepared toolset.PreparedToolset) error {
+	for _, item := range items {
+		if !item.decision.Approved {
+			continue
+		}
+		if err := approvalApplyBlockedError(item.call, prepared); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func approvalApplyBlockedError(call approvalCallState, prepared toolset.PreparedToolset) error {
+	tool, ok := prepared.Tool(call.ToolName)
+	if !ok {
+		return nil
+	}
+	if tool.UnavailableReason() != toolset.ToolUnavailableReasonSecretStoreLocked {
+		return nil
+	}
+	label := fallbackString(call.FullToolName, call.ToolName)
+	return fmt.Errorf("secret store locked; unlock before approving %s", label)
 }
 
 func validateApprovalDecisionsLocked(calls map[string]approvalCallState, decisions []ApprovalDecision) ([]decisionWithCall, error) {
@@ -523,7 +559,7 @@ func (s *sqliteApprovalStore) loadDecisionCalls(ctx context.Context, sessionID r
 
 func (s *sqliteApprovalStore) loadCall(ctx context.Context, sessionID repl.SessionID, toolCallID string) (approvalCallState, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT tool_call_id, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, reviewed_tool_key, params, presentation, status, error, created_at, updated_at
+SELECT tool_call_id, cell_id, effect_id, tool_name, full_tool_name, package_key, package_label, tool_label, description, requires_credentials, reviewed_tool_key, params, presentation, status, error, created_at, updated_at
 FROM approval_tool_calls
 WHERE session = ? AND tool_call_id = ? AND status = ?`,
 		string(sessionID),
@@ -548,6 +584,7 @@ WHERE session = ? AND tool_call_id = ? AND status = ?`,
 		&call.PackageLabel,
 		&call.ToolLabel,
 		&call.Description,
+		&call.RequiresCredentials,
 		&call.ReviewedToolKey,
 		&call.Params,
 		&presentation,
@@ -619,21 +656,22 @@ func clonePendingApprovals(calls map[string]approvalCallState) []PendingApproval
 
 func pendingApprovalFromState(call approvalCallState) PendingApproval {
 	return PendingApproval{
-		ToolCallID:    call.ToolCallID,
-		CellID:        string(call.CellID),
-		ToolName:      call.ToolName,
-		FullToolName:  fallbackString(call.FullToolName, call.ToolName),
-		PackageKey:    call.PackageKey,
-		PackageLabel:  call.PackageLabel,
-		ToolLabel:     fallbackString(call.ToolLabel, call.ToolName),
-		Description:   call.Description,
-		ParamsInspect: inspectApprovalParams(call.Params),
-		Presentation:  cloneRawJSON(call.Presentation),
-		EffectID:      call.EffectID,
-		Status:        call.Status,
-		Error:         call.Error,
-		CreatedAt:     call.CreatedAt,
-		UpdatedAt:     call.UpdatedAt,
+		ToolCallID:          call.ToolCallID,
+		CellID:              string(call.CellID),
+		ToolName:            call.ToolName,
+		FullToolName:        fallbackString(call.FullToolName, call.ToolName),
+		PackageKey:          call.PackageKey,
+		PackageLabel:        call.PackageLabel,
+		ToolLabel:           fallbackString(call.ToolLabel, call.ToolName),
+		Description:         call.Description,
+		RequiresCredentials: call.RequiresCredentials,
+		ParamsInspect:       inspectApprovalParams(call.Params),
+		Presentation:        cloneRawJSON(call.Presentation),
+		EffectID:            call.EffectID,
+		Status:              call.Status,
+		Error:               call.Error,
+		CreatedAt:           call.CreatedAt,
+		UpdatedAt:           call.UpdatedAt,
 	}
 }
 
@@ -674,19 +712,20 @@ func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call a
 	result := appliedApprovalResult{
 		Status: ApprovalAwaitStatusRejected,
 		ToolCall: PendingApproval{
-			ToolCallID:    call.ToolCallID,
-			CellID:        string(call.CellID),
-			ToolName:      call.ToolName,
-			FullToolName:  fallbackString(call.FullToolName, call.ToolName),
-			PackageKey:    call.PackageKey,
-			PackageLabel:  call.PackageLabel,
-			ToolLabel:     fallbackString(call.ToolLabel, call.ToolName),
-			Description:   call.Description,
-			ParamsInspect: inspectApprovalParams(call.Params),
-			Presentation:  cloneRawJSON(call.Presentation),
-			EffectID:      call.EffectID,
-			CreatedAt:     call.CreatedAt,
-			UpdatedAt:     call.UpdatedAt,
+			ToolCallID:          call.ToolCallID,
+			CellID:              string(call.CellID),
+			ToolName:            call.ToolName,
+			FullToolName:        fallbackString(call.FullToolName, call.ToolName),
+			PackageKey:          call.PackageKey,
+			PackageLabel:        call.PackageLabel,
+			ToolLabel:           fallbackString(call.ToolLabel, call.ToolName),
+			Description:         call.Description,
+			RequiresCredentials: call.RequiresCredentials,
+			ParamsInspect:       inspectApprovalParams(call.Params),
+			Presentation:        cloneRawJSON(call.Presentation),
+			EffectID:            call.EffectID,
+			CreatedAt:           call.CreatedAt,
+			UpdatedAt:           call.UpdatedAt,
 		},
 	}
 

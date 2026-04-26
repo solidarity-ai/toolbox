@@ -56,6 +56,10 @@ func (t PreparedTool) HiddenParams() map[string]bool { return t.hiddenParams }
 
 func (t PreparedTool) AccountParams() []AccountParam { return t.accountParams }
 
+func (t PreparedTool) RequiresCredentials() bool {
+	return t.PackageMeta != nil && len(t.PackageMeta.Credentials) > 0
+}
+
 // SelectedCredentialAccountParams returns credential account selections keyed
 // by their agent-facing param names, for example "workspace_account".
 func (t PreparedTool) SelectedCredentialAccountParams(fullParams map[string]any) map[string]string {

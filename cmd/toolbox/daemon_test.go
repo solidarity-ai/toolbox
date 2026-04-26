@@ -482,6 +482,48 @@ func TestApprovalConsoleDecisionsSubmitDraftBatch(t *testing.T) {
 	}
 }
 
+func TestApprovalConsoleBlocksCredentialApprovalWhenSecretStoreLocked(t *testing.T) {
+	control := &stubDaemonHTTPControl{
+		locked: true,
+		snapshots: []daemon.ClientSnapshot{{
+			BoundTBSession: "abc123",
+			PendingApprovals: []daemon.PendingApprovalSnapshot{{
+				ToolCallID:          "tc-1",
+				TBSession:           "abc123",
+				ToolName:            "gmail.send",
+				FullToolName:        "google-workspace.gmail.send",
+				RequiresCredentials: true,
+			}},
+		}},
+	}
+
+	result := applyApprovalConsoleDrafts(context.Background(), control, approvalConsoleSubmitRequest{
+		Session: "abc123",
+		Drafts:  map[string]string{"tc-1": "approve"},
+	})
+	if result.Accepted != 0 {
+		t.Fatalf("accepted = %d, want 0", result.Accepted)
+	}
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], "secret store locked") {
+		t.Fatalf("errors = %#v, want secret-store locked error", result.Errors)
+	}
+	if len(control.decisions) != 0 {
+		t.Fatalf("decisions = %#v, want none", control.decisions)
+	}
+
+	result = applyApprovalConsoleDrafts(context.Background(), control, approvalConsoleSubmitRequest{
+		Session: "abc123",
+		Drafts:  map[string]string{"tc-1": "reject"},
+		Reason:  "blocked",
+	})
+	if result.Accepted != 1 || len(result.Errors) != 0 {
+		t.Fatalf("reject result = %#v, want accepted reject", result)
+	}
+	if len(control.decisions) != 1 || control.decisions[0].Action != daemon.ApprovalActionReject {
+		t.Fatalf("decisions = %#v, want one reject", control.decisions)
+	}
+}
+
 func TestApprovalConsoleDetailsPreserveOpenAttribute(t *testing.T) {
 	state := approvalConsoleState{
 		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 1},

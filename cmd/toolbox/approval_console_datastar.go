@@ -36,10 +36,13 @@ func applyApprovalConsoleDrafts(ctx context.Context, control daemonHTTPControl, 
 	}
 
 	state := approvalConsoleStateForHTTP(control)
+	secretStoreLocked := state.SecretStore.Status == "locked"
+	pendingApprovals := make(map[string]daemon.PendingApprovalSnapshot)
 	pendingSessions := make(map[string]string)
 	for _, session := range state.Sessions {
 		for _, group := range session.PackageGroups {
 			for _, call := range group.ToolCalls {
+				pendingApprovals[call.ToolCallID] = call
 				pendingSessions[call.ToolCallID] = session.TBSession
 			}
 		}
@@ -72,8 +75,13 @@ func applyApprovalConsoleDrafts(ctx context.Context, control daemonHTTPControl, 
 		default:
 			continue
 		}
-		if _, ok := pendingSessions[id]; !ok {
+		pending, ok := pendingApprovals[id]
+		if !ok {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: approval no longer pending", id))
+			continue
+		}
+		if action == daemon.ApprovalActionApprove && secretStoreLocked && pending.RequiresCredentials {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: secret store locked; unlock before approving %s", id, approvalSubmitToolLabel(pending)))
 			continue
 		}
 		decision := daemon.ApprovalDecision{
@@ -100,6 +108,10 @@ func applyApprovalConsoleDrafts(ctx context.Context, control daemonHTTPControl, 
 	}
 	result.Accepted = len(decisions)
 	return result
+}
+
+func approvalSubmitToolLabel(call daemon.PendingApprovalSnapshot) string {
+	return firstNonEmpty(call.FullToolName, call.ToolLabel, call.ToolName, "tool")
 }
 
 func approvalConsoleDraftResetPatch(drafts map[string]string) map[string]any {

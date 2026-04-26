@@ -634,6 +634,21 @@ export default async function tool(input: { to: string; subject: string; body: s
 	assertContains(t, presentation, `"To"`)
 	assertContains(t, presentation, `"sarah@example.com"`)
 	assertContains(t, presentation, `"Follow-up"`)
+
+	err := session.ApplyApprovals(ctx, []codemodesession.ApprovalDecision{{
+		ToolCallID: groups[0].ToolCalls[0].ToolCallID,
+		Approved:   true,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "secret store locked") {
+		t.Fatalf("ApplyApprovals() error = %v, want secret-store locked approval block", err)
+	}
+	after := mustPendingApprovalGroups(t, ctx, session)
+	if len(after) != 1 || len(after[0].ToolCalls) != 1 {
+		t.Fatalf("pending approval groups after locked approve = %#v, want still pending", after)
+	}
+	if after[0].ToolCalls[0].ToolCallID != groups[0].ToolCalls[0].ToolCallID {
+		t.Fatalf("pending approval changed after locked approve: got %q want %q", after[0].ToolCalls[0].ToolCallID, groups[0].ToolCalls[0].ToolCallID)
+	}
 }
 
 func TestPendingApprovalPresentationGetsAutoSelectedCredentialAccount(t *testing.T) {

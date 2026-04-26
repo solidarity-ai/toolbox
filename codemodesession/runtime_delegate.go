@@ -417,6 +417,7 @@ func enrichApprovalCallState(call *approvalCallState, prepared toolset.PreparedT
 	call.ToolLabel = tool.Name
 	call.FullToolName = tool.ToolApprovalKey()
 	call.Description = strings.TrimSpace(tool.Description)
+	call.RequiresCredentials = tool.RequiresCredentials()
 	call.Presentation = approvalPresentationForTool(tool, call.Params)
 }
 

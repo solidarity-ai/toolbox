@@ -23,6 +23,7 @@ type SessionDelegate = daemonclient.SessionDelegate
 type SessionState = daemonserver.SessionState
 type ClientSnapshot = daemonserver.ClientSnapshot
 type PendingApprovalSnapshot = daemonserver.PendingApprovalSnapshot
+type QueuedApprovalDecision = daemonserver.QueuedApprovalDecision
 type ApprovalDecision = daemonserver.ApprovalDecision
 type Registry = daemonserver.Registry
 type Server = daemonserver.Server

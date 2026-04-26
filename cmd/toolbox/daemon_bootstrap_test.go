@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -100,6 +101,31 @@ func TestBindApprovalExecutionAppliesDecisionBatchTogether(t *testing.T) {
 	}
 }
 
+func TestBindApprovalExecutionRecoversAndLogsPanic(t *testing.T) {
+	delegate := &recordingSessionDaemon{}
+	executor := panicApprovalExecutor{}
+	var stderr lockedBuffer
+
+	bindApprovalExecution(delegate, &stderr, executor, nil)
+	delegate.fireApprovalBatch([]daemon.ApprovalDecision{{
+		Action:     daemon.ApprovalActionReject,
+		ToolCallID: "tc-1",
+		Message:    "blocked",
+	}, {
+		Action:     daemon.ApprovalActionReject,
+		ToolCallID: "tc-2",
+		Message:    "blocked",
+	}})
+
+	got := waitForBufferSubstring(t, &stderr, "toolbox daemon approval panic applying 2 decision(s): boom")
+	if got == "" {
+		t.Fatal("stderr was empty, want recovered approval panic")
+	}
+	if !containsAll(got, "toolbox daemon approval panic applying 2 decision(s): boom", "goroutine") {
+		t.Fatalf("stderr = %q, want panic message and stack", got)
+	}
+}
+
 type recordingApprovalExecutor struct {
 	calls chan []codemodesession.ApprovalDecision
 }
@@ -107,6 +133,21 @@ type recordingApprovalExecutor struct {
 func (e *recordingApprovalExecutor) ApplyApprovals(_ context.Context, decisions []codemodesession.ApprovalDecision) error {
 	e.calls <- append([]codemodesession.ApprovalDecision(nil), decisions...)
 	return nil
+}
+
+type panicApprovalExecutor struct{}
+
+func (panicApprovalExecutor) ApplyApprovals(context.Context, []codemodesession.ApprovalDecision) error {
+	panic("boom")
+}
+
+func containsAll(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(value, needle) {
+			return false
+		}
+	}
+	return true
 }
 
 type recordingSessionDaemon struct {

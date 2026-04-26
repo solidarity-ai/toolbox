@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -348,6 +349,223 @@ func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testi
 	}
 }
 
+func TestApprovalConsoleEventsUseDatastarPatches(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{
+		locked: false,
+		snapshots: []daemon.ClientSnapshot{{
+			PID:              41,
+			Mode:             "codemode",
+			BoundTBSession:   "abc123",
+			IntentText:       "Review pending mail",
+			IntentSource:     "user",
+			IntentUpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir:       "/tmp/work",
+			PendingApprovals: []daemon.PendingApprovalSnapshot{{ToolCallID: "tc-1", TBSession: "abc123", ToolName: "gmail.messages.send", ParamsInspect: `{to: "joe@example.com"}`}},
+		}},
+	}
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/approval-console/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(/approval-console/events): %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /approval-console/events: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var lines []string
+	for len(lines) < 40 {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("ReadString(/approval-console/events): %v", err)
+		}
+		lines = append(lines, line)
+		if strings.Contains(strings.Join(lines, ""), "event: datastar-patch-elements") {
+			break
+		}
+	}
+	payload := strings.Join(lines, "")
+	if strings.Contains(payload, "event: html") {
+		t.Fatalf("events used old html event: %q", payload)
+	}
+	if !strings.Contains(payload, "event: datastar-patch-signals") {
+		t.Fatalf("events missing Datastar signal patch: %q", payload)
+	}
+	if !strings.Contains(payload, "event: datastar-patch-elements") {
+		t.Fatalf("events missing Datastar element patch: %q", payload)
+	}
+}
+
+func TestApprovalConsoleDecisionsSubmitDraftBatch(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{
+		snapshots: []daemon.ClientSnapshot{{
+			PID:            41,
+			Mode:           "codemode",
+			BoundTBSession: "abc123",
+			WorkingDir:     "/tmp/work",
+			PendingApprovals: []daemon.PendingApprovalSnapshot{
+				{ToolCallID: "tc-1", TBSession: "abc123", ToolName: "gmail.messages.send", ParamsInspect: `{to: "joe@example.com"}`},
+				{ToolCallID: "tc-2", TBSession: "abc123", ToolName: "gmail.messages.send", ParamsInspect: `{to: "ann@example.com"}`},
+				{ToolCallID: "tc-3", TBSession: "abc123", ToolName: "gmail.messages.search", ParamsInspect: `{query: "from:ann"}`},
+			},
+		}},
+	}
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	body := strings.NewReader(`{"session":"abc123","drafts":{"tc-1":"approve","tc-2":"reject","tc-3":"leave"},"reason":"blocked"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/approval-console/decisions", body)
+	if err != nil {
+		t.Fatalf("NewRequest(/approval-console/decisions): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /approval-console/decisions: %v", err)
+	}
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/approval-console/decisions): %v", err)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	if !strings.Contains(string(payload), "event: datastar-patch-signals") || !strings.Contains(string(payload), "event: datastar-patch-elements") {
+		t.Fatalf("decision response missing Datastar patches: %q", string(payload))
+	}
+	if !strings.Contains(string(payload), `"liveState":"Live"`) {
+		t.Fatalf("decision response did not restore live state: %q", string(payload))
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.decisions) != 2 {
+		t.Fatalf("decisions = %#v, want 2 decisions", control.decisions)
+	}
+	if control.decisions[0].Action != daemon.ApprovalActionApprove || control.decisions[0].ToolCallID != "tc-1" {
+		t.Fatalf("first decision = %#v, want approve tc-1", control.decisions[0])
+	}
+	if control.decisions[1].Action != daemon.ApprovalActionReject || control.decisions[1].ToolCallID != "tc-2" || control.decisions[1].Message != "blocked" {
+		t.Fatalf("second decision = %#v, want reject tc-2 with reason", control.decisions[1])
+	}
+}
+
+func TestApprovalConsoleDetailsPreserveOpenAttribute(t *testing.T) {
+	state := approvalConsoleState{
+		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 1},
+		Sessions: []approvalConsoleSession{{
+			TBSession: "abc123",
+			Active:    true,
+			Intent:    approvalConsoleIntent{Text: "Review pending mail"},
+			PackageGroups: []approvalConsolePackageGroup{{
+				PackageKey:   "gmail",
+				PackageLabel: "Gmail",
+				ToolCalls: []daemon.PendingApprovalSnapshot{{
+					ToolCallID:    "tc-1",
+					ToolName:      "gmail.messages.send",
+					ToolLabel:     "messages.send",
+					Description:   "Send Gmail message.",
+					ParamsInspect: `{to: "joe@example.com"}`,
+				}},
+			}},
+		}},
+	}
+	html := componentHTML(ApprovalMain(state))
+	if !strings.Contains(html, `data-preserve-attr="open"`) {
+		t.Fatalf("approval main missing details open preservation: %q", html)
+	}
+	if !strings.Contains(html, `id="approval-row-`) || !strings.Contains(html, `id="approval-details-`) {
+		t.Fatalf("approval main missing stable row/details ids: %q", html)
+	}
+	if !strings.Contains(html, `<pre>{to: &#34;joe@example.com&#34;}</pre>`) {
+		t.Fatalf("approval main missing escaped raw params: %q", html)
+	}
+}
+
+func TestApprovalConsoleUsesHyphenatedDatastarBindSignals(t *testing.T) {
+	html := componentHTML(ApprovalConsolePage(daemonIndexPageData{StatusText: "locked", Available: true, Locked: true}, approvalConsoleState{
+		SecretStore: approvalConsoleSecretStore{Status: "locked"},
+	}))
+	if !strings.Contains(html, `data-bind:unlock-key`) {
+		t.Fatalf("console missing Datastar-safe unlock key binding: %q", html)
+	}
+	if !strings.Contains(html, `data-bind:reject-reason`) {
+		t.Fatalf("console missing Datastar-safe reject reason binding: %q", html)
+	}
+	if strings.Contains(html, `data-bind:rejectReason`) || strings.Contains(html, `data-bind:unlockKey`) {
+		t.Fatalf("console used camelCase data-bind attributes that browsers lowercase: %q", html)
+	}
+	if !strings.Contains(html, `method="post" action="/secret-store/unlock"`) {
+		t.Fatalf("unlock form must post so passphrases cannot leak into the URL: %q", html)
+	}
+	if !strings.Contains(html, `data-on:submit__prevent`) {
+		t.Fatalf("console missing Datastar v1 modifier syntax for submit prevention: %q", html)
+	}
+	if strings.Contains(html, `data-on:submit.prevent`) {
+		t.Fatalf("console used dot modifier syntax that v1.0.1 treats as a literal event name: %q", html)
+	}
+}
+
+func TestApprovalConsolePatchesDoNotEmitQueuedBanner(t *testing.T) {
+	state := approvalConsoleState{
+		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 1, QueuedDecisions: 1},
+		Sessions: []approvalConsoleSession{{
+			TBSession: "abc123",
+			Active:    true,
+			Intent:    approvalConsoleIntent{Text: "Review pending mail"},
+			PackageGroups: []approvalConsolePackageGroup{{
+				PackageKey:   "gmail",
+				PackageLabel: "Gmail",
+				ToolCalls: []daemon.PendingApprovalSnapshot{{
+					ToolCallID:     "tc-1",
+					ToolName:       "gmail.messages.send",
+					ToolLabel:      "messages.send",
+					Description:    "Send Gmail message.",
+					ParamsInspect:  `{to: "joe@example.com"}`,
+					QueuedDecision: &daemon.QueuedApprovalDecision{Action: daemon.ApprovalActionReject},
+				}},
+			}},
+		}},
+	}
+	var out bytes.Buffer
+	writeApprovalConsolePatches(&out, nil, state)
+	if strings.Contains(out.String(), "decision queued") {
+		t.Fatalf("console patches emitted stale global queued banner: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Decision sent") {
+		t.Fatalf("console patches missing row-level queued state: %q", out.String())
+	}
+}
+
 func TestStartDaemonDebugServerServesIndex(t *testing.T) {
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
@@ -377,16 +595,19 @@ func TestStartDaemonDebugServerServesIndex(t *testing.T) {
 	if !strings.Contains(page, `<strong id="status">locked</strong>`) {
 		t.Fatalf("index missing locked status: %q", page)
 	}
-	if !strings.Contains(page, `<form id="unlock-form">`) {
+	if !strings.Contains(page, `id="unlock-form"`) {
 		t.Fatalf("index missing unlock form: %q", page)
 	}
 	if !strings.Contains(page, `/secret-store/unlock`) {
 		t.Fatalf("index missing unlock endpoint: %q", page)
 	}
-	if !strings.Contains(page, `'Content-Type': 'application/json'`) {
-		t.Fatalf("index missing JSON submit: %q", page)
+	if !strings.Contains(page, `/assets/datastar-v1.0.1.js`) {
+		t.Fatalf("index missing vendored Datastar asset: %q", page)
 	}
-	if strings.Contains(page, `<form id="lock-form">`) {
+	if !strings.Contains(page, `data-init="@get('/approval-console/events', {payload:{}})"`) {
+		t.Fatalf("index missing Datastar event stream init: %q", page)
+	}
+	if strings.Contains(page, `id="lock-form"`) {
 		t.Fatalf("index unexpectedly rendered lock form while locked: %q", page)
 	}
 }
@@ -417,13 +638,13 @@ func TestStartDaemonDebugServerServesUnlockedIndex(t *testing.T) {
 	if !strings.Contains(page, `<strong id="status">unlocked</strong>`) {
 		t.Fatalf("index missing unlocked status: %q", page)
 	}
-	if !strings.Contains(page, `<form id="lock-form">`) {
+	if !strings.Contains(page, `id="lock-form"`) {
 		t.Fatalf("index missing lock form: %q", page)
 	}
 	if !strings.Contains(page, `/secret-store/lock`) {
 		t.Fatalf("index missing lock endpoint: %q", page)
 	}
-	if strings.Contains(page, `<form id="unlock-form">`) {
+	if strings.Contains(page, `id="unlock-form"`) {
 		t.Fatalf("index unexpectedly rendered unlock form while unlocked: %q", page)
 	}
 	if strings.Contains(page, `type="password"`) {
@@ -553,6 +774,122 @@ func TestStartDaemonDebugServerSecretStoreEndpoints(t *testing.T) {
 	}
 	if !lockPayload.Locked {
 		t.Fatal("/secret-store/lock reported locked=false, want true")
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreUnlockAcceptsDatastarForm(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: true}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader("unlock_key=hunter2"))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/unlock): %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/unlock status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	if control.unlockKey != "hunter2" {
+		t.Fatalf("unlock key = %q, want hunter2", control.unlockKey)
+	}
+	if !strings.Contains(string(body), "event: datastar-patch-elements") {
+		t.Fatalf("Datastar unlock response missing element patches: %q", string(body))
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreUnlockAcceptsDatastarCamelJSON(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: true}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader(`{"unlockKey":"hunter2"}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/unlock): %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/unlock status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if control.unlockKey != "hunter2" {
+		t.Fatalf("unlock key = %q, want hunter2", control.unlockKey)
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreUnlockRejectsEmptyDatastarKey(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, &stubDaemonHTTPControl{locked: true})
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader(`{"unlockKey":""}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/unlock): %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/unlock status = %d, want Datastar 200: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if !strings.Contains(string(body), "unlock key is empty") {
+		t.Fatalf("empty Datastar unlock response = %q, want explicit empty-key error", string(body))
 	}
 }
 

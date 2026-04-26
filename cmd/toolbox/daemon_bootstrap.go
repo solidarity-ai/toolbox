@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -114,6 +115,12 @@ func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, ex
 	}
 	delegate.SetApprovalBatchHandler(func(decisions []daemon.ApprovalDecision) {
 		go func() {
+			defer func() {
+				if recovered := recover(); recovered != nil && stderr != nil {
+					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval panic applying %d decision(s): %v\n%s", len(decisions), recovered, debug.Stack())
+				}
+			}()
+
 			batch := make([]codemodesession.ApprovalDecision, 0, len(decisions))
 			for _, decision := range decisions {
 				approved := false

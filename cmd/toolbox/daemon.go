@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"mime"
 	"net"
@@ -244,33 +243,15 @@ type approvalApplyRequest struct {
 	Approvals []approvalApplyDecisionRequest `json:"approvals"`
 }
 
-type approvalConsoleDecisionRequest struct {
-	ObservedRevision uint64                               `json:"observed_revision"`
-	ClientDecisionID string                               `json:"client_decision_id"`
-	Decisions        []approvalConsoleDecisionRequestItem `json:"decisions"`
+type approvalConsoleSubmitRequest struct {
+	Session string            `json:"session"`
+	Drafts  map[string]string `json:"drafts"`
+	Reason  string            `json:"reason"`
 }
 
-type approvalConsoleDecisionRequestItem struct {
-	ToolCallID string `json:"tool_call_id"`
-	Decision   string `json:"decision"`
-	Reason     string `json:"reason,omitempty"`
-}
-
-type approvalConsoleDecisionResponse struct {
-	Accepted []approvalConsoleAcceptedDecision `json:"accepted"`
-	Errors   []approvalConsoleDecisionError    `json:"errors"`
-	Revision uint64                            `json:"revision"`
-}
-
-type approvalConsoleAcceptedDecision struct {
-	ToolCallID string `json:"tool_call_id"`
-	Decision   string `json:"decision"`
-	QueuedAt   string `json:"queued_at"`
-}
-
-type approvalConsoleDecisionError struct {
-	ToolCallID string `json:"tool_call_id"`
-	Error      string `json:"error"`
+type approvalConsoleSubmitResult struct {
+	Accepted int
+	Errors   []string
 }
 
 type daemonHTTPApprovalGroup struct {
@@ -535,65 +516,6 @@ func toDaemonApprovalDecisions(decisions []approvalApplyDecisionRequest) []daemo
 	return out
 }
 
-func applyApprovalConsoleDecisions(ctx context.Context, control daemonHTTPControl, req approvalConsoleDecisionRequest) approvalConsoleDecisionResponse {
-	resp := approvalConsoleDecisionResponse{}
-	if control == nil {
-		resp.Errors = append(resp.Errors, approvalConsoleDecisionError{Error: "approvals unavailable"})
-		return resp
-	}
-	pending := make(map[string]struct{})
-	for _, group := range pendingApprovalGroupsForHTTP(control) {
-		for _, call := range group.ToolCalls {
-			pending[call.ToolCallID] = struct{}{}
-		}
-	}
-	var decisions []daemon.ApprovalDecision
-	queuedAt := time.Now().UTC()
-	for _, item := range req.Decisions {
-		id := strings.TrimSpace(item.ToolCallID)
-		decision := strings.TrimSpace(item.Decision)
-		if id == "" {
-			resp.Errors = append(resp.Errors, approvalConsoleDecisionError{ToolCallID: id, Error: "missing tool_call_id"})
-			continue
-		}
-		if _, ok := pending[id]; !ok {
-			resp.Errors = append(resp.Errors, approvalConsoleDecisionError{ToolCallID: id, Error: "approval no longer pending"})
-			continue
-		}
-		action := ""
-		switch decision {
-		case "approve":
-			action = daemon.ApprovalActionApprove
-		case "reject":
-			action = daemon.ApprovalActionReject
-		default:
-			resp.Errors = append(resp.Errors, approvalConsoleDecisionError{ToolCallID: id, Error: "decision must be approve or reject"})
-			continue
-		}
-		decisions = append(decisions, daemon.ApprovalDecision{
-			Action:           action,
-			ToolCallID:       id,
-			Message:          strings.TrimSpace(item.Reason),
-			ClientDecisionID: strings.TrimSpace(req.ClientDecisionID),
-			QueuedAt:         queuedAt,
-		})
-		resp.Accepted = append(resp.Accepted, approvalConsoleAcceptedDecision{
-			ToolCallID: id,
-			Decision:   decision,
-			QueuedAt:   queuedAt.Format(time.RFC3339Nano),
-		})
-	}
-	if len(decisions) > 0 {
-		if err := control.ApplyApprovals(ctx, decisions); err != nil {
-			resp.Errors = append(resp.Errors, approvalConsoleDecisionError{Error: err.Error()})
-		}
-	}
-	if revControl, ok := control.(daemonHTTPRevisionControl); ok {
-		resp.Revision = revControl.Revision()
-	}
-	return resp
-}
-
 func maybeAutoOpenDaemonBrowser(stderr io.Writer, control daemonHTTPControl, addr string) {
 	launcher := daemonBrowserLauncher
 	if control == nil || launcher == nil || !launcher.Enabled() {
@@ -622,231 +544,8 @@ type daemonIndexPageData struct {
 	Locked     bool
 }
 
-var daemonIndexTemplate = template.Must(template.New("daemon-index").Parse(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Toolbox Approvals</title>
-  <style>
-    :root { color-scheme: light; --border:#d8dde3; --muted:#5d6673; --bg:#f7f8fa; --text:#15181d; --accent:#1967d2; --ok:#16833a; --danger:#b42318; }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    button, input, textarea { font: inherit; }
-    button { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 0.42rem 0.7rem; cursor: pointer; }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1rem; padding: .8rem 1rem; background: #fff; border-bottom: 1px solid var(--border); }
-    .brand { font-weight: 700; font-size: 16px; margin-right: auto; }
-    .pill { color: var(--muted); white-space: nowrap; }
-    .dot { display:inline-block; width:.55rem; height:.55rem; border-radius:999px; background: var(--ok); margin-right:.35rem; }
-    .dot.warn { background:#c77700; } .dot.off { background:#9aa2ad; }
-    main { max-width: 1100px; margin: 1rem auto 3rem; padding: 0 1rem; }
-    .message { min-height: 1.3rem; color: var(--danger); white-space: pre-wrap; }
-    .secret-panel { display:none; margin:.75rem 0; padding:.75rem; border:1px solid var(--border); background:#fff; border-radius:8px; }
-    .secret-panel.open { display:block; }
-    .intent { background:#fff; border:1px solid var(--border); border-radius:8px; margin:1rem 0; overflow:hidden; }
-    .intent-head { display:flex; align-items:flex-start; gap:.75rem; padding:1rem 1rem .65rem; border-bottom:1px solid var(--border); }
-    .intent-title { font-size:16px; font-weight:650; flex:1; }
-    .intent-meta { color:var(--muted); font-size:13px; margin-top:.2rem; }
-    .session-info { color:var(--muted); font-size:12px; white-space:pre-line; text-align:right; }
-    .package { padding: .7rem 1rem 0; }
-    .package-title { display:flex; align-items:center; gap:.45rem; font-weight:700; padding-bottom:.45rem; border-bottom:1px solid var(--border); }
-    .row { padding:.75rem 0; border-bottom:1px solid #edf0f3; }
-    .row-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.8rem; align-items:center; }
-    .tool-name { font-weight:650; white-space:nowrap; }
-    .desc { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .seg { display:inline-flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; height:32px; background:#fff; }
-    .seg button { border:0; border-right:1px solid var(--border); border-radius:0; padding:0 .55rem; font-size:13px; }
-    .seg button:last-child { border-right:0; }
-    .seg button.active { background:#eaf2ff; color:#174ea6; font-weight:650; }
-    .seg button.reject.active { background:#fff0ee; color:var(--danger); }
-    .summary { display:grid; grid-template-columns:minmax(7rem, 12rem) minmax(0,1fr); gap:.25rem 1rem; margin-top:.55rem; }
-    .label { color:var(--muted); }
-    .value { overflow-wrap:anywhere; }
-    details { margin-top:.45rem; }
-    summary { color:var(--accent); cursor:pointer; width:fit-content; }
-    pre { margin:.35rem 0 0; padding:.75rem; background:#f4f6f8; border:1px solid var(--border); border-radius:6px; overflow:auto; white-space:pre-wrap; }
-    .details-grid { display:grid; grid-template-columns:9rem minmax(0,1fr); gap:.35rem .8rem; margin-top:.6rem; }
-    .footer { position:sticky; bottom:0; display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem; background:#fbfcfd; border-top:1px solid var(--border); }
-    .footer .counts { margin-right:auto; color:var(--muted); }
-    .empty { text-align:center; color:var(--muted); padding:4rem 1rem; border:1px dashed var(--border); background:#fff; border-radius:8px; }
-    dialog { border:1px solid var(--border); border-radius:8px; padding:1rem; max-width:420px; width:calc(100% - 2rem); }
-    dialog textarea { width:100%; min-height:5rem; margin:.5rem 0; }
-    @media (max-width: 700px) { .topbar { flex-wrap:wrap; } .row-head { grid-template-columns:1fr; } .desc { display:none; } .summary,.details-grid { grid-template-columns:1fr; } .session-info { text-align:left; } .footer { flex-wrap:wrap; } }
-  </style>
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">Toolbox Approvals</div>
-    <div class="pill" id="live-state"><span class="dot warn"></span>Connecting</div>
-    <div class="pill" id="secret-state">{{.StatusText}}</div>
-    <div class="pill" id="client-count">0 clients</div>
-    <div class="pill" id="pending-count">0 pending</div>
-    <button id="settings-button" type="button" title="Settings">Settings</button>
-  </header>
-  <main>
-    <p style="position:absolute;left:-10000px;">Status: <strong id="status">{{.StatusText}}</strong></p>
-    <section id="secret-panel" class="secret-panel">
-      {{if .Available}}{{if .Locked}}
-      <form id="unlock-form">
-        <label for="unlock-key">Secret store locked</label>
-        <input id="unlock-key" name="unlock_key" type="password" autocomplete="current-password" placeholder="Passcode">
-        <button type="submit" class="primary">Unlock</button>
-      </form>
-      {{else}}
-      <form id="lock-form"><span>Secret store unlocked</span> <button type="submit">Lock</button></form>
-      {{end}}{{else}}Secret store unavailable.{{end}}
-    </section>
-    <p class="message" id="message"></p>
-    <section id="app" class="empty">Loading approvals...</section>
-  </main>
-  <dialog id="reject-dialog">
-    <form method="dialog">
-      <h3 id="reject-title">Reject approvals?</h3>
-      <label for="reject-reason">Reason</label>
-      <textarea id="reject-reason" placeholder="Optional reason"></textarea>
-      <div style="display:flex;justify-content:flex-end;gap:.5rem;">
-        <button value="cancel">Cancel</button>
-        <button value="submit" class="primary">Submit decisions</button>
-      </div>
-    </form>
-  </dialog>
-  <script>
-    const state = { revision:0, drafts:new Map(), submitted:new Set(), source:null };
-    const app = document.getElementById('app'), message = document.getElementById('message');
-    const live = document.getElementById('live-state'), secret = document.getElementById('secret-state');
-    const clients = document.getElementById('client-count'), pending = document.getElementById('pending-count');
-    document.getElementById('settings-button').onclick = () => document.getElementById('secret-panel').classList.toggle('open');
-    const unlockForm = document.getElementById('unlock-form'), lockForm = document.getElementById('lock-form');
-
-    function setLive(text, cls) { live.textContent = ''; const d=document.createElement('span'); d.className='dot '+(cls||''); live.append(d, document.createTextNode(text)); }
-    async function postJSON(url, body) { const r=await fetch(url,{method:'POST',headers:{'Content-Type': 'application/json'},body:JSON.stringify(body)}); const t=await r.text(); if(!r.ok) throw new Error(t || 'request failed'); return t ? JSON.parse(t) : null; }
-    async function postNoBody(url) { const r=await fetch(url,{method:'POST'}); const t=await r.text(); if(!r.ok) throw new Error(t || 'request failed'); }
-    function swapFragment(html) { app.innerHTML = html; syncHeader(); applyDrafts(); }
-    function syncHeader() { const f=document.getElementById('approval-fragment'); if(!f) return; secret.textContent=f.dataset.secretStatus||'Unavailable'; clients.textContent=(f.dataset.activeClients||'0')+' clients'; pending.textContent=(f.dataset.pendingApprovals||'0')+' pending'; state.revision=Number(f.dataset.revision||0); for (const id of Array.from(state.submitted)) if (!document.querySelector('[data-tool-call-id="'+CSS.escape(id)+'"]')) state.submitted.delete(id); }
-    function applyDrafts() { for (const row of app.querySelectorAll('[data-tool-call-id]')) { const id=row.dataset.toolCallId; const draft=state.submitted.has(id) || row.dataset.queued === 'true' ? 'sent' : (state.drafts.get(id)||'leave'); row.dataset.draft=draft; for (const b of row.querySelectorAll('[data-decision]')) b.classList.toggle('active', b.dataset.decision === draft); const sent=row.querySelector('[data-sent]'); if(sent) sent.hidden = draft !== 'sent'; const seg=row.querySelector('.seg'); if(seg) seg.hidden = draft === 'sent'; } updateFooters(); }
-    function updateFooters() { for (const session of app.querySelectorAll('[data-session]')) { const rows=[...session.querySelectorAll('[data-tool-call-id]')].filter(r=>r.dataset.draft!=='sent'); const approve=rows.filter(r=>r.dataset.draft==='approve').length, reject=rows.filter(r=>r.dataset.draft==='reject').length, unchanged=rows.length-approve-reject; const counts=session.querySelector('[data-counts]'); if(counts) counts.textContent=approve+' approve - '+reject+' reject - '+unchanged+' unchanged'; const submit=session.querySelector('[data-submit]'); if(submit) { submit.textContent='Submit '+(approve+reject)+' decisions'; submit.disabled=approve+reject===0; } } }
-    function markSession(sessionEl, value) { for (const row of sessionEl.querySelectorAll('[data-tool-call-id]')) if(row.dataset.draft!=='sent') { value==='leave' ? state.drafts.delete(row.dataset.toolCallId) : state.drafts.set(row.dataset.toolCallId, value); } applyDrafts(); }
-    async function submitSession(sessionEl) {
-      const decisions=[]; for(const row of sessionEl.querySelectorAll('[data-tool-call-id]')) { const d=state.drafts.get(row.dataset.toolCallId); if(d==='approve'||d==='reject') decisions.push({tool_call_id:row.dataset.toolCallId, decision:d}); }
-      const rejects=decisions.filter(d=>d.decision==='reject'); let reason='';
-      if (rejects.length) { reason = await rejectReason(rejects.length); if (reason === null) return; for(const d of rejects) d.reason = reason; }
-      message.textContent='';
-      const res=await postJSON('/approval-console/decisions',{observed_revision:state.revision||0,client_decision_id:String(Date.now()),decisions});
-      for(const a of res.accepted||[]) { state.submitted.add(a.tool_call_id); state.drafts.delete(a.tool_call_id); }
-      if (res.errors?.length) message.textContent = res.errors.map(e => (e.tool_call_id || 'decision') + ': ' + e.error).join('\n');
-      applyDrafts();
-    }
-    function rejectReason(count) { return new Promise(resolve => { const dlg=document.getElementById('reject-dialog'), title=document.getElementById('reject-title'), reason=document.getElementById('reject-reason'); title.textContent='Reject '+String(count)+' approval'+(count===1?'':'s')+'?'; reason.value=''; dlg.onclose=()=>resolve(dlg.returnValue==='submit'?reason.value:null); dlg.showModal(); }); }
-    async function loadHTML() { const r=await fetch('/approval-console/html'); if(!r.ok) throw new Error(await r.text() || 'failed to load approvals'); swapFragment(await r.text()); }
-    function connectEvents() { setLive('Connecting','warn'); const es=new EventSource('/approval-console/events'); state.source=es; es.onopen=()=>setLive('Live',''); es.onerror=()=>setLive('Disconnected','off'); es.addEventListener('html', e=>swapFragment(e.data)); }
-    app.addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; const row=b.closest('[data-tool-call-id]'); if(b.dataset.decision && row) { const id=row.dataset.toolCallId, d=b.dataset.decision; d==='leave' ? state.drafts.delete(id) : state.drafts.set(id,d); applyDrafts(); } const session=b.closest('[data-session]'); if(b.dataset.mark && session) markSession(session,b.dataset.mark); if(b.dataset.clear && session) markSession(session,'leave'); if(b.dataset.submit && session) submitSession(session); });
-    if (unlockForm) unlockForm.onsubmit=async e=>{ e.preventDefault(); await postJSON('/secret-store/unlock',{unlock_key:document.getElementById('unlock-key').value}); location.reload(); };
-    if (lockForm) lockForm.onsubmit=async e=>{ e.preventDefault(); await postNoBody('/secret-store/lock'); location.reload(); };
-    loadHTML().then(connectEvents).catch(err=>{ message.textContent=err.message || 'failed to load approvals'; setLive('Disconnected','off'); });
-  </script>
-</body>
-</html>
-`))
-
-func renderDaemonIndex(w io.Writer, page daemonIndexPageData) error {
-	return daemonIndexTemplate.Execute(w, page)
-}
-
-func renderApprovalConsoleHTML(state approvalConsoleState) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<div id="approval-fragment" data-revision="%d" data-secret-status="%s" data-active-clients="%d" data-pending-approvals="%d">`,
-		state.Revision,
-		escapeAttr(titleCase(state.SecretStore.Status)),
-		state.Summary.ActiveClients,
-		state.Summary.PendingApprovals,
-	)
-	if state.Summary.ActiveClients == 0 {
-		b.WriteString(`<div class="empty"><h2>No active Toolbox sessions</h2><p>Start a codemode session to review tool approvals here.</p></div></div>`)
-		return b.String()
-	}
-	if len(state.Sessions) == 0 {
-		b.WriteString(`<div class="empty"><h2>No pending approvals</h2><p>Connected Toolbox sessions will appear here when they need approval.</p></div></div>`)
-		return b.String()
-	}
-	for _, session := range state.Sessions {
-		renderApprovalConsoleSessionHTML(&b, session)
-	}
-	b.WriteString(`</div>`)
-	return b.String()
-}
-
-func renderApprovalConsoleSessionHTML(b *strings.Builder, session approvalConsoleSession) {
-	fmt.Fprintf(b, `<section class="intent" data-session="%s">`, escapeAttr(session.TBSession))
-	b.WriteString(`<div class="intent-head">`)
-	dotClass := "dot"
-	if !session.Active {
-		dotClass += " off"
-	}
-	fmt.Fprintf(b, `<span class="%s"></span>`, dotClass)
-	fmt.Fprintf(b, `<div class="intent-title">"%s"<div class="intent-meta">%d pending - updated %s</div></div>`,
-		escapeText(session.Intent.Text),
-		countConsoleSessionCalls(session),
-		escapeText(displayTime(session.UpdatedAt)),
-	)
-	fmt.Fprintf(b, `<button type="button" data-mark="approve">Mark all approve</button>`)
-	fmt.Fprintf(b, `<div class="session-info">Session %s&#10;%s - PID %d&#10;%s&#10;Synced %s</div>`,
-		escapeText(session.TBSession),
-		escapeText(firstNonEmpty(session.Details.Mode, "codemode")),
-		session.Details.PID,
-		escapeText(session.Details.WorkingDir),
-		escapeText(displayTime(session.Details.LastSyncAt)),
-	)
-	b.WriteString(`</div>`)
-	for _, group := range session.PackageGroups {
-		renderApprovalConsolePackageHTML(b, group)
-	}
-	b.WriteString(`<div class="footer"><div class="counts" data-counts>0 approve - 0 reject - 0 unchanged</div><button type="button" data-clear="true">Clear choices</button><button type="button" class="primary" data-submit="true" disabled>Submit 0 decisions</button></div>`)
-	b.WriteString(`</section>`)
-}
-
-func renderApprovalConsolePackageHTML(b *strings.Builder, group approvalConsolePackageGroup) {
-	b.WriteString(`<section class="package">`)
-	fmt.Fprintf(b, `<div class="package-title">%s %d</div>`, escapeText(firstNonEmpty(group.PackageLabel, group.PackageKey)), len(group.ToolCalls))
-	for _, call := range group.ToolCalls {
-		renderApprovalConsoleCallHTML(b, call)
-	}
-	b.WriteString(`</section>`)
-}
-
-func renderApprovalConsoleCallHTML(b *strings.Builder, call daemon.PendingApprovalSnapshot) {
-	queued := "false"
-	if call.QueuedDecision != nil {
-		queued = "true"
-	}
-	fmt.Fprintf(b, `<div class="row" data-tool-call-id="%s" data-queued="%s" data-draft="leave">`, escapeAttr(call.ToolCallID), queued)
-	b.WriteString(`<div class="row-head">`)
-	fmt.Fprintf(b, `<div class="tool-name">%s</div>`, escapeText(firstNonEmpty(call.ToolLabel, call.ToolName)))
-	fmt.Fprintf(b, `<div class="desc">%s</div>`, escapeText(call.Description))
-	b.WriteString(`<div class="seg"><button type="button" data-decision="leave">Leave</button><button type="button" class="reject" data-decision="reject">Reject</button><button type="button" data-decision="approve">Approve</button></div>`)
-	b.WriteString(`<div class="pill" data-sent hidden>Decision sent - Waiting for session...</div>`)
-	b.WriteString(`</div>`)
-	b.WriteString(`<div class="summary">`)
-	fields := approvalSummaryFields(call)
-	if len(fields) == 0 && strings.TrimSpace(call.ParamsInspect) != "" {
-		fields = [][2]string{{"Params", call.ParamsInspect}}
-	}
-	for _, field := range fields {
-		fmt.Fprintf(b, `<div class="label">%s</div><div class="value">%s</div>`, escapeText(field[0]), escapeText(field[1]))
-	}
-	b.WriteString(`</div>`)
-	b.WriteString(`<details><summary>Details</summary><div class="details-grid">`)
-	detail := func(label, value string) {
-		fmt.Fprintf(b, `<div class="label">%s</div><div>%s</div>`, escapeText(label), escapeText(value))
-	}
-	detail("Tool call", firstNonEmpty(call.FullToolName, call.ToolName))
-	detail("Call ID", call.ToolCallID)
-	detail("Cell", call.CellID)
-	detail("Requested", displayTime(call.CreatedAt))
-	b.WriteString(`</div><div class="label">Raw params</div><pre>`)
-	b.WriteString(escapeText(call.ParamsInspect))
-	b.WriteString(`</pre></details></div>`)
+func renderDaemonIndex(w io.Writer, state approvalConsoleState) error {
+	return ApprovalConsolePage(approvalConsolePageDataFromState(state), state).Render(context.Background(), w)
 }
 
 func approvalSummaryFields(call daemon.PendingApprovalSnapshot) [][2]string {
@@ -907,22 +606,6 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-func escapeText(s string) string {
-	return template.HTMLEscapeString(s)
-}
-
-func escapeAttr(s string) string {
-	return template.HTMLEscapeString(s)
-}
-
-func writeSSEHTML(w io.Writer, html string) {
-	_, _ = io.WriteString(w, "event: html\n")
-	for _, line := range strings.Split(html, "\n") {
-		_, _ = fmt.Fprintf(w, "data: %s\n", line)
-	}
-	_, _ = io.WriteString(w, "\n")
-}
-
 func startDaemonDebugServer(stderr io.Writer, shutdown func(), control daemonHTTPControl) (func() error, string, error) {
 	listener, err := listenDaemonDebugListener()
 	if err != nil {
@@ -946,40 +629,25 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/assets/datastar-v1.0.1.js", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = w.Write(datastarJS)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" && r.URL.Path != "/approval-console" {
 			http.NotFound(w, r)
 			return
 		}
 
-		page := daemonIndexPageData{StatusText: "unavailable"}
-		if control != nil {
-			locked, err := control.SecretStoreLocked(r.Context())
-			if err == nil {
-				page.Available = true
-				page.Locked = locked
-				if locked {
-					page.StatusText = "locked"
-				} else {
-					page.StatusText = "unlocked"
-				}
-			}
-		}
-
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := renderDaemonIndex(w, page); err != nil {
+		if err := renderDaemonIndex(w, approvalConsoleStateForHTTP(control)); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
-	mux.HandleFunc("/approval-console/state", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		if err := json.NewEncoder(w).Encode(approvalConsoleStateForHTTP(control)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	})
-	mux.HandleFunc("/approval-console/html", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, renderApprovalConsoleHTML(approvalConsoleStateForHTTP(control)))
 	})
 	mux.HandleFunc("/approval-console/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -987,27 +655,16 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		writeDatastarHeaders(w)
 
-		last := ""
-		sendHTML := func() {
-			state := approvalConsoleStateForHTTP(control)
-			stable := state
-			stable.ServerTime = ""
-			stablePayload, err := json.Marshal(stable)
-			if err != nil {
-				return
-			}
-			if string(stablePayload) == last {
-				return
-			}
-			last = string(stablePayload)
-			writeSSEHTML(w, renderApprovalConsoleHTML(state))
+		writeDatastarPatchSignals(w, map[string]any{"liveState": "Live"})
+		var previous *approvalConsoleFragments
+		sendPatches := func() {
+			next := writeApprovalConsolePatches(w, previous, approvalConsoleStateForHTTP(control))
+			previous = &next
 			flusher.Flush()
 		}
-		sendHTML()
+		sendPatches()
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -1015,7 +672,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			case <-r.Context().Done():
 				return
 			case <-ticker.C:
-				sendHTML()
+				sendPatches()
 			}
 		}
 	})
@@ -1028,15 +685,22 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 			return
 		}
-		var req approvalConsoleDecisionRequest
+		var req approvalConsoleSubmitRequest
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		if err := json.NewEncoder(w).Encode(applyApprovalConsoleDecisions(r.Context(), control, req)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+		writeDatastarHeaders(w)
+		result := applyApprovalConsoleDrafts(r.Context(), control, req)
+		writeDatastarPatchSignals(w, map[string]any{
+			"liveState":        "Live",
+			"drafts":           map[string]string{},
+			"rejectReason":     "",
+			"rejectDialogOpen": false,
+			"rejectSession":    "",
+			"message":          approvalConsoleErrorMessage(result),
+		})
+		writeApprovalConsolePatches(w, nil, approvalConsoleStateForHTTP(control))
 	})
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1273,20 +937,32 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			return
 		}
 		if control == nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "secret store unavailable"})
+				return
+			}
 			http.Error(w, "secret store unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if !isJSONRequest(r) {
-			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-			return
-		}
-		var req secretStoreUnlockRequest
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		req, status, err := readSecretStoreUnlockRequest(r)
+		if err != nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error()})
+				return
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 		if err := control.UnlockSecretStore(r.Context(), req.UnlockKey); err != nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error()})
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if isDatastarRequest(r) {
+			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "", "unlockKey": ""})
 			return
 		}
 		writeSecretStoreStatus(w, false)
@@ -1297,11 +973,23 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			return
 		}
 		if control == nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "secret store unavailable"})
+				return
+			}
 			http.Error(w, "secret store unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if err := control.LockSecretStore(r.Context()); err != nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error()})
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if isDatastarRequest(r) {
+			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": ""})
 			return
 		}
 		writeSecretStoreStatus(w, true)
@@ -1351,8 +1039,57 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 }
 
 func isJSONRequest(r *http.Request) bool {
+	return requestMediaType(r) == "application/json"
+}
+
+func requestMediaType(r *http.Request) string {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	return err == nil && mediaType == "application/json"
+	if err != nil {
+		return ""
+	}
+	return mediaType
+}
+
+func readSecretStoreUnlockRequest(r *http.Request) (secretStoreUnlockRequest, int, error) {
+	req := secretStoreUnlockRequest{}
+	if isJSONRequest(r) {
+		var payload struct {
+			UnlockKey      string `json:"unlock_key"`
+			CamelUnlockKey string `json:"unlockKey"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+			return secretStoreUnlockRequest{}, http.StatusBadRequest, err
+		}
+		req.UnlockKey = payload.UnlockKey
+		if req.UnlockKey == "" {
+			req.UnlockKey = payload.CamelUnlockKey
+		}
+		return validateSecretStoreUnlockRequest(req)
+	}
+	if isDatastarRequest(r) {
+		switch requestMediaType(r) {
+		case "application/x-www-form-urlencoded":
+			if err := r.ParseForm(); err != nil {
+				return secretStoreUnlockRequest{}, http.StatusBadRequest, err
+			}
+			req.UnlockKey = r.FormValue("unlock_key")
+			return validateSecretStoreUnlockRequest(req)
+		case "multipart/form-data":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				return secretStoreUnlockRequest{}, http.StatusBadRequest, err
+			}
+			req.UnlockKey = r.FormValue("unlock_key")
+			return validateSecretStoreUnlockRequest(req)
+		}
+	}
+	return secretStoreUnlockRequest{}, http.StatusUnsupportedMediaType, fmt.Errorf("%s", http.StatusText(http.StatusUnsupportedMediaType))
+}
+
+func validateSecretStoreUnlockRequest(req secretStoreUnlockRequest) (secretStoreUnlockRequest, int, error) {
+	if req.UnlockKey == "" {
+		return secretStoreUnlockRequest{}, http.StatusBadRequest, errors.New("unlock key is empty")
+	}
+	return req, http.StatusOK, nil
 }
 
 func writeSecretStoreStatus(w http.ResponseWriter, locked bool) {

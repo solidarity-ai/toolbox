@@ -462,8 +462,8 @@ func TestApprovalConsoleDecisionsSubmitDraftBatch(t *testing.T) {
 	if !strings.Contains(string(payload), "event: datastar-patch-signals") || !strings.Contains(string(payload), "event: datastar-patch-elements") {
 		t.Fatalf("decision response missing Datastar patches: %q", string(payload))
 	}
-	if !strings.Contains(string(payload), `"liveState":"Live"`) {
-		t.Fatalf("decision response did not restore live state: %q", string(payload))
+	if !strings.Contains(string(payload), `"liveState":"Connected"`) {
+		t.Fatalf("decision response did not restore connected state: %q", string(payload))
 	}
 	if !strings.Contains(string(payload), `"drafts":{"tc-1":"leave","tc-2":"leave","tc-3":"leave"}`) {
 		t.Fatalf("decision response did not reset submitted draft keys to the neutral state: %q", string(payload))
@@ -662,6 +662,128 @@ func TestApprovalConsoleDecisionControlIsTwoWayToggle(t *testing.T) {
 	}
 }
 
+func TestApprovalConsoleTopbarUsesCompactControls(t *testing.T) {
+	state := approvalConsoleState{
+		SecretStore: approvalConsoleSecretStore{Status: "locked"},
+		Summary:     approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 2},
+		Clients: []approvalConsoleClient{{
+			PID:              41,
+			Mode:             "codemode",
+			Host:             "Claude Code",
+			ParentPID:        40,
+			ParentCommand:    "claude",
+			WorkingDir:       "/tmp/work",
+			BoundTBSession:   "abc123",
+			PendingApprovals: 2,
+			PreparedTools:    17,
+			ConnectedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+			LastSyncAt:       time.Now().UTC().Format(time.RFC3339Nano),
+			Active:           true,
+		}},
+	}
+	html := componentHTML(ApprovalTopbar(state))
+	if strings.Contains(html, "Toolbox Approvals") {
+		t.Fatalf("topbar should not render Approvals in the navbar: %q", html)
+	}
+	if !strings.Contains(html, `<span>Toolbox</span>`) {
+		t.Fatalf("topbar missing compact Toolbox brand: %q", html)
+	}
+	if strings.Contains(html, "Settings") || strings.Contains(html, `id="secret-state"`) {
+		t.Fatalf("topbar still renders old settings/secret text controls: %q", html)
+	}
+	if !strings.Contains(html, `id="live-state"`) || !strings.Contains(html, `data-text="$liveState"`) {
+		t.Fatalf("topbar missing live dot tooltip state: %q", html)
+	}
+	if !strings.Contains(html, `class="topbar-menu client-popover"`) ||
+		!strings.Contains(html, `aria-label="Connected clients"`) ||
+		!strings.Contains(html, `Claude Code - PID 41`) ||
+		!strings.Contains(html, `Host</div><div class="value">Claude Code`) ||
+		!strings.Contains(html, `Parent</div><div class="value">claude - PID 40`) ||
+		!strings.Contains(html, `Mode</div><div class="value">codemode`) ||
+		!strings.Contains(html, `/tmp/work`) ||
+		!strings.Contains(html, `abc123`) ||
+		!strings.Contains(html, `2 pending`) ||
+		!strings.Contains(html, `17 prepared`) {
+		t.Fatalf("topbar missing client popover data: %q", html)
+	}
+	if !strings.Contains(html, `class="brand-pending"`) ||
+		!strings.Contains(html, `aria-label="Pending approvals"`) ||
+		!strings.Contains(html, `>2</span>`) {
+		t.Fatalf("topbar missing brand pending count pill: %q", html)
+	}
+	if strings.Contains(html, `id="pending-count"`) {
+		t.Fatalf("topbar still renders separate right-side pending count: %q", html)
+	}
+	if !strings.Contains(html, `class="icon-button lock-button locked"`) ||
+		!strings.Contains(html, `aria-label="Secret store locked"`) ||
+		!strings.Contains(html, `$secretOpen = !$secretOpen`) {
+		t.Fatalf("topbar missing lock-state icon control: %q", html)
+	}
+}
+
+func TestApprovalConsoleTopbarHidesZeroPendingPill(t *testing.T) {
+	html := componentHTML(ApprovalTopbar(approvalConsoleState{
+		Summary: approvalConsoleSummary{ActiveClients: 1, PendingApprovals: 0},
+	}))
+	if strings.Contains(html, `class="brand-pending"`) {
+		t.Fatalf("topbar rendered pending pill for zero pending approvals: %q", html)
+	}
+	if strings.Contains(html, `id="pending-count"`) {
+		t.Fatalf("topbar rendered separate right-side pending count: %q", html)
+	}
+}
+
+func TestApprovalClientHostClassifier(t *testing.T) {
+	cases := map[string]string{
+		"claude":                                "Claude Code",
+		"claude --dangerously-skip-permissions": "Claude Code",
+		"/opt/homebrew/bin/codex":               "Codex",
+		"/Applications/Cursor.app/Cursor":       "Cursor",
+		"node /tmp/something":                   "",
+	}
+	for command, want := range cases {
+		if got := classifyApprovalClientHost(command); got != want {
+			t.Fatalf("classifyApprovalClientHost(%q) = %q, want %q", command, got, want)
+		}
+	}
+}
+
+func TestApprovalConsoleStateIncludesClientPopoverData(t *testing.T) {
+	now := time.Now().UTC()
+	control := &stubDaemonHTTPControl{
+		snapshots: []daemon.ClientSnapshot{{
+			PID:            41,
+			Mode:           "codemode",
+			WorkingDir:     "/tmp/work",
+			BoundTBSession: "abc123",
+			PreparedTools:  []string{"gmail.send", "gmail.search"},
+			PendingApprovals: []daemon.PendingApprovalSnapshot{{
+				ToolCallID: "tc-1",
+				TBSession:  "abc123",
+				ToolName:   "gmail.send",
+			}},
+			ConnectedAt: now.Add(-time.Minute),
+			LastSyncAt:  now,
+		}},
+	}
+	state := approvalConsoleStateForHTTP(control)
+	if len(state.Clients) != 1 {
+		t.Fatalf("clients = %#v, want one client", state.Clients)
+	}
+	client := state.Clients[0]
+	if client.PID != 41 ||
+		client.Mode != "codemode" ||
+		client.WorkingDir != "/tmp/work" ||
+		client.BoundTBSession != "abc123" ||
+		client.PendingApprovals != 1 ||
+		client.PreparedTools != 2 ||
+		client.ConnectedAt == "" ||
+		client.LastSyncAt == "" ||
+		!client.Active {
+		t.Fatalf("client = %#v, want populated popover data", client)
+	}
+}
+
 func TestApprovalConsoleUsesHyphenatedDatastarBindSignals(t *testing.T) {
 	html := componentHTML(ApprovalConsolePage(daemonIndexPageData{StatusText: "locked", Available: true, Locked: true}, approvalConsoleState{
 		SecretStore: approvalConsoleSecretStore{Status: "locked"},
@@ -678,11 +800,23 @@ func TestApprovalConsoleUsesHyphenatedDatastarBindSignals(t *testing.T) {
 	if !strings.Contains(html, `method="post" action="/secret-store/unlock"`) {
 		t.Fatalf("unlock form must post so passphrases cannot leak into the URL: %q", html)
 	}
+	if !strings.Contains(html, `id="secret-panel" class="secret-panel open" data-class:open="true"`) {
+		t.Fatalf("locked secret store should show the unlock panel without toolbar toggle: %q", html)
+	}
 	if !strings.Contains(html, `data-on:submit__prevent`) {
 		t.Fatalf("console missing Datastar v1 modifier syntax for submit prevention: %q", html)
 	}
 	if strings.Contains(html, `data-on:submit.prevent`) {
 		t.Fatalf("console used dot modifier syntax that v1.0.1 treats as a literal event name: %q", html)
+	}
+	if !strings.Contains(html, `.topbar-menu[open] > summary::after`) ||
+		!strings.Contains(html, `.intent-menu[open] > summary::after`) {
+		t.Fatalf("console missing menu caret override for details-based popovers: %q", html)
+	}
+
+	unlockedHTML := componentHTML(SecretPanel(daemonIndexPageData{StatusText: "unlocked", Available: true, Locked: false}))
+	if !strings.Contains(unlockedHTML, `data-class:open="$secretOpen"`) {
+		t.Fatalf("unlocked secret panel should still use the toolbar toggle: %q", unlockedHTML)
 	}
 }
 

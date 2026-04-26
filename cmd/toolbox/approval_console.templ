@@ -24,10 +24,42 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				button:disabled { opacity: .5; cursor: not-allowed; }
 				.link-button { border:0; background:transparent; color:#0957d0; padding:.2rem .35rem; }
 				.icon-button { width:32px; height:32px; display:inline-grid; place-items:center; padding:0; border-radius:8px; color:#243047; background:#fff; }
-				.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1.35rem; padding: .75rem 1.5rem; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--border); }
+				.toolbar-icon { width:16px; height:16px; flex:0 0 auto; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+				.client-icon { width:20px; height:20px; }
+				.toolbar-count { font-weight:700; color:#1f2937; }
+				.icon-button .toolbar-icon { width:17px; height:17px; }
+				.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: .75rem; padding: .75rem 1.5rem; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--border); }
 				.brand { display:flex; align-items:center; gap:.65rem; font-weight: 700; font-size: 16px; margin-right: auto; }
 				.brand-mark { width:28px; height:28px; display:inline-grid; place-items:center; border-radius:7px; background:#111827; color:#fff; font-weight:800; line-height:1; }
+				.brand-pending { min-width:1.45rem; height:1.35rem; display:inline-grid; place-items:center; padding:0 .45rem; border-radius:999px; background:#eef4ff; color:#0b57d0; font-size:12px; font-weight:700; line-height:1; }
 				.pill { display:inline-flex; align-items:center; gap:.4rem; color: var(--muted); white-space: nowrap; }
+				.toolbar-pill { height:32px; display:inline-flex; align-items:center; justify-content:center; gap:.4rem; padding:0 .6rem; border:1px solid var(--border); border-radius:8px; background:#fff; color:#344054; font-size:13px; line-height:1; white-space:nowrap; }
+				.toolbar-button { cursor:pointer; }
+				.topbar-popover, .topbar-menu { position:relative; }
+				.topbar-menu { margin:0; }
+				.topbar-menu summary { width:auto; color:#344054; list-style:none; }
+				.topbar-menu summary::-webkit-details-marker { display:none; }
+				.topbar-menu summary::after { content:""; margin:0; }
+				.topbar-menu[open] > summary { background:#f6f8fb; }
+				.live-target { width:32px; height:32px; display:inline-grid; place-items:center; border-radius:8px; }
+				.live-target:focus-visible { outline:2px solid #9ec1ff; outline-offset:2px; }
+				.dot.toolbar-dot { width:.65rem; height:.65rem; margin:0; }
+				.topbar-tooltip { position:absolute; right:0; top:calc(100% + .45rem); z-index:30; display:none; width:max-content; max-width:min(18rem, calc(100vw - 2rem)); padding:.45rem .55rem; border:1px solid #111827; border-radius:7px; background:#111827; color:#fff; box-shadow:0 8px 24px rgba(15,23,42,.22); font-size:12px; line-height:1.35; white-space:nowrap; }
+				.topbar-popover:hover .topbar-tooltip, .topbar-popover:focus-within .topbar-tooltip { display:block; }
+				.topbar-panel { position:absolute; right:0; top:calc(100% + .45rem); z-index:30; width:min(30rem, calc(100vw - 2rem)); max-width:calc(100vw - 2rem); padding:.35rem; border:1px solid var(--border); border-radius:8px; background:#fff; box-shadow:0 12px 30px rgba(15,23,42,.16); }
+				.client-empty { padding:.7rem .8rem; color:var(--muted); }
+				.client-row { padding:.65rem .7rem; border-bottom:1px solid #edf0f3; }
+				.client-row:last-child { border-bottom:0; }
+				.client-title { display:flex; align-items:center; gap:.5rem; min-width:0; color:var(--text); font-weight:650; }
+				.client-title .dot { margin:0; flex:0 0 auto; }
+				.client-title-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+				.client-facts { display:grid; grid-template-columns:6.5rem minmax(0,1fr); gap:.18rem .65rem; margin-top:.45rem; font-size:12px; }
+				.client-facts .label { color:var(--muted); }
+				.client-facts .value { overflow-wrap:anywhere; }
+				.lock-button.unlocked { color:var(--ok); }
+				.lock-button.locked { color:var(--danger); }
+				.lock-button.unavailable { color:#6b7280; }
+				.lock-button .toolbar-icon { width:20px; height:20px; stroke-width:2.1; }
 				.ok-text { color:#0b8f43; }
 				.danger-text { color:var(--danger); }
 				.dot { display:inline-block; width:.55rem; height:.55rem; border-radius:999px; background: var(--ok); margin-right:.35rem; }
@@ -77,6 +109,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				summary::-webkit-details-marker { display:none; }
 				summary::after { content:"v"; margin-left:.45rem; font-size:12px; }
 				details[open] summary::after { content:"^"; }
+				.topbar-menu > summary::after, .topbar-menu[open] > summary::after, .intent-menu > summary::after, .intent-menu[open] > summary::after { content:""; margin:0; }
 				pre { margin:.35rem 0 0; padding:.75rem; background:#f4f6f8; border:1px solid var(--border); border-radius:6px; overflow:auto; white-space:pre-wrap; }
 				.details-grid { display:grid; grid-template-columns:9rem minmax(0,1fr); gap:.35rem .8rem; margin-top:.6rem; }
 				.footer { position:sticky; bottom:0; display:flex; align-items:center; gap:.75rem; margin:.25rem -1rem 0; padding:.75rem 1rem; background:#fbfcfd; border-top:1px solid var(--border); box-shadow:0 -1px 2px rgba(15,23,42,.04); }
@@ -109,19 +142,104 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 
 templ ApprovalTopbar(state approvalConsoleState) {
 	<header class="topbar" id="approval-topbar">
-		<div class="brand"><span class="brand-mark" aria-hidden="true">T</span><span>Toolbox Approvals</span></div>
-		<div class="pill" id="live-state">
-			<span class="dot" data-class:warn={ liveDotWarnExpr() } data-class:off={ liveDotOffExpr() }></span><span data-text="$liveState">Connecting</span>
+		<div class="brand">
+			<span class="brand-mark" aria-hidden="true">T</span>
+			<span>Toolbox</span>
+			if state.Summary.PendingApprovals > 0 {
+				<span class="brand-pending" aria-label="Pending approvals" title="Pending approvals">{ fmt.Sprintf("%d", state.Summary.PendingApprovals) }</span>
+			}
 		</div>
-		<div class="pill" id="secret-state"><span class={ secretStatusClass(state.SecretStore.Status) }>{ titleCase(state.SecretStore.Status) }</span></div>
-		<div class="pill" id="client-count">{ fmt.Sprintf("%d clients", state.Summary.ActiveClients) }</div>
-		<div class="pill" id="pending-count">{ fmt.Sprintf("%d pending", state.Summary.PendingApprovals) }</div>
-		<button type="button" class="icon-button" aria-label="Settings" title="Settings" data-on:click="$settingsOpen = !$settingsOpen">...</button>
+		<div class="topbar-popover" id="live-state">
+			<span class="live-target" tabindex="0" aria-label="Live update status" aria-describedby="live-state-tooltip">
+				<span class="dot toolbar-dot" data-class={ liveDotClassExpr() }></span>
+			</span>
+			<div class="topbar-tooltip" id="live-state-tooltip" role="tooltip"><span data-text="$liveState">Connecting</span></div>
+		</div>
+		<details class="topbar-menu client-popover" id="client-count" data-preserve-attr="open">
+			<summary class="toolbar-pill toolbar-button" aria-label="Connected clients" title="Connected clients">
+				@IconClients()
+				<span class="toolbar-count">{ fmt.Sprintf("%d", state.Summary.ActiveClients) }</span>
+			</summary>
+			<div class="topbar-panel clients-panel">
+				@ClientPopover(state)
+			</div>
+		</details>
+		<button type="button" class={ lockButtonClass(state.SecretStore.Status) } aria-label={ secretStoreIconLabel(state.SecretStore.Status) } title={ secretStoreIconLabel(state.SecretStore.Status) } data-on:click="$secretOpen = !$secretOpen">
+			@IconLock(state.SecretStore.Status)
+		</button>
 	</header>
 }
 
+templ ClientPopover(state approvalConsoleState) {
+	if len(state.Clients) == 0 {
+		<div class="client-empty">No connected clients</div>
+	} else {
+		for _, client := range state.Clients {
+			<div class="client-row">
+				<div class="client-title">
+					if client.Active {
+						<span class="dot"></span>
+					} else {
+						<span class="dot off"></span>
+					}
+					<span class="client-title-text">{ approvalClientTitle(client) }</span>
+				</div>
+				<div class="client-facts">
+					if client.Host != "" {
+						<div class="label">Host</div><div class="value">{ client.Host }</div>
+					}
+					if client.ParentCommand != "" {
+						<div class="label">Parent</div><div class="value">{ approvalClientParentLabel(client) }</div>
+					}
+					if client.Mode != "" {
+						<div class="label">Mode</div><div class="value">{ client.Mode }</div>
+					}
+					if client.BoundTBSession != "" {
+						<div class="label">Session</div><div class="value">{ client.BoundTBSession }</div>
+					}
+					if client.WorkingDir != "" {
+						<div class="label">Directory</div><div class="value">{ client.WorkingDir }</div>
+					}
+					<div class="label">Approvals</div><div class="value">{ fmt.Sprintf("%d pending", client.PendingApprovals) }</div>
+					<div class="label">Tools</div><div class="value">{ fmt.Sprintf("%d prepared", client.PreparedTools) }</div>
+					if client.LastSyncAt != "" {
+						<div class="label">Last sync</div><div class="value">{ displayTime(client.LastSyncAt) }</div>
+					}
+					if client.ConnectedAt != "" {
+						<div class="label">Connected</div><div class="value">{ displayTime(client.ConnectedAt) }</div>
+					}
+				</div>
+			</div>
+		}
+	}
+}
+
+templ IconClients() {
+	<svg class="toolbar-icon client-icon" viewBox="0 0 24 24" aria-hidden="true">
+		<rect x="4" y="5" width="16" height="14" rx="2"></rect>
+		<path d="M4 8h16"></path>
+		<rect x="8" y="10.5" width="8" height="5.5" rx="1.5"></rect>
+		<path d="M12 10.5V9"></path>
+		<circle cx="10.3" cy="13.2" r=".35"></circle>
+		<circle cx="13.7" cy="13.2" r=".35"></circle>
+		<path d="M10.5 15h3"></path>
+	</svg>
+}
+
+templ IconLock(status string) {
+	<svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
+		if secretIconStatus(status) == "unlocked" {
+			<path d="M7 10V7a5 5 0 0 1 9.8-1.4"></path>
+		} else {
+			<path d="M7 10V7a5 5 0 0 1 10 0v3"></path>
+		}
+		<rect x="4" y="10" width="16" height="10" rx="2"></rect>
+		<path d="M12 14v2"></path>
+	</svg>
+}
+
 templ SecretPanel(page daemonIndexPageData) {
-	<section id="secret-panel" class="secret-panel" data-class:open="$settingsOpen">
+	<section id="secret-panel" class={ secretPanelClass(page) } data-class:open={ secretPanelOpenExpr(page) }>
 		if page.Available {
 			if page.Locked {
 				<form id="unlock-form" method="post" action="/secret-store/unlock" data-on:submit__prevent="@post('/secret-store/unlock', {payload:{unlock_key:el.querySelector('[name=unlock_key]').value}})">
@@ -146,7 +264,7 @@ templ ApprovalMain(state approvalConsoleState) {
 		if state.Summary.ActiveClients == 0 {
 			<div class="empty"><h2>No active Toolbox sessions</h2><p>Start a codemode session to review tool approvals here.</p></div>
 		} else if len(state.Sessions) == 0 {
-			<div class="empty"><h2>No pending approvals</h2><p>Connected Toolbox sessions will appear here when they need approval.</p></div>
+			<div class="empty"><h2>Awaiting Approvals</h2><p>Tool use approvals will display here when required.</p></div>
 		} else {
 			for _, session := range state.Sessions {
 				@ApprovalSession(session)

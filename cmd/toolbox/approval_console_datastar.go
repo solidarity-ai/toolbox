@@ -162,7 +162,7 @@ func isDatastarRequest(r *http.Request) bool {
 func writeApprovalConsoleDatastarResponse(w http.ResponseWriter, control daemonHTTPControl, signals map[string]any) {
 	writeDatastarHeaders(w)
 	patch := make(map[string]any, len(signals)+1)
-	patch["liveState"] = "Live"
+	patch["liveState"] = "Connected"
 	for key, value := range signals {
 		patch[key] = value
 	}

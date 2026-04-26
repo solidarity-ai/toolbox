@@ -267,6 +267,7 @@ type approvalConsoleState struct {
 	ServerTime  string                     `json:"server_time"`
 	SecretStore approvalConsoleSecretStore `json:"secret_store"`
 	Summary     approvalConsoleSummary     `json:"summary"`
+	Clients     []approvalConsoleClient    `json:"clients,omitempty"`
 	Sessions    []approvalConsoleSession   `json:"sessions"`
 }
 
@@ -278,6 +279,21 @@ type approvalConsoleSummary struct {
 	ActiveClients    int `json:"active_clients"`
 	PendingApprovals int `json:"pending_approvals"`
 	QueuedDecisions  int `json:"queued_decisions"`
+}
+
+type approvalConsoleClient struct {
+	PID              int    `json:"pid,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	Host             string `json:"host,omitempty"`
+	ParentPID        int    `json:"parent_pid,omitempty"`
+	ParentCommand    string `json:"parent_command,omitempty"`
+	WorkingDir       string `json:"working_dir,omitempty"`
+	BoundTBSession   string `json:"bound_tb_session,omitempty"`
+	PendingApprovals int    `json:"pending_approvals"`
+	PreparedTools    int    `json:"prepared_tools"`
+	ConnectedAt      string `json:"connected_at,omitempty"`
+	LastSyncAt       string `json:"last_sync_at,omitempty"`
+	Active           bool   `json:"active"`
 }
 
 type approvalConsoleSession struct {
@@ -331,6 +347,21 @@ func approvalConsoleStateForHTTP(control daemonHTTPControl) approvalConsoleState
 	state.Summary.ActiveClients = len(clients)
 	grouped := make(map[string]*approvalConsoleSession)
 	for _, client := range clients {
+		host := approvalConsoleClientHostForPID(client.PID)
+		state.Clients = append(state.Clients, approvalConsoleClient{
+			PID:              client.PID,
+			Mode:             client.Mode,
+			Host:             host.Host,
+			ParentPID:        host.ParentPID,
+			ParentCommand:    host.ParentCommand,
+			WorkingDir:       client.WorkingDir,
+			BoundTBSession:   client.BoundTBSession,
+			PendingApprovals: len(client.PendingApprovals),
+			PreparedTools:    len(client.PreparedTools),
+			ConnectedAt:      formatHTTPTime(client.ConnectedAt),
+			LastSyncAt:       formatHTTPTime(client.LastSyncAt),
+			Active:           !isStaleClient(client.LastSyncAt, now),
+		})
 		for _, approval := range client.PendingApprovals {
 			state.Summary.PendingApprovals++
 			if approval.QueuedDecision != nil {
@@ -370,6 +401,15 @@ func approvalConsoleStateForHTTP(control daemonHTTPControl) approvalConsoleState
 			addApprovalToConsoleSession(session, approval)
 		}
 	}
+	sort.Slice(state.Clients, func(i, j int) bool {
+		if state.Clients[i].PID != state.Clients[j].PID {
+			return state.Clients[i].PID < state.Clients[j].PID
+		}
+		if state.Clients[i].Mode != state.Clients[j].Mode {
+			return state.Clients[i].Mode < state.Clients[j].Mode
+		}
+		return state.Clients[i].WorkingDir < state.Clients[j].WorkingDir
+	})
 	for _, session := range grouped {
 		sort.Slice(session.PackageGroups, func(i, j int) bool {
 			return session.PackageGroups[i].PackageLabel < session.PackageGroups[j].PackageLabel
@@ -731,7 +771,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		}
 		writeDatastarHeaders(w)
 
-		writeDatastarPatchSignals(w, map[string]any{"liveState": "Live"})
+		writeDatastarPatchSignals(w, map[string]any{"liveState": "Connected"})
 		var previous *approvalConsoleFragments
 		sendPatches := func() {
 			next := writeApprovalConsolePatches(w, previous, approvalConsoleStateForHTTP(control))
@@ -767,7 +807,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		writeDatastarHeaders(w)
 		result := applyApprovalConsoleDrafts(r.Context(), control, req)
 		writeDatastarPatchSignals(w, map[string]any{
-			"liveState":        "Live",
+			"liveState":        "Connected",
 			"drafts":           approvalConsoleDraftResetPatch(req.Drafts),
 			"rejectReason":     "",
 			"rejectDialogOpen": false,

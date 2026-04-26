@@ -42,7 +42,7 @@ func approvalConsolePageDataFromState(state approvalConsoleState) daemonIndexPag
 }
 
 func approvalConsoleInitialSignals() string {
-	return `{"liveState":"Connecting","settingsOpen":false,"drafts":{},"rejectReason":"","rejectDialogOpen":false,"rejectSession":"","unlockKey":"","message":""}`
+	return `{"liveState":"Connecting","secretOpen":false,"drafts":{},"rejectReason":"","rejectDialogOpen":false,"rejectSession":"","unlockKey":"","message":""}`
 }
 
 func secretStatusClass(status string) string {
@@ -54,6 +54,60 @@ func secretStatusClass(status string) string {
 	default:
 		return ""
 	}
+}
+
+func secretIconStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "unlocked":
+		return "unlocked"
+	case "locked":
+		return "locked"
+	default:
+		return "unavailable"
+	}
+}
+
+func lockButtonClass(status string) string {
+	return "icon-button lock-button " + secretIconStatus(status)
+}
+
+func secretStoreIconLabel(status string) string {
+	status = firstNonEmpty(status, "unavailable")
+	return "Secret store " + strings.ToLower(status)
+}
+
+func secretPanelLocked(page daemonIndexPageData) bool {
+	return page.Locked || strings.EqualFold(strings.TrimSpace(page.StatusText), "locked")
+}
+
+func secretPanelClass(page daemonIndexPageData) string {
+	if secretPanelLocked(page) {
+		return "secret-panel open"
+	}
+	return "secret-panel"
+}
+
+func secretPanelOpenExpr(page daemonIndexPageData) string {
+	if secretPanelLocked(page) {
+		return "true"
+	}
+	return "$secretOpen"
+}
+
+func approvalClientTitle(client approvalConsoleClient) string {
+	title := firstNonEmpty(client.Host, client.Mode, "client")
+	if client.PID != 0 {
+		title = fmt.Sprintf("%s - PID %d", title, client.PID)
+	}
+	return title
+}
+
+func approvalClientParentLabel(client approvalConsoleClient) string {
+	parent := firstNonEmpty(client.ParentCommand, "parent")
+	if client.ParentPID != 0 {
+		return fmt.Sprintf("%s - PID %d", parent, client.ParentPID)
+	}
+	return parent
 }
 
 func approvalDOMID(prefix, raw string) string {
@@ -202,8 +256,12 @@ func liveDotOffExpr() string {
 	return "$liveState === 'Disconnected'"
 }
 
+func liveDotClassExpr() string {
+	return "{'warn': " + liveDotWarnExpr() + ", 'off': " + liveDotOffExpr() + "}"
+}
+
 func datastarFetchStateExpr() string {
-	return "if (evt.detail.el === document.body && evt.detail.type === 'started') { $liveState = 'Connecting' } else if (evt.detail.el === document.body && (evt.detail.type === 'retrying' || evt.detail.type === 'error' || evt.detail.type === 'retries-failed')) { $liveState = 'Disconnected' } else if (evt.detail.el !== document.body && evt.detail.type === 'finished') { $liveState = 'Live' }"
+	return "if (evt.detail.el === document.body && evt.detail.type === 'started') { $liveState = 'Connecting' } else if (evt.detail.el === document.body && (evt.detail.type === 'retrying' || evt.detail.type === 'error' || evt.detail.type === 'retries-failed')) { $liveState = 'Disconnected' } else if (evt.detail.el !== document.body && evt.detail.type === 'finished') { $liveState = 'Connected' }"
 }
 
 func componentHTML(component templ.Component) string {

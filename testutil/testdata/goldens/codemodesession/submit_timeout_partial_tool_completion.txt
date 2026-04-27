@@ -1,7 +1,18 @@
 cell (failed to commit)
 ==
 failure: eval_and_await_cell_settlement: promise still pending after evaluation: context deadline exceeded; awaiting cell settlement: context deadline exceeded
-side effects (3):
-- fast [completed, non_replayable]
-- fast [completed, non_replayable]
-- slow [pending, non_replayable]
+tool call completion status in failed cell (3):
+1. "<tool-call-id>"
+   tool: fast
+   status: success
+   params: {"id":"I-1"}
+2. "<tool-call-id>"
+   tool: fast
+   status: success
+   params: {"id":"I-2"}
+3. "<tool-call-id>"
+   tool: slow
+   status: started
+   params: {"id":"I-3"}
+Recovery: use $tool_call("<tool-call-id>") in a new cell to recover data or status.
+A success view includes result; a failed view includes error; needsApproval waits for approval; started may still finish; unknown means the in-flight result could not be recovered.

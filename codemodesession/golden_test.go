@@ -15,7 +15,11 @@ import (
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
-var toolCallIDPattern = regexp.MustCompile(`"toolCallId": "[^"]+"`)
+var (
+	toolCallIDPattern   = regexp.MustCompile(`"toolCallId": "[^"]+"`)
+	toolCallRefPattern  = regexp.MustCompile(`\$tool_call\("[^"]+"\)`)
+	toolCallLinePattern = regexp.MustCompile(`(?m)^(\d+\. )"[^"]+"$`)
+)
 
 func TestSubmitOutputGoldens(t *testing.T) {
 	t.Run("typecheck-failure", func(t *testing.T) {
@@ -96,11 +100,11 @@ func TestSubmitOutputGoldens(t *testing.T) {
 		}
 		defer session.Close()
 
-		checkGolden(t, goldenPath("submit_timeout_partial_tool_completion.txt"), session.Submit(ctx, `const first = await partial_timeout.fast("I-1");
+		checkGolden(t, goldenPath("submit_timeout_partial_tool_completion.txt"), normalizeToolCallRefs(session.Submit(ctx, `const first = await partial_timeout.fast("I-1");
 const second = await partial_timeout.fast("I-2");
 const third = partial_timeout.slow("I-3");
 await new Promise(() => {});
-[first, second, third]`))
+[first, second, third]`)))
 	})
 
 	t.Run("multi-tool-rejection", func(t *testing.T) {
@@ -150,7 +154,14 @@ tasks.map((task) => $tool_call(task).status)`)
 }
 
 func normalizeToolCallIDs(out string) string {
-	return toolCallIDPattern.ReplaceAllString(out, `"toolCallId": "<tool-call-id>"`)
+	return normalizeToolCallRefs(toolCallIDPattern.ReplaceAllString(out, `"toolCallId": "<tool-call-id>"`))
+}
+
+func normalizeToolCallRefs(out string) string {
+	out = toolCallRefPattern.ReplaceAllStringFunc(out, func(string) string {
+		return `$tool_call("<tool-call-id>")`
+	})
+	return toolCallLinePattern.ReplaceAllString(out, `$1"<tool-call-id>"`)
 }
 
 func prepareToolsetWithApprovals(t testing.TB, dir string, toolNames ...string) toolset.PreparedToolset {

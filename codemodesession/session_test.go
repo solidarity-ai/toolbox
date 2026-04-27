@@ -339,7 +339,8 @@ const second = await partial_timeout.fast("I-2");
 const third = partial_timeout.slow("I-3");
 await new Promise(() => {});
 [first, second, third]`)
-	assertContains(t, out, `slow [pending`)
+	assertContains(t, out, `tool: slow`)
+	assertContains(t, out, `status: started`)
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close(first): %v", err)
 	}

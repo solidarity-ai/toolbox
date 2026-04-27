@@ -588,13 +588,13 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 		return ""
 	}
 	if err := s.requireLease(ctx); err != nil {
-		return formatSubmitError(repl.SubmitResult{}, err)
+		return formatSubmitError(repl.SubmitResult{}, err, s.id, s.toolCalls)
 	}
 
 	s.mu.Lock()
 	if err := s.activeErrorLocked(); err != nil {
 		s.mu.Unlock()
-		return formatSubmitError(repl.SubmitResult{}, err)
+		return formatSubmitError(repl.SubmitResult{}, err, s.id, s.toolCalls)
 	}
 	if s.toolRuns != nil {
 		s.toolRuns.Reset()
@@ -619,7 +619,7 @@ func (s *Session) Submit(ctx context.Context, tsSource string) string {
 		}
 		s.submitting.Store(false)
 		s.mu.Unlock()
-		return formatSubmitError(res, err)
+		return formatSubmitError(res, err, s.id, s.toolCalls)
 	}
 	if s.approvals != nil {
 		_ = s.approvals.CommitSubmit(s.id, res.Cell)
@@ -873,7 +873,7 @@ func formatSubmitResult(ctx context.Context, sess repl.Session, res repl.SubmitR
 	return b.String()
 }
 
-func formatSubmitError(res repl.SubmitResult, err error) string {
+func formatSubmitError(res repl.SubmitResult, err error, sessionID repl.SessionID, toolCalls toolCallJournal) string {
 	var b strings.Builder
 
 	var submitErr *repl.SubmitFailure
@@ -897,7 +897,7 @@ func formatSubmitError(res repl.SubmitResult, err error) string {
 	} else {
 		fmt.Fprintf(&b, "failure: %s\n", submitErr.ErrorMessage)
 	}
-	writeEffects(&b, submitErr.LinkedEffects)
+	writeToolCallRecovery(&b, sessionID, toolCalls, submitErr.LinkedEffects)
 	if len(submitErr.Log) > 0 {
 		fmt.Fprintln(&b, "--")
 		for _, line := range submitErr.Log {
@@ -923,18 +923,110 @@ func writeDiagnostics(b *strings.Builder, diagnostics []repl.Diagnostic) {
 	}
 }
 
-func writeEffects(b *strings.Builder, effects []repl.EffectSummary) {
+func writeToolCallRecovery(b *strings.Builder, sessionID repl.SessionID, toolCalls toolCallJournal, effects []repl.EffectSummary) {
 	if len(effects) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "side effects (%d):\n", len(effects))
-	for _, effect := range effects {
-		line := fmt.Sprintf("- %s [%s, %s]", effect.FunctionName, effect.Status, effect.ReplayPolicy)
-		if effect.ErrorMessage != "" {
-			line += ": " + effect.ErrorMessage
+	fmt.Fprintf(b, "tool call completion status in failed cell (%d):\n", len(effects))
+	for i, effect := range effects {
+		call := toolCallRecoveryForEffect(sessionID, toolCalls, effect)
+		ref := fmt.Sprintf("%q", call.ToolCallID)
+		if call.ToolCallID == "" {
+			ref = "<unavailable>"
 		}
-		fmt.Fprintln(b, line)
+		fmt.Fprintf(b, "%d. %s\n", i+1, ref)
+		fmt.Fprintf(b, "   tool: %s\n", call.ToolName)
+		fmt.Fprintf(b, "   status: %s\n", call.Status)
+		if len(call.Params) > 0 {
+			fmt.Fprintf(b, "   params: %s\n", formatToolCallPayload(call.Params))
+		}
+		if call.Error != "" {
+			fmt.Fprintf(b, "   error: %s\n", compactSubmitLine(call.Error))
+		}
 	}
+	fmt.Fprintln(b, "Recovery: use $tool_call(\"<tool-call-id>\") in a new cell to recover data or status.")
+	fmt.Fprintln(b, "A success view includes result; a failed view includes error; needsApproval waits for approval; started may still finish; unknown means the in-flight result could not be recovered.")
+}
+
+type toolCallRecovery struct {
+	ToolCallID string
+	ToolName   string
+	Status     string
+	Params     []byte
+	Error      string
+}
+
+func toolCallRecoveryForEffect(sessionID repl.SessionID, toolCalls toolCallJournal, effect repl.EffectSummary) toolCallRecovery {
+	toolCallID := strings.TrimSpace(string(effect.Effect))
+	call := toolCallRecovery{
+		ToolCallID: toolCallID,
+		ToolName:   displayEffectToolName(effect.FunctionName),
+		Status:     toolCallStatusFromEffect(effect.Status),
+		Params:     effect.Params,
+		Error:      effect.ErrorMessage,
+	}
+	if toolCallID == "" || sessionID == "" || toolCalls == nil {
+		return call
+	}
+	snapshot, ok, err := toolCalls.Snapshot(sessionID, toolCallID)
+	if err != nil || !ok {
+		return call
+	}
+	if strings.TrimSpace(snapshot.ToolName) != "" {
+		call.ToolName = snapshot.ToolName
+	}
+	call.Status = string(snapshot.Status)
+	call.Params = snapshot.Params
+	call.Error = snapshot.Error
+	return call
+}
+
+func displayEffectToolName(name string) string {
+	name = strings.TrimSpace(name)
+	if toolName := strings.TrimPrefix(name, pendingApprovalEffectName("")); toolName != name {
+		return toolName
+	}
+	if name == "" {
+		return "<unknown>"
+	}
+	return name
+}
+
+func toolCallStatusFromEffect(status repl.EffectStatus) string {
+	switch status {
+	case repl.EffectStatusCompleted:
+		return string(toolCallStatusSuccess)
+	case repl.EffectStatusFailed:
+		return string(toolCallStatusFailed)
+	case repl.EffectStatusPending:
+		return string(toolCallStatusStarted)
+	default:
+		if text := strings.TrimSpace(string(status)); text != "" {
+			return text
+		}
+		return string(toolCallStatusUnknown)
+	}
+}
+
+func formatToolCallPayload(raw []byte) string {
+	value, err := decodeStoredJSWireValue(raw)
+	if err != nil {
+		return compactSubmitLine(fmt.Sprintf("<unreadable: %s>", err))
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return compactSubmitLine(fmt.Sprintf("%v", value))
+	}
+	return compactSubmitLine(string(encoded))
+}
+
+func compactSubmitLine(text string) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	const max = 900
+	if len(text) <= max {
+		return text
+	}
+	return text[:max-3] + "..."
 }
 
 func renderCompletion(ctx context.Context, sess repl.Session, value *repl.ValueRef) string {

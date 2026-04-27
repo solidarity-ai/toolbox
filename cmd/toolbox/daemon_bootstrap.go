@@ -109,9 +109,15 @@ func syncPendingApprovals(ctx context.Context, provider pendingApprovalProvider,
 	return nil
 }
 
-func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, executor approvalActionExecutor, refresh func() error) {
+func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, executor approvalActionExecutor, refresh func() error, debugf ...func(string, ...any)) {
 	if delegate == nil || executor == nil {
 		return
+	}
+	logDebug := func(format string, args ...any) {
+		if len(debugf) == 0 || debugf[0] == nil {
+			return
+		}
+		debugf[0](format, args...)
 	}
 	delegate.SetApprovalBatchHandler(func(decisions []daemon.ApprovalDecision) {
 		go func() {
@@ -141,15 +147,19 @@ func bindApprovalExecution(delegate daemon.SessionDelegate, stderr io.Writer, ex
 					Reason:     decision.Message,
 				})
 			}
+			logDebug("approval batch received count=%d", len(batch))
 			err := executor.ApplyApprovals(context.Background(), batch)
 			if err != nil {
+				logDebug("approval batch apply error: %v", err)
 				if stderr != nil {
 					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval error: %v\n", err)
 				}
 				return
 			}
+			logDebug("approval batch applied count=%d", len(batch))
 			if refresh != nil {
 				if err := refresh(); err != nil && stderr != nil {
+					logDebug("approval sync after apply error: %v", err)
 					_, _ = fmt.Fprintf(stderr, "toolbox daemon approval sync error: %v\n", err)
 				}
 			}

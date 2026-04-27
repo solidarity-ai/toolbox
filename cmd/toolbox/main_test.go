@@ -1046,6 +1046,18 @@ func TestRunMCPLoadsLocalOverlayToolsetAndServesTools(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
 	}
+	logPath, err := latestMCPDebugLogPath()
+	if err != nil {
+		t.Fatalf("latestMCPDebugLogPath(): %v", err)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", logPath, err)
+	}
+	logText := string(logBytes)
+	if !strings.Contains(logText, "start kind=mcp") || !strings.Contains(logText, "exit kind=mcp") {
+		t.Fatalf("mcp debug log missing lifecycle markers:\n%s", logText)
+	}
 }
 
 func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
@@ -1176,6 +1188,18 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("ensureSessionDaemon() calls = %d, want 1", calls.Load())
+	}
+	logPath, err := latestMCPDebugLogPath()
+	if err != nil {
+		t.Fatalf("latestMCPDebugLogPath(): %v", err)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", logPath, err)
+	}
+	logText := string(logBytes)
+	if !strings.Contains(logText, "start kind=codemode_mcp") || !strings.Contains(logText, "exit kind=codemode_mcp") {
+		t.Fatalf("codemode mcp debug log missing lifecycle markers:\n%s", logText)
 	}
 }
 

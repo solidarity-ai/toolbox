@@ -60,6 +60,12 @@ type daemonPingCmd struct {
 
 type daemonStopCmd struct{}
 
+type daemonLogsCmd struct {
+	MCP  bool `help:"Show the latest MCP/codemode MCP debug log instead of the daemon log."`
+	Tail int  `default:"200" help:"Number of trailing log lines to print. Use 0 for the whole file."`
+	Path bool `help:"Print only the selected log file path."`
+}
+
 func runDaemonServe(stderr io.Writer) error {
 	dir, err := daemon.Dir()
 	if err != nil {

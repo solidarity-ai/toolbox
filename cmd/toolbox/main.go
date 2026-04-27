@@ -100,6 +100,7 @@ type authCmd struct {
 
 type daemonControlCmd struct {
 	Stop daemonStopCmd `cmd:"" help:"Stop all running toolbox daemon processes."`
+	Logs daemonLogsCmd `cmd:"" help:"Print daemon or MCP debug logs."`
 }
 
 type sdkBridgeCmd struct {
@@ -177,6 +178,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runAuth(parsed.Auth.Args, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "daemon stop"):
 		return runDaemonStop(stdout, stderr)
+	case strings.HasPrefix(command, "daemon logs"):
+		return runDaemonLogs(parsed.Daemon.Logs, stdout)
 	case strings.HasPrefix(command, "_daemon serve"):
 		return runDaemonServe(stderr)
 	case strings.HasPrefix(command, "_daemon ping"):

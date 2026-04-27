@@ -24,17 +24,23 @@ var newSDKBridgeServer = func(opts sdkbridge.Options) sdkBridgeServer {
 	return sdkbridge.New(opts)
 }
 
-func runMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
+func runMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) (err error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
+	debugLog := startMCPDebugLog("mcp", cmd.Toolset, cwd, stderr)
+	defer func() {
+		debugLog.Close(err)
+	}()
+	stderr = debugLog.ErrorWriter()
 
 	sessionDelegate, err := ensureSessionDaemon("mcp", cwd, stderr)
 	if err != nil {
 		return err
 	}
 	defer sessionDelegate.Close()
+	debugLog.Logf("daemon session registered mode=mcp")
 
 	managed := mcpserver.NewManagedNamed(mcpServerNameForToolsetPath(cmd.Toolset))
 	consumer := combinedPreparedToolConsumer{managed, sessionDelegate}
@@ -42,27 +48,41 @@ func runMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr
 	if err != nil {
 		return err
 	}
+	debugLog.Logf("toolset loaded toolset=%q effects=%q", cmd.Toolset, cmd.Effects)
 	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		debugLog.Logf("secret epoch changed; reloading toolset")
 		_, err := backend.Reload(context.Background())
+		if err != nil {
+			debugLog.Logf("toolset reload error: %v", err)
+		} else {
+			debugLog.Logf("toolset reloaded")
+		}
 		return err
 	})
 
 	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
+	debugLog.Logf("stdio listen starting")
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
 
-func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
+func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) (err error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
+	debugLog := startMCPDebugLog("codemode_mcp", cmd.Toolset, cwd, stderr)
+	defer func() {
+		debugLog.Close(err)
+	}()
+	stderr = debugLog.ErrorWriter()
 
 	sessionDelegate, err := ensureSessionDaemon("codemode_mcp", cwd, stderr)
 	if err != nil {
 		return err
 	}
 	defer sessionDelegate.Close()
+	debugLog.Logf("daemon session registered mode=codemode_mcp")
 
 	var managed *codemodemcp.ManagedServer
 	if strings.TrimSpace(cmd.TBSession) == "" {
@@ -77,11 +97,13 @@ func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout
 		return err
 	}
 	defer managed.Close()
+	debugLog.Logf("codemode manager opened locked=%t bound_tb_session=%q", strings.TrimSpace(cmd.TBSession) != "", strings.TrimSpace(cmd.TBSession))
 	syncSessionBinding(sessionDelegate, managed)
 	bindApprovalExecution(sessionDelegate, stderr, managed, func() error {
 		return syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
-	})
+	}, debugLog.Logf)
 	managed.SetAfterChange(func() {
+		debugLog.Logf("codemode state changed; syncing daemon session")
 		syncSessionBinding(sessionDelegate, managed)
 		_ = syncPendingApprovals(context.Background(), managed, sessionDelegate, stderr)
 	})
@@ -93,13 +115,21 @@ func runCodemodeMCP(cmd mcpCmd, opts secretStoreOptions, stdin io.Reader, stdout
 	if err != nil {
 		return err
 	}
+	debugLog.Logf("toolset loaded toolset=%q effects=%q", cmd.Toolset, cmd.Effects)
 	bindSecretEpochReload(sessionDelegate, stderr, func() error {
+		debugLog.Logf("secret epoch changed; reloading codemode toolset")
 		_, err := backend.Reload(context.Background())
+		if err != nil {
+			debugLog.Logf("codemode toolset reload error: %v", err)
+		} else {
+			debugLog.Logf("codemode toolset reloaded")
+		}
 		return err
 	})
 
 	stdioServer := mcpgoserver.NewStdioServer(managed.Server())
 	stdioServer.SetErrorLogger(log.New(stderr, "", log.LstdFlags))
+	debugLog.Logf("stdio listen starting")
 	return stdioServer.Listen(context.Background(), stdin, stdout)
 }
 

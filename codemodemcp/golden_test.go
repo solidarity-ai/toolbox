@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"testing"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
+
+var tbSessionOutputPattern = regexp.MustCompile(`\A[0-9a-f]{6}\z`)
 
 func TestSuperToolDescriptionGoldens(t *testing.T) {
 	t.Run("unlocked-no-approvals", func(t *testing.T) {
@@ -52,6 +55,34 @@ func TestSuperToolDescriptionGoldens(t *testing.T) {
 		h := mcptest.NewHarness(t, managed.Server())
 		checkGolden(t, goldenPath("super_tool_description_locked_with_approvals.txt"), toolDescription(t, h.ListTools().Tools, codemodemcp.ToolSuperTool))
 	})
+}
+
+func TestNewSuperToolSessionOutputGolden(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TOOLBOX_SESSIONS_DIR", filepath.Join(tempDir, "sessions"))
+
+	managed, err := codemodemcp.OpenManagedNamed(context.Background(), "example", tempDir)
+	if err != nil {
+		t.Fatalf("OpenManagedNamed(): %v", err)
+	}
+	defer managed.Close()
+
+	h := mcptest.NewHarness(t, managed.Server())
+	result := h.CallTool(codemodemcp.ToolNewSession, map[string]any{
+		codemodesession.IntentParam: "Investigate test failures.",
+	})
+	if result.IsError {
+		t.Fatalf("new_super_tool_session expected non-error result")
+	}
+
+	checkGolden(t, goldenPath("new_super_tool_session_output.txt"), normalizeTBSessionOutput(resultText(t, result))+"\n")
+}
+
+func normalizeTBSessionOutput(out string) string {
+	if tbSessionOutputPattern.MatchString(out) {
+		return "<tb-session>"
+	}
+	return out
 }
 
 func toolDescription(t testing.TB, tools []mcp.Tool, name string) string {

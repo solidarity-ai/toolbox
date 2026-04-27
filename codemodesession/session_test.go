@@ -229,7 +229,7 @@ const view = $tool_call(task);
 	}))`)
 	assertContains(t, out, `"hasTaskId":true`)
 	assertContains(t, out, `"status":"needsApproval"`)
-	assertContains(t, out, `"toolName":"get"`)
+	assertContains(t, out, `"toolName":"issues.get"`)
 	assertContains(t, out, `"hasTaskProperty":false`)
 }
 
@@ -258,7 +258,7 @@ func TestSubmitToolCallSupportsRawStringInspection(t *testing.T) {
 const view = $tool_call(task.toolCallId);
 console.log(JSON.stringify(view))`)
 	assertContains(t, out, `"status":"needsApproval"`)
-	assertContains(t, out, `"toolName":"get"`)
+	assertContains(t, out, `"toolName":"issues.get"`)
 	assertContains(t, out, `"approval":{"approvalId":"`)
 }
 
@@ -339,7 +339,7 @@ const second = await partial_timeout.fast("I-2");
 const third = partial_timeout.slow("I-3");
 await new Promise(() => {});
 [first, second, third]`)
-	assertContains(t, out, `tool: slow`)
+	assertContains(t, out, `tool: partial_timeout.slow`)
 	assertContains(t, out, `status: started`)
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close(first): %v", err)
@@ -390,8 +390,8 @@ tasks.map((task) => $tool_call(task).status)`)
 
 	out = second.Submit(secondCtx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task)), null, 2));
 "done"`)
-	assertContains(t, out, `"status": "failed"`)
-	assertContains(t, out, `"error": "blocked by policy"`)
+	assertContains(t, out, `"status": "rejected"`)
+	assertContains(t, out, `"reason": "blocked by policy"`)
 }
 
 func TestTimedOutToolSubmitCancelsToolContext(t *testing.T) {
@@ -803,8 +803,8 @@ tasks.map((task) => $tool_call(task).status)`)
 	inspect := session.Submit(ctx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task))));
 "done"`)
 	assertContains(t, inspect, `"status":"success"`)
-	assertContains(t, inspect, `"status":"failed"`)
-	assertContains(t, inspect, `"error":"manual reject"`)
+	assertContains(t, inspect, `"status":"rejected"`)
+	assertContains(t, inspect, `"reason":"manual reject"`)
 	assertContains(t, inspect, `"id":"I-1"`)
 	assertContains(t, inspect, `"id":"I-3"`)
 	assertContains(t, inspect, `"owner":"alpha"`)
@@ -838,6 +838,7 @@ tasks.map((task) => $tool_call(task).status)`)
 	if len(groups) != 1 {
 		t.Fatalf("pending approval groups len = %d, want 1", len(groups))
 	}
+	rejectedToolCallID := groups[0].ToolCalls[0].ToolCallID
 
 	decisions := make([]codemodesession.ApprovalDecision, 0, len(groups[0].ToolCalls))
 	for _, call := range groups[0].ToolCalls {
@@ -856,8 +857,17 @@ tasks.map((task) => $tool_call(task).status)`)
 
 	inspect := session.Submit(ctx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task))));
 "done"`)
-	assertContains(t, inspect, `"status":"failed"`)
-	assertContains(t, inspect, `"error":"blocked by policy"`)
+	assertContains(t, inspect, `"status":"rejected"`)
+	assertContains(t, inspect, `"reason":"blocked by policy"`)
+	assertNotContains(t, inspect, `"error":"blocked by policy"`)
+
+	typedInspect := session.Submit(ctx, `const view = $tool_call("`+rejectedToolCallID+`");
+if (view.status === "rejected") {
+  const reason: string = view.reason;
+  console.log(reason);
+}
+"done"`)
+	assertContains(t, typedInspect, "blocked by policy")
 }
 
 func TestOpenMemoryRejectsDuplicateApprovalDecisionBatch(t *testing.T) {
@@ -940,8 +950,8 @@ tasks.map((task) => $tool_call(task).status)`)
 	inspect := session.Submit(ctx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task))));
 "done"`)
 	assertContains(t, inspect, `"status":"success"`)
-	assertContains(t, inspect, `"status":"failed"`)
-	assertContains(t, inspect, `"error":"manual reject"`)
+	assertContains(t, inspect, `"status":"rejected"`)
+	assertContains(t, inspect, `"reason":"manual reject"`)
 	assertContains(t, inspect, `"title":"Example I-1"`)
 }
 
@@ -1458,7 +1468,7 @@ console.log(JSON.stringify({
 }))`)
 	assertContains(t, out, `"hasTaskId":true`)
 	assertContains(t, out, `"status":"needsApproval"`)
-	assertContains(t, out, `"toolName":"get"`)
+	assertContains(t, out, `"toolName":"issues.get"`)
 }
 
 func TestPersistentSessionUsesFreshToolCallIDsAfterResume(t *testing.T) {
@@ -1596,7 +1606,7 @@ console.log(JSON.stringify({
 console.log(JSON.stringify(view));
 "done"`)
 	assertContains(t, inspect, `"status":"failed"`)
-	assertContains(t, inspect, `"toolName":"get"`)
+	assertContains(t, inspect, `"toolName":"issues.get"`)
 	assertContains(t, inspect, `"toolCallId":"`+toolCallID+`"`)
 	assertContains(t, inspect, `approved tool issues.get no longer matches the reviewed version`)
 	assertNotContains(t, inspect, `"title":"v2-I-1"`)

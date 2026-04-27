@@ -26,11 +26,10 @@ func sortedTools(view toolset.AgentView) []toolset.AgentTool {
 // agent-visible tools as concat-safe ambient package namespaces.
 func DeclarationSource(prepared toolset.PreparedToolset) string {
 	var b strings.Builder
-	b.WriteString(toolCallDeclarationsDTS())
 
 	groups := groupedPackageNames(prepared)
 	for i, packageName := range groups {
-		if i > 0 || b.Len() > 0 {
+		if i > 0 {
 			b.WriteString("\n\n")
 		}
 		pkgPrepared := prepared.FilterTools(func(tool toolset.PreparedTool) bool {
@@ -40,62 +39,6 @@ func DeclarationSource(prepared toolset.PreparedToolset) string {
 	}
 
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func toolCallDeclarationsDTS() string {
-	return strings.TrimSpace(`
-type ToolCallTask<T = unknown> = {
-  toolCallId: string;
-};
-
-type ToolCallPromise<T> = Promise<T> & {
-  toolCallTask: ToolCallTask<T>;
-};
-
-type ToolCallView<T = unknown> =
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "started";
-      params?: unknown;
-    }
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "needsApproval";
-      params?: unknown;
-      approval: { approvalId?: string };
-    }
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "success";
-      params?: unknown;
-      result: T;
-    }
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "failed";
-      params?: unknown;
-      error: unknown;
-    }
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "cancelled";
-      params?: unknown;
-    }
-  | {
-      toolCallId: string;
-      toolName: string;
-      status: "unknown";
-      params?: unknown;
-    };
-
-declare function $tool_call<T>(refOrId: ToolCallTask<T> | string): ToolCallView<T>;
-declare function $tool_call<T>(ref: ToolCallPromise<T>): ToolCallView<T>;
-`)
 }
 
 type returnTypeInfo struct {

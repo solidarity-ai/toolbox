@@ -147,8 +147,26 @@ tasks.map((task) => $tool_call(task).status)`)
 		}
 		mustApplyApprovals(t, ctx, session, decisions...)
 
-		out = session.Submit(ctx, `console.log(JSON.stringify((globalThis as any).tasks.map((task: any) => $tool_call(task)), null, 2));
-"done"`)
+		out = session.Submit(ctx, `function toolCallStatusReport(refs: any[]): string {
+  const views = refs.map((task: any) => $tool_call(task) as any);
+  const lines = ["tool call status (" + views.length + "):"];
+  for (let i = 0; i < views.length; i++) {
+    const view = views[i];
+    if (i > 0) lines.push("");
+    lines.push((i + 1) + ". \"" + view.toolCallId + "\"");
+    lines.push("   tool: " + view.toolName);
+    lines.push("   status: " + view.status);
+    if ("params" in view) lines.push("   params: " + inspect(view.params));
+    if (view.status === "rejected") lines.push("   reason: " + view.reason);
+    if (view.status === "failed") lines.push("   error: " + view.error);
+    if (view.status === "success") lines.push("   result: " + inspect(view.result));
+  }
+  lines.push("");
+  lines.push("Use $tool_call(\"<tool-call-id>\") to inspect a tool call again.");
+  return lines.join("\n");
+}
+console.log(toolCallStatusReport((globalThis as any).tasks));
+	"done"`)
 		checkGolden(t, goldenPath("submit_multi_tool_rejection.txt"), normalizeToolCallIDs(out))
 	})
 }

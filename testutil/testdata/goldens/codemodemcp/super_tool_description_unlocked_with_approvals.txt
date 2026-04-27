@@ -70,6 +70,13 @@ type ToolCallView<T = unknown> =
   | {
       toolCallId: string;
       toolName: string;
+      status: "rejected";
+      params?: unknown;
+      reason: string;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
       status: "cancelled";
       params?: unknown;
     }

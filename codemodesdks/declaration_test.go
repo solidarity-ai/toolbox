@@ -36,33 +36,21 @@ func TestDeclarationSource_UsesPackageNamespaces(t *testing.T) {
 	}
 }
 
-func TestDeclarationSource_DeclaresToolCallHelpers(t *testing.T) {
+func TestDeclarationSource_LeavesToolCallHelpersToCodemodePrelude(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("calc"), toolset.Config{})
 
 	got := codemodesdks.DeclarationSource(prepared)
-	if !strings.Contains(got, "type ToolCallTask<T = unknown>") {
-		t.Fatalf("missing ToolCallTask declaration:\n%s", got)
+	if strings.Contains(got, "type ToolCallTask<T = unknown>") {
+		t.Fatalf("DeclarationSource should not declare top-level ToolCallTask:\n%s", got)
 	}
-	if !strings.Contains(got, "type ToolCallPromise<T> = Promise<T> & {") {
-		t.Fatalf("missing ToolCallPromise declaration:\n%s", got)
+	if strings.Contains(got, "type ToolCallPromise<T>") {
+		t.Fatalf("DeclarationSource should not declare top-level ToolCallPromise:\n%s", got)
 	}
-	if !strings.Contains(got, "toolCallTask: ToolCallTask<T>;") {
-		t.Fatalf("missing ToolCallPromise.toolCallTask declaration:\n%s", got)
+	if strings.Contains(got, "type ToolCallView<T = unknown>") {
+		t.Fatalf("DeclarationSource should not declare top-level ToolCallView:\n%s", got)
 	}
-	if !strings.Contains(got, `approval: { approvalId?: string };`) {
-		t.Fatalf("missing needsApproval approval metadata declaration:\n%s", got)
-	}
-	if !strings.Contains(got, `status: "cancelled";`) {
-		t.Fatalf("missing cancelled ToolCallView declaration:\n%s", got)
-	}
-	if !strings.Contains(got, `status: "unknown";`) {
-		t.Fatalf("missing unknown ToolCallView declaration:\n%s", got)
-	}
-	if !strings.Contains(got, "declare function $tool_call<T>(refOrId: ToolCallTask<T> | string)") {
-		t.Fatalf("missing $tool_call task-or-id declaration:\n%s", got)
-	}
-	if !strings.Contains(got, "declare function $tool_call<T>(ref: ToolCallPromise<T>)") {
-		t.Fatalf("missing $tool_call promise overload declaration:\n%s", got)
+	if strings.Contains(got, "declare function $tool_call") {
+		t.Fatalf("DeclarationSource should not declare top-level $tool_call:\n%s", got)
 	}
 }
 

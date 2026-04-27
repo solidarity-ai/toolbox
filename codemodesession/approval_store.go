@@ -733,7 +733,7 @@ func applyApprovalDecision(ctx context.Context, sessionID repl.SessionID, call a
 		if toolCalls == nil {
 			return appliedApprovalResult{}, fmt.Errorf("tool call journal unavailable")
 		}
-		if err := toolCalls.EnsureStarted(sessionID, call.ToolCallID, call.ToolName, call.Params); err != nil {
+		if err := toolCalls.EnsureStarted(sessionID, call.ToolCallID, fallbackString(call.FullToolName, call.ToolName), call.Params); err != nil {
 			return appliedApprovalResult{}, err
 		}
 		outcome, err := executeApprovedToolCall(ctx, sessionID, call.CellID, call, prepared, st, toolCalls, executor)
@@ -863,7 +863,7 @@ func rejectPendingToolCall(sessionID repl.SessionID, toolCallID, message string,
 	if toolCalls == nil {
 		return approvalExecutionOutcome{}, fmt.Errorf("tool call journal unavailable")
 	}
-	if err := toolCalls.EnsureFailed(sessionID, toolCallID, errText); err != nil {
+	if err := toolCalls.EnsureRejected(sessionID, toolCallID, errText); err != nil {
 		return approvalExecutionOutcome{}, err
 	}
 	return approvalExecutionOutcome{

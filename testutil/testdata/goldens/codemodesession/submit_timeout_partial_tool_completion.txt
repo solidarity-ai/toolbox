@@ -3,15 +3,15 @@ cell (failed to commit)
 failure: eval_and_await_cell_settlement: promise still pending after evaluation: context deadline exceeded; awaiting cell settlement: context deadline exceeded
 tool call completion status in failed cell (3):
 1. "<tool-call-id>"
-   tool: fast
+   tool: partial_timeout.fast
    status: success
    params: {"id":"I-1"}
 2. "<tool-call-id>"
-   tool: fast
+   tool: partial_timeout.fast
    status: success
    params: {"id":"I-2"}
 3. "<tool-call-id>"
-   tool: slow
+   tool: partial_timeout.slow
    status: started
    params: {"id":"I-3"}
 Recovery: use $tool_call("<tool-call-id>") in a new cell to recover data or status.

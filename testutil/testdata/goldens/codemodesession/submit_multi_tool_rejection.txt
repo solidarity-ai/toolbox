@@ -1,41 +1,29 @@
 cell 2
 --
-[
-  {
-    "error": "blocked by policy",
-    "params": {
-      "id": "I-1"
-    },
-    "status": "failed",
-    "toolCallId": "<tool-call-id>",
-    "toolName": "get"
-  },
-  {
-    "error": "blocked by policy",
-    "params": {
-      "id": "I-2"
-    },
-    "status": "failed",
-    "toolCallId": "<tool-call-id>",
-    "toolName": "get"
-  },
-  {
-    "error": "blocked by policy",
-    "params": {
-      "id": "I-3"
-    },
-    "status": "failed",
-    "toolCallId": "<tool-call-id>",
-    "toolName": "get"
-  },
-  {
-    "error": "blocked by policy",
-    "params": {
-      "id": "I-4"
-    },
-    "status": "failed",
-    "toolCallId": "<tool-call-id>",
-    "toolName": "lookup"
-  }
-]
+tool call status (4):
+1. "<tool-call-id>"
+   tool: issues.get
+   status: rejected
+   params: {id: "I-1"}
+   reason: blocked by policy
+
+2. "<tool-call-id>"
+   tool: issues.get
+   status: rejected
+   params: {id: "I-2"}
+   reason: blocked by policy
+
+3. "<tool-call-id>"
+   tool: issues.get
+   status: rejected
+   params: {id: "I-3"}
+   reason: blocked by policy
+
+4. "<tool-call-id>"
+   tool: issues.lookup
+   status: rejected
+   params: {id: "I-4"}
+   reason: blocked by policy
+
+Use $tool_call("<tool-call-id>") to inspect a tool call again.
 => "done"

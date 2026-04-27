@@ -275,6 +275,10 @@ func (j *failingStartToolCallJournal) EnsureFailed(sessionID repl.SessionID, too
 	return j.wrapped.EnsureFailed(sessionID, toolCallID, errText)
 }
 
+func (j *failingStartToolCallJournal) EnsureRejected(sessionID repl.SessionID, toolCallID, reason string) error {
+	return j.wrapped.EnsureRejected(sessionID, toolCallID, reason)
+}
+
 func (j *failingStartToolCallJournal) EnsureCancelled(sessionID repl.SessionID, toolCallID string) error {
 	return j.wrapped.EnsureCancelled(sessionID, toolCallID)
 }

@@ -481,6 +481,9 @@ func typeScriptEnv(currentDir string, prepared toolset.PreparedToolset) repl.Typ
 
 func checkerEpochTS(prepared toolset.PreparedToolset, pkgMetadataPrelude string) string {
 	var parts []string
+	if globals := strings.TrimSpace(codemodeGlobalsDTS()); globals != "" {
+		parts = append(parts, globals)
+	}
 	if sdk := strings.TrimSpace(codemodesdks.DeclarationSource(prepared)); sdk != "" {
 		parts = append(parts, sdk)
 	}
@@ -490,7 +493,7 @@ func checkerEpochTS(prepared toolset.PreparedToolset, pkgMetadataPrelude string)
 	return strings.Join(parts, "\n\n")
 }
 
-func packageDeclarationsDTS() string {
+func codemodeGlobalsDTS() string {
 	return strings.TrimSpace(`
 type ToolCallTask<T = unknown> = {
   toolCallId: string;
@@ -531,6 +534,13 @@ type ToolCallView<T = unknown> =
   | {
       toolCallId: string;
       toolName: string;
+      status: "rejected";
+      params?: unknown;
+      reason: string;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
       status: "cancelled";
       params?: unknown;
     }
@@ -543,7 +553,11 @@ type ToolCallView<T = unknown> =
 
 declare function $tool_call<T>(refOrId: ToolCallTask<T> | string): ToolCallView<T>;
 declare function $tool_call<T>(ref: ToolCallPromise<T>): ToolCallView<T>;
+	`)
+}
 
+func packageDeclarationsDTS() string {
+	return strings.TrimSpace(codemodeGlobalsDTS() + "\n\n" + strings.TrimSpace(`
 declare const $pkgMetadata: Record<string, {
   toolCount: number;
   // present when the package needs extra guidance
@@ -551,7 +565,7 @@ declare const $pkgMetadata: Record<string, {
   /* .d.ts for package, always use console.log to view */
   api: string;
 }>;
-`)
+	`))
 }
 
 func pkgMetadataObject(rows []toolSummaryRow) map[string]map[string]any {

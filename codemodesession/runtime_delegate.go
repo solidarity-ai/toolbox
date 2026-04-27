@@ -285,7 +285,7 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 		toolCallID := string(effectID)
 		reviewedToolKey := approvalReviewedToolKey(binding.prepared(), binding.state.Name)
 		if binding.toolCalls != nil {
-			if err := binding.toolCalls.EnsureNeedsApproval(sessionID, toolCallID, toolCallID, binding.state.Name, params); err != nil {
+			if err := binding.toolCalls.EnsureNeedsApproval(sessionID, toolCallID, toolCallID, runtimeToolDisplayName(binding.state), params); err != nil {
 				return nil, err
 			}
 		}
@@ -373,7 +373,7 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			panic(rt.NewTypeError("tool %s toolCallId: missing effect id", binding.state.Name))
 		}
 		if binding.toolCalls != nil {
-			if err := binding.toolCalls.EnsureStarted(sessionID, toolCallID, binding.state.Name, paramsEncoded); err != nil {
+			if err := binding.toolCalls.EnsureStarted(sessionID, toolCallID, runtimeToolDisplayName(binding.state), paramsEncoded); err != nil {
 				startGate.Fail(fmt.Errorf("tool %s start journal: %v", binding.state.Name, err))
 				panic(rt.NewTypeError("tool %s start journal: %v", binding.state.Name, err))
 			}
@@ -399,6 +399,18 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 	wrapped := rt.ToValue(wrapper)
 	replengine.SetIndexedValueMetadata(wrapped, replengine.IndexedValueMetadata{StaleMessage: staleMessage})
 	return wrapped, nil
+}
+
+func runtimeToolDisplayName(state runtimeToolState) string {
+	name := strings.TrimSpace(state.Name)
+	pkg := strings.TrimSpace(state.Package)
+	if name == "" || pkg == "" || pkg == "<unknown>" {
+		return name
+	}
+	if name == pkg || strings.HasPrefix(name, pkg+".") {
+		return name
+	}
+	return pkg + "." + name
 }
 
 func enrichApprovalCallState(call *approvalCallState, prepared toolset.PreparedToolset, toolName string) {

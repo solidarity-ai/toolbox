@@ -15,10 +15,18 @@ var _ secrets.ManagedSecretStore = (*SecretStore)(nil)
 
 func (s *SecretStore) Unlock(ctx context.Context, unlockKey string) error {
 	return s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
-		_, err := service.Unlock(ctx, connect.NewRequest(&daemonv1.SecretUnlockRequest{
-			UnlockKey: unlockKey,
-		}))
-		return mapSecretStoreError(err)
+		err := s.unlockWithService(ctx, service, unlockKey)
+		if errors.Is(err, secrets.ErrNotInitialized) {
+			if s.backupCodeWriter == nil {
+				return err
+			}
+			codes, setupErr := s.setupWithService(ctx, service, unlockKey)
+			if setupErr == nil {
+				secrets.WriteBackupCodes(s.backupCodeWriter, codes)
+			}
+			return setupErr
+		}
+		return err
 	})
 }
 
@@ -81,11 +89,22 @@ func (s *SecretStore) List(ctx context.Context, prefix string) ([]string, error)
 func (s *SecretStore) withAutoUnlock(ctx context.Context, fn func(service daemonv1connect.SecretStoreServiceClient) error) error {
 	return s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
 		err := fn(service)
-		if !errors.Is(err, secrets.ErrLocked) || strings.TrimSpace(s.unlockKey) == "" {
+		if strings.TrimSpace(s.unlockKey) == "" || (!errors.Is(err, secrets.ErrLocked) && !errors.Is(err, secrets.ErrNotInitialized)) {
 			return err
 		}
 		if unlockErr := s.unlockWithService(ctx, service, s.unlockKey); unlockErr != nil {
-			return unlockErr
+			if errors.Is(unlockErr, secrets.ErrNotInitialized) {
+				if s.backupCodeWriter == nil {
+					return unlockErr
+				}
+				codes, setupErr := s.setupWithService(ctx, service, s.unlockKey)
+				if setupErr != nil {
+					return setupErr
+				}
+				secrets.WriteBackupCodes(s.backupCodeWriter, codes)
+			} else {
+				return unlockErr
+			}
 		}
 		return fn(service)
 	})
@@ -107,6 +126,16 @@ func (s *SecretStore) unlockWithService(ctx context.Context, service daemonv1con
 	return mapSecretStoreError(err)
 }
 
+func (s *SecretStore) setupWithService(ctx context.Context, service daemonv1connect.SecretStoreServiceClient, unlockKey string) ([]string, error) {
+	resp, err := service.Setup(ctx, connect.NewRequest(&daemonv1.SecretSetupRequest{
+		UnlockKey: unlockKey,
+	}))
+	if err != nil {
+		return nil, mapSecretStoreError(err)
+	}
+	return append([]string(nil), resp.Msg.GetBackupCodes()...), nil
+}
+
 func mapSecretStoreError(err error) error {
 	if err == nil {
 		return nil
@@ -121,7 +150,15 @@ func mapSecretStoreError(err error) error {
 	case connect.CodeInvalidArgument:
 		return secrets.ErrInvalidKey
 	case connect.CodeFailedPrecondition:
+		msg := connectErr.Message()
+		if strings.Contains(msg, secrets.ErrNotInitialized.Error()) {
+			return secrets.ErrNotInitialized
+		}
 		return secrets.ErrLocked
+	case connect.CodeCanceled:
+		return context.Canceled
+	case connect.CodeDeadlineExceeded:
+		return context.DeadlineExceeded
 	default:
 		return err
 	}

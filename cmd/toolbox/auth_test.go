@@ -31,7 +31,9 @@ func newTestSecretStore(t *testing.T) secrets.SecretStore {
 	dir := t.TempDir()
 	identityPath := filepath.Join(dir, "keys.txt")
 	storePath := filepath.Join(dir, "secrets")
-	return secrets.NewLocalSecretStoreWithKey(storePath, identityPath, "test-secret-key")
+	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, "test-secret-key")
+	store.SetBackupCodeWriter(io.Discard)
+	return store
 }
 
 func newTestCredentialRepo(t *testing.T) (*credentialrepo.Repository, secrets.SecretStore) {

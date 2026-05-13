@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/solidarity-ai/toolbox/daemon"
+	"github.com/solidarity-ai/toolbox/secrets"
 )
 
 const (
@@ -223,13 +224,28 @@ type daemonHTTPControl interface {
 	UnlockSecretStore(context.Context, string) error
 	LockSecretStore(context.Context) error
 	SecretStoreLocked(context.Context) (bool, error)
+	SetupSecretStore(context.Context, string) ([]string, error)
 }
 
 type daemonHTTPRevisionControl interface {
 	Revision() uint64
 }
 
+type daemonHTTPSecretStoreSetupControl interface {
+	SecretStoreSetupRequired(context.Context) (bool, error)
+}
+
+type daemonHTTPSecretStoreRecoveryControl interface {
+	GenerateSecretStoreRecoveryCodes(context.Context, string) ([]string, error)
+	SecretStoreRecoveryUnlocked(context.Context) (bool, error)
+}
+
 type secretStoreUnlockRequest struct {
+	UnlockKey string `json:"unlock_key"`
+	Setup     bool   `json:"setup"`
+}
+
+type secretStoreRecoveryCodesRequest struct {
 	UnlockKey string `json:"unlock_key"`
 }
 
@@ -278,7 +294,9 @@ type approvalConsoleState struct {
 }
 
 type approvalConsoleSecretStore struct {
-	Status string `json:"status"`
+	Status           string `json:"status"`
+	SetupRequired    bool   `json:"setup_required,omitempty"`
+	RecoveryUnlocked bool   `json:"recovery_unlocked,omitempty"`
 }
 
 type approvalConsoleSummary struct {
@@ -347,6 +365,19 @@ func approvalConsoleStateForHTTP(control daemonHTTPControl) approvalConsoleState
 			state.SecretStore.Status = "locked"
 		} else {
 			state.SecretStore.Status = "unlocked"
+		}
+	}
+	if setupControl, ok := control.(daemonHTTPSecretStoreSetupControl); ok {
+		if setupRequired, err := setupControl.SecretStoreSetupRequired(context.Background()); err == nil {
+			state.SecretStore.SetupRequired = setupRequired
+			if setupRequired {
+				state.SecretStore.Status = "locked"
+			}
+		}
+	}
+	if recoveryControl, ok := control.(daemonHTTPSecretStoreRecoveryControl); ok {
+		if recoveryUnlocked, err := recoveryControl.SecretStoreRecoveryUnlocked(context.Background()); err == nil {
+			state.SecretStore.RecoveryUnlocked = recoveryUnlocked
 		}
 	}
 	clients := control.Clients()
@@ -587,9 +618,11 @@ func maybeAutoOpenDaemonBrowser(stderr io.Writer, control daemonHTTPControl, add
 }
 
 type daemonIndexPageData struct {
-	StatusText string
-	Available  bool
-	Locked     bool
+	StatusText       string
+	Available        bool
+	Locked           bool
+	SetupRequired    bool
+	RecoveryUnlocked bool
 }
 
 func renderDaemonIndex(w io.Writer, state approvalConsoleState) error {
@@ -777,10 +810,14 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		}
 		writeDatastarHeaders(w)
 
-		writeDatastarPatchSignals(w, map[string]any{"liveState": "Connected"})
 		var previous *approvalConsoleFragments
 		sendPatches := func() {
-			next := writeApprovalConsolePatches(w, previous, approvalConsoleStateForHTTP(control))
+			state := approvalConsoleStateForHTTP(control)
+			writeDatastarPatchSignals(w, map[string]any{
+				"liveState":     "Connected",
+				"setupRequired": state.SecretStore.SetupRequired,
+			})
+			next := writeApprovalConsolePatches(w, previous, state)
 			previous = &next
 			flusher.Flush()
 		}
@@ -1074,6 +1111,40 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			return
 		}
 		if err := control.UnlockSecretStore(r.Context(), req.UnlockKey); err != nil {
+			if errors.Is(err, secrets.ErrNotInitialized) {
+				if !req.Setup {
+					if isDatastarRequest(r) {
+						writeApprovalConsoleDatastarResponse(w, control, map[string]any{
+							"message":       "Secret store is not initialized. Choose a passphrase, keep it safe, then set up the store.",
+							"setupRequired": true,
+						})
+						return
+					}
+					http.Error(w, err.Error(), http.StatusPreconditionRequired)
+					return
+				}
+				codes, setupErr := control.SetupSecretStore(r.Context(), req.UnlockKey)
+				if setupErr != nil {
+					if isDatastarRequest(r) {
+						writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": setupErr.Error(), "setupRequired": true})
+						return
+					}
+					http.Error(w, setupErr.Error(), http.StatusBadRequest)
+					return
+				}
+				if isDatastarRequest(r) {
+					writeApprovalConsoleDatastarResponse(w, control, map[string]any{
+						"message":         "Secret store set up. Save these backup codes in your password manager; Toolbox does not store them and cannot show them again.",
+						"secretOpen":      true,
+						"unlockKey":       "",
+						"setupRequired":   false,
+						"backupCodesText": strings.Join(codes, "\n"),
+					})
+					return
+				}
+				writeSecretStoreStatus(w, false)
+				return
+			}
 			if isDatastarRequest(r) {
 				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error()})
 				return
@@ -1082,10 +1153,53 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			return
 		}
 		if isDatastarRequest(r) {
-			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "", "unlockKey": ""})
+			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "", "unlockKey": "", "setupRequired": false, "backupCodesText": ""})
 			return
 		}
 		writeSecretStoreStatus(w, false)
+	})
+	mux.HandleFunc("/secret-store/recovery-codes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		recoveryControl, ok := control.(daemonHTTPSecretStoreRecoveryControl)
+		if control == nil || !ok {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "secret store backup codes unavailable"})
+				return
+			}
+			http.Error(w, "secret store backup codes unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		req, status, err := readSecretStoreRecoveryCodesRequest(r)
+		if err != nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error(), "secretOpen": true})
+				return
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		codes, err := recoveryControl.GenerateSecretStoreRecoveryCodes(r.Context(), req.UnlockKey)
+		if err != nil {
+			if isDatastarRequest(r) {
+				writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": err.Error(), "secretOpen": true})
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if isDatastarRequest(r) {
+			writeApprovalConsoleDatastarResponse(w, control, map[string]any{
+				"message":         "New backup codes generated. Save them in your password manager; Toolbox does not store them and cannot show them again.",
+				"secretOpen":      true,
+				"backupCodesText": strings.Join(codes, "\n"),
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, strings.Join(codes, "\n"))
 	})
 	mux.HandleFunc("/secret-store/lock", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1109,7 +1223,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 			return
 		}
 		if isDatastarRequest(r) {
-			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": ""})
+			writeApprovalConsoleDatastarResponse(w, control, map[string]any{"message": "", "backupCodesText": ""})
 			return
 		}
 		writeSecretStoreStatus(w, true)
@@ -1176,6 +1290,7 @@ func readSecretStoreUnlockRequest(r *http.Request) (secretStoreUnlockRequest, in
 		var payload struct {
 			UnlockKey      string `json:"unlock_key"`
 			CamelUnlockKey string `json:"unlockKey"`
+			Setup          bool   `json:"setup"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 			return secretStoreUnlockRequest{}, http.StatusBadRequest, err
@@ -1184,6 +1299,7 @@ func readSecretStoreUnlockRequest(r *http.Request) (secretStoreUnlockRequest, in
 		if req.UnlockKey == "" {
 			req.UnlockKey = payload.CamelUnlockKey
 		}
+		req.Setup = payload.Setup
 		return validateSecretStoreUnlockRequest(req)
 	}
 	if isDatastarRequest(r) {
@@ -1193,16 +1309,69 @@ func readSecretStoreUnlockRequest(r *http.Request) (secretStoreUnlockRequest, in
 				return secretStoreUnlockRequest{}, http.StatusBadRequest, err
 			}
 			req.UnlockKey = r.FormValue("unlock_key")
+			req.Setup = formBool(r.FormValue("setup"))
 			return validateSecretStoreUnlockRequest(req)
 		case "multipart/form-data":
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				return secretStoreUnlockRequest{}, http.StatusBadRequest, err
 			}
 			req.UnlockKey = r.FormValue("unlock_key")
+			req.Setup = formBool(r.FormValue("setup"))
 			return validateSecretStoreUnlockRequest(req)
 		}
 	}
 	return secretStoreUnlockRequest{}, http.StatusUnsupportedMediaType, fmt.Errorf("%s", http.StatusText(http.StatusUnsupportedMediaType))
+}
+
+func readSecretStoreRecoveryCodesRequest(r *http.Request) (secretStoreRecoveryCodesRequest, int, error) {
+	req := secretStoreRecoveryCodesRequest{}
+	mediaType := requestMediaType(r)
+	if mediaType == "" && r.ContentLength <= 0 {
+		return req, http.StatusOK, nil
+	}
+	if mediaType == "application/json" {
+		var payload struct {
+			UnlockKey      string `json:"unlock_key"`
+			CamelUnlockKey string `json:"unlockKey"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+			if errors.Is(err, io.EOF) {
+				return req, http.StatusOK, nil
+			}
+			return secretStoreRecoveryCodesRequest{}, http.StatusBadRequest, err
+		}
+		req.UnlockKey = payload.UnlockKey
+		if req.UnlockKey == "" {
+			req.UnlockKey = payload.CamelUnlockKey
+		}
+		return req, http.StatusOK, nil
+	}
+	if isDatastarRequest(r) {
+		switch mediaType {
+		case "application/x-www-form-urlencoded":
+			if err := r.ParseForm(); err != nil {
+				return secretStoreRecoveryCodesRequest{}, http.StatusBadRequest, err
+			}
+			req.UnlockKey = r.FormValue("unlock_key")
+			return req, http.StatusOK, nil
+		case "multipart/form-data":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				return secretStoreRecoveryCodesRequest{}, http.StatusBadRequest, err
+			}
+			req.UnlockKey = r.FormValue("unlock_key")
+			return req, http.StatusOK, nil
+		}
+	}
+	return secretStoreRecoveryCodesRequest{}, http.StatusUnsupportedMediaType, fmt.Errorf("%s", http.StatusText(http.StatusUnsupportedMediaType))
+}
+
+func formBool(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "t", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateSecretStoreUnlockRequest(req secretStoreUnlockRequest) (secretStoreUnlockRequest, int, error) {

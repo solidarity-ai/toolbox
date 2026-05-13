@@ -17,17 +17,23 @@ import (
 	"time"
 
 	"github.com/solidarity-ai/toolbox/daemon"
+	"github.com/solidarity-ai/toolbox/secrets"
 )
 
 type stubDaemonHTTPControl struct {
-	mu        sync.Mutex
-	locked    bool
-	unlockKey string
-	unlockErr error
-	lockErr   error
-	statusErr error
-	snapshots []daemon.ClientSnapshot
-	decisions []daemon.ApprovalDecision
+	mu                sync.Mutex
+	locked            bool
+	unlockKey         string
+	unlockErr         error
+	setupErr          error
+	lockErr           error
+	statusErr         error
+	setupRequired     bool
+	recoveryUnlocked  bool
+	recoveryUnlockKey string
+	recoveryGenerated int
+	snapshots         []daemon.ClientSnapshot
+	decisions         []daemon.ApprovalDecision
 }
 
 type stubBrowserLauncher struct {
@@ -63,6 +69,38 @@ func (s *stubDaemonHTTPControl) UnlockSecretStore(_ context.Context, unlockKey s
 	return nil
 }
 
+func (s *stubDaemonHTTPControl) SetupSecretStore(_ context.Context, unlockKey string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.setupErr != nil {
+		return nil, s.setupErr
+	}
+	s.unlockKey = unlockKey
+	s.locked = false
+	s.setupRequired = false
+	return []string{"AAAAA-BBBBB-CCCCC-DDDDD", "EEEEE-FFFFF-GGGGG-HHHHH"}, nil
+}
+
+func (s *stubDaemonHTTPControl) GenerateSecretStoreRecoveryCodes(_ context.Context, unlockKey string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.setupErr != nil {
+		return nil, s.setupErr
+	}
+	if unlockKey == "" && !s.recoveryUnlocked {
+		return nil, secrets.ErrLocked
+	}
+	s.recoveryUnlockKey = unlockKey
+	s.recoveryGenerated++
+	return []string{"IIIII-JJJJJ-KKKKK-LLLLL", "MMMMM-NNNNN-OOOOO-PPPPP"}, nil
+}
+
+func (s *stubDaemonHTTPControl) SecretStoreRecoveryUnlocked(context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recoveryUnlocked, nil
+}
+
 func (s *stubDaemonHTTPControl) LockSecretStore(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,6 +118,12 @@ func (s *stubDaemonHTTPControl) SecretStoreLocked(context.Context) (bool, error)
 		return false, s.statusErr
 	}
 	return s.locked, nil
+}
+
+func (s *stubDaemonHTTPControl) SecretStoreSetupRequired(context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setupRequired, nil
 }
 
 func (s *stubDaemonHTTPControl) ApplyApprovals(_ context.Context, decisions []daemon.ApprovalDecision) error {
@@ -800,8 +844,11 @@ func TestApprovalConsoleUsesHyphenatedDatastarBindSignals(t *testing.T) {
 	if !strings.Contains(html, `method="post" action="/secret-store/unlock"`) {
 		t.Fatalf("unlock form must post so passphrases cannot leak into the URL: %q", html)
 	}
-	if !strings.Contains(html, `id="secret-panel" class="secret-panel open" data-class:open="true"`) {
+	if !strings.Contains(html, `id="secret-panel" class="secret-panel open" data-class="{&#39;open&#39;: true}"`) {
 		t.Fatalf("locked secret store should show the unlock panel without toolbar toggle: %q", html)
+	}
+	if !strings.Contains(html, `Secret Store Locked`) {
+		t.Fatalf("locked secret panel should use the capitalized onboarding title: %q", html)
 	}
 	if !strings.Contains(html, `data-on:submit__prevent`) {
 		t.Fatalf("console missing Datastar v1 modifier syntax for submit prevention: %q", html)
@@ -815,8 +862,33 @@ func TestApprovalConsoleUsesHyphenatedDatastarBindSignals(t *testing.T) {
 	}
 
 	unlockedHTML := componentHTML(SecretPanel(daemonIndexPageData{StatusText: "unlocked", Available: true, Locked: false}))
-	if !strings.Contains(unlockedHTML, `data-class:open="$secretOpen"`) {
+	if !strings.Contains(unlockedHTML, `data-class="{&#39;open&#39;: $secretOpen}"`) {
 		t.Fatalf("unlocked secret panel should still use the toolbar toggle: %q", unlockedHTML)
+	}
+}
+
+func TestApprovalConsoleInitialSetupRequiredSignal(t *testing.T) {
+	state := approvalConsoleStateForHTTP(&stubDaemonHTTPControl{locked: true, setupRequired: true})
+	if state.SecretStore.Status != "locked" || !state.SecretStore.SetupRequired {
+		t.Fatalf("SecretStore = %#v, want locked setup-required state", state.SecretStore)
+	}
+	html := componentHTML(ApprovalConsolePage(approvalConsolePageDataFromState(state), state))
+	if !strings.Contains(html, `&#34;setupRequired&#34;:true`) {
+		t.Fatalf("initial console signals should keep create-store controls visible: %q", html)
+	}
+	if !strings.Contains(html, `Create your toolbox secret store`) ||
+		!strings.Contains(html, `Create Secret Store`) ||
+		!strings.Contains(html, `Choose a passphrase`) {
+		t.Fatalf("setup-required panel should look like secret-store onboarding: %q", html)
+	}
+	if strings.Contains(html, `type="checkbox"`) || strings.Contains(html, `Set up new store`) {
+		t.Fatalf("setup-required panel should not expose the setup checkbox: %q", html)
+	}
+	if strings.Contains(html, `Passphrase or backup code`) {
+		t.Fatalf("setup-required panel should not mention backup codes in the passphrase placeholder: %q", html)
+	}
+	if !strings.Contains(html, `setup:true`) {
+		t.Fatalf("setup-required form should still submit setup=true under the hood: %q", html)
 	}
 }
 
@@ -929,11 +1001,46 @@ func TestStartDaemonDebugServerServesUnlockedIndex(t *testing.T) {
 	if !strings.Contains(page, `/secret-store/lock`) {
 		t.Fatalf("index missing lock endpoint: %q", page)
 	}
+	if !strings.Contains(page, `id="recovery-codes-form"`) || !strings.Contains(page, `/secret-store/recovery-codes`) {
+		t.Fatalf("index missing recovery-code generation controls while unlocked: %q", page)
+	}
 	if strings.Contains(page, `id="unlock-form"`) {
 		t.Fatalf("index unexpectedly rendered unlock form while unlocked: %q", page)
 	}
-	if strings.Contains(page, `type="password"`) {
-		t.Fatalf("index unexpectedly rendered password input while unlocked: %q", page)
+	if !strings.Contains(page, `id="recovery-unlock-key"`) || !strings.Contains(page, `Confirm passphrase`) {
+		t.Fatalf("index missing recovery-code passphrase confirmation while unlocked: %q", page)
+	}
+}
+
+func TestStartDaemonDebugServerServesRecoveryUnlockedIndex(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: false, recoveryUnlocked: true}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/): %v", err)
+	}
+	page := string(body)
+	if !strings.Contains(page, `id="recovery-codes-form"`) || !strings.Contains(page, `{payload:{}}`) {
+		t.Fatalf("recovery-unlocked index missing unauthenticated recovery-code form: %q", page)
+	}
+	if strings.Contains(page, `id="recovery-unlock-key"`) {
+		t.Fatalf("recovery-unlocked index should not prompt for passphrase: %q", page)
 	}
 }
 
@@ -1102,6 +1209,169 @@ func TestStartDaemonDebugServerSecretStoreUnlockAcceptsDatastarForm(t *testing.T
 	}
 	if !strings.Contains(string(body), "event: datastar-patch-elements") {
 		t.Fatalf("Datastar unlock response missing element patches: %q", string(body))
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreSetupKeepsRecoveryCodesVisible(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{
+		locked:        true,
+		setupRequired: true,
+		unlockErr:     secrets.ErrNotInitialized,
+	}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/unlock", strings.NewReader(`{"unlock_key":"hunter2","setup":true}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/unlock): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/unlock): %v", err)
+	}
+	body := string(bodyBytes)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/unlock status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(body))
+	}
+	if !strings.Contains(body, `"secretOpen":true`) {
+		t.Fatalf("setup response should keep the secret panel open for recovery codes: %q", body)
+	}
+	if !strings.Contains(body, "AAAAA-BBBBB-CCCCC-DDDDD") {
+		t.Fatalf("setup response missing recovery codes: %q", body)
+	}
+	if !strings.Contains(body, "Secret Store Unlocked") {
+		t.Fatalf("setup response should patch in the unlocked secret panel: %q", body)
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreRecoveryCodesEndpoint(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: false}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/recovery-codes", strings.NewReader(`{"unlock_key":"hunter2"}`))
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/recovery-codes): %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Datastar-Request", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/recovery-codes: %v", err)
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/recovery-codes): %v", err)
+	}
+	body := string(bodyBytes)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/recovery-codes status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(body))
+	}
+	if !strings.Contains(body, `"secretOpen":true`) {
+		t.Fatalf("recovery-code response should keep the secret panel open: %q", body)
+	}
+	if !strings.Contains(body, "IIIII-JJJJJ-KKKKK-LLLLL") {
+		t.Fatalf("recovery-code response missing generated recovery codes: %q", body)
+	}
+	if !strings.Contains(body, "Toolbox does not store them") {
+		t.Fatalf("recovery-code response should explain backup-code handling: %q", body)
+	}
+	if control.recoveryUnlockKey != "hunter2" {
+		t.Fatalf("recovery-code endpoint used unlock key %q, want hunter2", control.recoveryUnlockKey)
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreRecoveryCodesEndpointRequiresAuth(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: false}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/recovery-codes", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/recovery-codes): %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/recovery-codes: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /secret-store/recovery-codes status = %d, want 400: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if control.recoveryGenerated != 0 {
+		t.Fatalf("recovery-code endpoint generated %d code sets without auth", control.recoveryGenerated)
+	}
+}
+
+func TestStartDaemonDebugServerSecretStoreRecoveryCodesEndpointAllowsRecoveryUnlock(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{locked: false, recoveryUnlocked: true}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/secret-store/recovery-codes", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(/secret-store/recovery-codes): %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /secret-store/recovery-codes: %v", err)
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(/secret-store/recovery-codes): %v", err)
+	}
+	body := string(bodyBytes)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /secret-store/recovery-codes status = %d, want 200: %s", resp.StatusCode, strings.TrimSpace(body))
+	}
+	if !strings.Contains(body, "IIIII-JJJJJ-KKKKK-LLLLL") {
+		t.Fatalf("recovery-code response missing generated recovery codes: %q", body)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,9 @@ func newTestStore(t *testing.T) (*secrets.LocalSecretStore, string, string) {
 	identityPath := filepath.Join(dir, "keys.txt")
 	storePath := filepath.Join(dir, "secrets")
 	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+	if _, err := store.Setup(context.Background(), testUnlockKey); err != nil {
+		t.Fatal(err)
+	}
 	return store, storePath, identityPath + ".age"
 }
 
@@ -202,6 +206,9 @@ func TestLocalSecretStore_Persistence(t *testing.T) {
 
 	// Write with first store instance.
 	store1 := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+	if _, err := store1.Setup(ctx, testUnlockKey); err != nil {
+		t.Fatal(err)
+	}
 	if err := store1.Set(ctx, "persistent", []byte("value")); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +247,46 @@ func TestLocalSecretStore_LockedWithoutKey(t *testing.T) {
 	_, err := store.Get(ctx, "key")
 	if err != secrets.ErrLocked {
 		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+}
+
+func TestLocalSecretStore_AutoSetupWritesBackupCodes(t *testing.T) {
+	ctx := context.Background()
+	setTestScryptEnv(t)
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "keys.txt")
+	storePath := filepath.Join(dir, "secrets")
+	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+	var out bytes.Buffer
+	store.SetBackupCodeWriter(&out)
+
+	if err := store.Set(ctx, "key", []byte("value")); err != nil {
+		t.Fatalf("Set(): %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "Toolbox secret store backup codes:") || !strings.Contains(got, "TBX1-") {
+		t.Fatalf("backup code output = %q, want heading and backup code", got)
+	}
+	if _, err := os.Stat(identityPath + ".recovery.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup-code sidecar Stat() error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestLocalSecretStore_AutoSetupWithoutWriterReturnsNotInitialized(t *testing.T) {
+	ctx := context.Background()
+	setTestScryptEnv(t)
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "keys.txt")
+	storePath := filepath.Join(dir, "secrets")
+	store := secrets.NewLocalSecretStoreWithKey(storePath, identityPath, testUnlockKey)
+
+	if err := store.Set(ctx, "key", []byte("value")); !errors.Is(err, secrets.ErrNotInitialized) {
+		t.Fatalf("Set() error = %v, want ErrNotInitialized", err)
+	}
+	if _, err := os.Stat(storePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store Stat() error = %v, want os.ErrNotExist", err)
+	}
+	if _, err := os.Stat(identityPath + ".age"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("identity Stat() error = %v, want os.ErrNotExist", err)
 	}
 }
 

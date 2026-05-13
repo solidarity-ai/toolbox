@@ -153,6 +153,7 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	command := ctx.Command()
 	secretOpts := parsed.secretStoreOptions()
+	secretOpts.BackupCodeWriter = stderr
 	switch {
 	case strings.HasPrefix(command, "install"):
 		return runInstall(parsed.Install, stdout)

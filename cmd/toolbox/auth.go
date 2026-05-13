@@ -28,6 +28,9 @@ var openBrowser = func(url string) {
 }
 
 func runAuth(args []string, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
+	if opts.BackupCodeWriter == nil {
+		opts.BackupCodeWriter = stderr
+	}
 	// Parse flags.
 	check := false
 	deleteCredential := false

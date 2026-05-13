@@ -53,7 +53,8 @@ type sessionDelegate struct {
 type noopSessionDelegate struct{}
 
 type SecretStore struct {
-	unlockKey string
+	unlockKey        string
+	backupCodeWriter io.Writer
 }
 
 func OpenSessionDelegate(mode, cwd string, stderr io.Writer) (SessionDelegate, error) {
@@ -78,6 +79,10 @@ func NewNoopSessionDelegate() SessionDelegate {
 
 func NewSecretStore(unlockKey string) *SecretStore {
 	return &SecretStore{unlockKey: unlockKey}
+}
+
+func NewSecretStoreWithBackupCodeWriter(unlockKey string, w io.Writer) *SecretStore {
+	return &SecretStore{unlockKey: unlockKey, backupCodeWriter: w}
 }
 
 func (d *sessionDelegate) SetPreparedTools(prepared toolset.PreparedToolset) {

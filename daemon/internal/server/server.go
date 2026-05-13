@@ -102,6 +102,27 @@ func (s *Server) UnlockSecretStore(ctx context.Context, unlockKey string) error 
 	return s.secretService.UnlockStore(ctx, unlockKey)
 }
 
+func (s *Server) SetupSecretStore(ctx context.Context, unlockKey string) ([]string, error) {
+	if s == nil || s.secretService == nil {
+		return nil, nil
+	}
+	return s.secretService.SetupStore(ctx, unlockKey)
+}
+
+func (s *Server) GenerateSecretStoreRecoveryCodes(ctx context.Context, unlockKey string) ([]string, error) {
+	if s == nil || s.secretService == nil {
+		return nil, nil
+	}
+	return s.secretService.RecoveryCodes(ctx, unlockKey)
+}
+
+func (s *Server) SecretStoreRecoveryUnlocked(ctx context.Context) (bool, error) {
+	if s == nil || s.secretService == nil {
+		return false, nil
+	}
+	return s.secretService.RecoveryUnlocked(ctx)
+}
+
 func (s *Server) LockSecretStore(ctx context.Context) error {
 	if s == nil || s.secretService == nil {
 		return nil
@@ -114,6 +135,13 @@ func (s *Server) SecretStoreLocked(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	return s.secretService.Locked(ctx)
+}
+
+func (s *Server) SecretStoreSetupRequired(ctx context.Context) (bool, error) {
+	if s == nil || s.secretService == nil {
+		return false, nil
+	}
+	return s.secretService.SetupRequired(ctx)
 }
 
 func (s *Server) ApplyApprovals(_ context.Context, decisions []ApprovalDecision) error {

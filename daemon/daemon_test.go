@@ -153,7 +153,7 @@ func TestSessionRegistrationTracksPendingApprovals(t *testing.T) {
 }
 
 func TestSessionRegistrationSecretEpochHandlerFiresOnSecretChanges(t *testing.T) {
-	_, _ = startTrackedServer(t)
+	_, srv := startTrackedServer(t)
 
 	reg, err := OpenSessionRegistration(SessionState{
 		Mode:       "codemode_mcp",
@@ -174,6 +174,9 @@ func TestSessionRegistrationSecretEpochHandlerFiresOnSecretChanges(t *testing.T)
 	})
 
 	ctx := context.Background()
+	if _, err := srv.SetupSecretStore(ctx, "test-secret-key"); err != nil {
+		t.Fatalf("SetupSecretStore(): %v", err)
+	}
 	store := NewSecretStore("test-secret-key")
 	if err := store.Unlock(ctx, "test-secret-key"); err != nil {
 		t.Fatalf("Unlock(): %v", err)
@@ -226,7 +229,7 @@ func TestEnsureConnection(t *testing.T) {
 }
 
 func TestSecretStoreRoundTrip(t *testing.T) {
-	_, _ = startTrackedServer(t)
+	_, srv := startTrackedServer(t)
 
 	ctx := context.Background()
 	lockedStore := NewSecretStore("")
@@ -235,6 +238,9 @@ func TestSecretStoreRoundTrip(t *testing.T) {
 	}
 
 	store := NewSecretStore("test-secret-key")
+	if _, err := srv.SetupSecretStore(ctx, "test-secret-key"); err != nil {
+		t.Fatalf("SetupSecretStore(): %v", err)
+	}
 	if err := store.Set(ctx, "service/token", []byte("value")); err != nil {
 		t.Fatalf("Set(): %v", err)
 	}

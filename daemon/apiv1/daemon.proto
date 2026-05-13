@@ -113,6 +113,14 @@ message SecretUnlockRequest {
 
 message SecretUnlockResponse {}
 
+message SecretSetupRequest {
+  string unlock_key = 1;
+}
+
+message SecretSetupResponse {
+  repeated string backup_codes = 1;
+}
+
 message SecretLockRequest {}
 
 message SecretLockResponse {}
@@ -124,6 +132,7 @@ service SessionService {
 
 service SecretStoreService {
   rpc Unlock(SecretUnlockRequest) returns (SecretUnlockResponse);
+  rpc Setup(SecretSetupRequest) returns (SecretSetupResponse);
   rpc Lock(SecretLockRequest) returns (SecretLockResponse);
   rpc Get(SecretGetRequest) returns (SecretGetResponse);
   rpc Set(SecretSetRequest) returns (SecretSetResponse);

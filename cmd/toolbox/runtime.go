@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,8 +26,9 @@ const (
 )
 
 type secretStoreOptions struct {
-	NoDaemon  bool
-	SecretKey string
+	NoDaemon         bool
+	SecretKey        string
+	BackupCodeWriter io.Writer
 }
 
 func newCredentialPolicySource(opts secretStoreOptions) toolset.PackageCredentialPolicySource {
@@ -39,11 +41,12 @@ func newCredentialRepository(opts secretStoreOptions) *credentialrepo.Repository
 
 func newSecretStore(opts secretStoreOptions) secrets.SecretStore {
 	local := secrets.NewLocalSecretStoreWithKey("", "", opts.SecretKey)
+	local.SetBackupCodeWriter(opts.BackupCodeWriter)
 	if opts.NoDaemon {
 		return local
 	}
 	return &daemonPreferredSecretStore{
-		primary:  daemon.NewSecretStore(opts.SecretKey),
+		primary:  daemon.NewSecretStoreWithBackupCodeWriter(opts.SecretKey, opts.BackupCodeWriter),
 		fallback: local,
 	}
 }

@@ -84,6 +84,10 @@ func NewSecretStore(unlockKey string) *SecretStore {
 	return daemonclient.NewSecretStore(unlockKey)
 }
 
+func NewSecretStoreWithBackupCodeWriter(unlockKey string, w io.Writer) *SecretStore {
+	return daemonclient.NewSecretStoreWithBackupCodeWriter(unlockKey, w)
+}
+
 func NewNoopSessionDelegate() SessionDelegate {
 	return daemonclient.NewNoopSessionDelegate()
 }

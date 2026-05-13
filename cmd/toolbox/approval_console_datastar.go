@@ -161,15 +161,17 @@ func isDatastarRequest(r *http.Request) bool {
 
 func writeApprovalConsoleDatastarResponse(w http.ResponseWriter, control daemonHTTPControl, signals map[string]any) {
 	writeDatastarHeaders(w)
-	patch := make(map[string]any, len(signals)+1)
+	state := approvalConsoleStateForHTTP(control)
+	patch := make(map[string]any, len(signals)+2)
 	patch["liveState"] = "Connected"
+	patch["setupRequired"] = state.SecretStore.SetupRequired
 	for key, value := range signals {
 		patch[key] = value
 	}
 	if len(patch) > 0 {
 		writeDatastarPatchSignals(w, patch)
 	}
-	writeApprovalConsolePatches(w, nil, approvalConsoleStateForHTTP(control))
+	writeApprovalConsolePatches(w, nil, state)
 }
 
 func writeApprovalConsolePatches(w io.Writer, previous *approvalConsoleFragments, state approvalConsoleState) approvalConsoleFragments {

@@ -66,10 +66,22 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.dot.warn { background:#c77700; } .dot.off { background:#9aa2ad; }
 				main { max-width: none; margin: .9rem auto 3rem; padding: 0 1.25rem; }
 				.message { min-height: 1.3rem; color: var(--danger); white-space: pre-wrap; }
-				.secret-panel { display:none; margin:.75rem 0; padding:.75rem; border:1px solid var(--border); background:#fff; border-radius:8px; }
+				.secret-panel { display:none; max-width:32rem; margin:2rem auto 1rem; padding:1.25rem; border:1px solid var(--border); background:#fff; border-radius:12px; box-shadow:0 10px 30px rgba(15,23,42,.08); }
 				.secret-panel.open { display:block; }
-				.secret-panel form { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
-				.secret-panel input { min-width: 16rem; border:1px solid var(--border); border-radius:6px; padding:.42rem .55rem; }
+				.secret-panel-card { display:grid; gap:.85rem; }
+				.secret-panel-eyebrow { margin:0; color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+				.secret-panel h2 { margin:0; font-size:22px; line-height:1.2; }
+				.secret-panel-subtitle { margin:0; color:var(--muted); }
+				.secret-panel form { display:grid; gap:.7rem; }
+				.secret-panel label { font-weight:650; }
+				.secret-panel input { width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:.62rem .7rem; }
+				.secret-panel .primary { width:100%; padding:.6rem .8rem; }
+				.secret-panel-note { margin:.15rem 0 0; color:var(--muted); font-size:13px; }
+				.backup-codes { display:none; margin:.75rem 0 0; padding:.75rem; border:1px solid #b7d4ff; background:#f4f8ff; border-radius:7px; }
+				.backup-codes.open { display:block; }
+				.backup-codes h3 { margin:0 0 .35rem; font-size:14px; }
+				.backup-codes p { margin:.2rem 0 .55rem; color:var(--muted); }
+				.backup-codes pre { background:#fff; }
 				.intent { background:#fff; border:1px solid var(--border); border-radius:8px; margin:1rem 0; padding:1rem 1rem 0; overflow:hidden; box-shadow:0 1px 2px rgba(15,23,42,.04); }
 				.intent-head { display:block; margin-bottom:.75rem; }
 				.intent-primary { display:flex; align-items:center; gap:.65rem; }
@@ -90,6 +102,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.package-title { display:flex; align-items:center; gap:.55rem; font-weight:700; padding-bottom:.55rem; border-bottom:1px solid var(--border); font-size:15px; }
 				.count-badge { min-width:1.35rem; height:1.35rem; display:inline-grid; place-items:center; padding:0 .4rem; border-radius:999px; background:#eef4ff; color:#0b57d0; font-size:12px; font-weight:700; }
 				.row { padding:.75rem 0; border-bottom:1px solid #edf0f3; }
+				.row:last-child { border-bottom:0; padding-bottom:0; }
 				.row-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.8rem; align-items:center; }
 				.tool-name { display:flex; align-items:center; gap:.45rem; font-weight:650; white-space:nowrap; min-width:0; }
 				.tool-name-text { overflow:hidden; text-overflow:ellipsis; }
@@ -124,7 +137,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 			<script type="module" src="/assets/datastar-v1.0.1.js"></script>
 		</head>
 		<body
-			data-signals={ approvalConsoleInitialSignals() }
+			data-signals={ approvalConsoleInitialSignals(state) }
 			data-init="@get('/approval-console/events', {payload:{}})"
 			data-on:datastar-fetch__window={ datastarFetchStateExpr() }
 		>
@@ -239,19 +252,61 @@ templ IconLock(status string) {
 }
 
 templ SecretPanel(page daemonIndexPageData) {
-	<section id="secret-panel" class={ secretPanelClass(page) } data-class:open={ secretPanelOpenExpr(page) }>
+	<section id="secret-panel" class={ secretPanelClass(page) } data-class={ secretPanelClassExpr(page) }>
 		if page.Available {
 			if page.Locked {
-				<form id="unlock-form" method="post" action="/secret-store/unlock" data-on:submit__prevent="@post('/secret-store/unlock', {payload:{unlock_key:el.querySelector('[name=unlock_key]').value}})">
-					<label for="unlock-key">Secret store locked</label>
-					<input id="unlock-key" name="unlock_key" type="password" autocomplete="current-password" placeholder="Passcode" data-bind:unlock-key/>
-					<button type="submit" class="primary">Unlock</button>
-				</form>
+				<div class="secret-panel-card">
+					<p class="secret-panel-eyebrow">Toolbox Secret Store</p>
+					if page.SetupRequired {
+						<h2>Create your toolbox secret store</h2>
+						<p class="secret-panel-subtitle">Create an encrypted Secret Store to save credentials for Toolbox tools.</p>
+						<form id="unlock-form" method="post" action="/secret-store/unlock" data-on:submit__prevent="@post('/secret-store/unlock', {payload:{unlock_key:el.querySelector('[name=unlock_key]').value, setup:true}})">
+							<label for="unlock-key">Create a passphrase</label>
+							<input id="unlock-key" name="unlock_key" type="password" autocomplete="new-password" placeholder="Choose a passphrase" data-bind:unlock-key/>
+							<button type="submit" class="primary">Create Secret Store</button>
+							<p class="secret-panel-note">After setup, Toolbox will show backup codes once. Save them in your password manager.</p>
+						</form>
+					} else {
+						<h2>Secret Store Locked</h2>
+						<p class="secret-panel-subtitle">Unlock the Secret Store to approve tools that need credentials.</p>
+						<form id="unlock-form" method="post" action="/secret-store/unlock" data-on:submit__prevent="@post('/secret-store/unlock', {payload:{unlock_key:el.querySelector('[name=unlock_key]').value, setup:false}})">
+							<label for="unlock-key">Passphrase</label>
+							<input id="unlock-key" name="unlock_key" type="password" autocomplete="current-password" placeholder="Passphrase or backup code" data-bind:unlock-key/>
+							<button type="submit" class="primary">Unlock</button>
+						</form>
+					}
+				</div>
+				<div id="backup-codes" class="backup-codes" data-class="{'open': $backupCodesText !== ''}">
+					<h3>Backup codes</h3>
+					<p>Save these long backup codes in your password manager. Toolbox does not store them and cannot show them again.</p>
+					<pre data-text="$backupCodesText"></pre>
+				</div>
 			} else {
-				<form id="lock-form" method="post" action="/secret-store/lock" data-on:submit__prevent="@post('/secret-store/lock', {payload:{}})">
-					<span>Secret store unlocked</span>
-					<button type="submit">Lock</button>
-				</form>
+				<div class="secret-panel-card">
+					<p class="secret-panel-eyebrow">Toolbox Secret Store</p>
+					<h2>Secret Store Unlocked</h2>
+					if page.RecoveryUnlocked {
+						<p class="secret-panel-subtitle">Generate new backup codes for this recovery session.</p>
+						<form id="recovery-codes-form" method="post" action="/secret-store/recovery-codes" data-on:submit__prevent="@post('/secret-store/recovery-codes', {payload:{}})">
+							<button type="submit" class="primary">Generate new backup codes</button>
+						</form>
+					} else {
+						<p class="secret-panel-subtitle">Confirm your passphrase to generate new backup codes.</p>
+						<form id="recovery-codes-form" method="post" action="/secret-store/recovery-codes" data-on:submit__prevent="@post('/secret-store/recovery-codes', {payload:{unlock_key:el.querySelector('[name=unlock_key]').value}})">
+							<label for="recovery-unlock-key">Passphrase</label>
+							<input id="recovery-unlock-key" name="unlock_key" type="password" autocomplete="current-password" placeholder="Confirm passphrase"/>
+							<button type="submit" class="primary">Generate new backup codes</button>
+						</form>
+					}
+					<form id="lock-form" method="post" action="/secret-store/lock" data-on:submit__prevent="@post('/secret-store/lock', {payload:{}})">
+						<button type="submit">Lock Secret Store</button>
+					</form>
+				</div>
+				<div id="backup-codes" class="backup-codes" data-class="{'open': $backupCodesText !== ''}">
+					<h3>Backup codes</h3>
+					<p>Save these long backup codes in your password manager. Toolbox does not store them and cannot show them again.</p>
+					<pre data-text="$backupCodesText"></pre>
+				</div>
 			}
 		} else {
 			Secret store unavailable.

@@ -31,9 +31,11 @@ func mustRenderComponent(component templ.Component) string {
 func approvalConsolePageDataFromState(state approvalConsoleState) daemonIndexPageData {
 	status := strings.TrimSpace(state.SecretStore.Status)
 	page := daemonIndexPageData{
-		StatusText: firstNonEmpty(status, "unavailable"),
-		Available:  status != "" && status != "unavailable",
-		Locked:     status == "locked",
+		StatusText:       firstNonEmpty(status, "unavailable"),
+		Available:        status != "" && status != "unavailable",
+		Locked:           status == "locked",
+		SetupRequired:    state.SecretStore.SetupRequired,
+		RecoveryUnlocked: state.SecretStore.RecoveryUnlocked,
 	}
 	if page.StatusText == "" {
 		page.StatusText = "Unavailable"
@@ -41,8 +43,12 @@ func approvalConsolePageDataFromState(state approvalConsoleState) daemonIndexPag
 	return page
 }
 
-func approvalConsoleInitialSignals() string {
-	return `{"liveState":"Connecting","secretOpen":false,"drafts":{},"rejectReason":"","rejectDialogOpen":false,"rejectSession":"","unlockKey":"","message":""}`
+func approvalConsoleInitialSignals(state approvalConsoleState) string {
+	setupRequired := "false"
+	if state.SecretStore.SetupRequired {
+		setupRequired = "true"
+	}
+	return `{"liveState":"Connecting","secretOpen":false,"setupRequired":` + setupRequired + `,"backupCodesText":"","drafts":{},"rejectReason":"","rejectDialogOpen":false,"rejectSession":"","unlockKey":"","message":""}`
 }
 
 func secretStatusClass(status string) string {
@@ -92,6 +98,10 @@ func secretPanelOpenExpr(page daemonIndexPageData) string {
 		return "true"
 	}
 	return "$secretOpen"
+}
+
+func secretPanelClassExpr(page daemonIndexPageData) string {
+	return "{'open': " + secretPanelOpenExpr(page) + "}"
 }
 
 func approvalClientTitle(client approvalConsoleClient) string {

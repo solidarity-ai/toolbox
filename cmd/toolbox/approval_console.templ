@@ -16,65 +16,72 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 			<title>Toolbox Approvals</title>
 			<link rel="preconnect" href="https://fonts.googleapis.com"/>
 			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""/>
-			<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+			<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet"/>
 			<style>
 				:root {
 					color-scheme: light dark;
-					--font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+					--font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
 					--font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
-					--transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-					--transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+					--transition-fast: 120ms cubic-bezier(0.2, 0.7, 0.2, 1);
+					--transition-normal: 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+					--radius-sm: 2px;
+					--radius: 2px;
+					--radius-lg: 8px;
+					--signal: #D62828;
+					--signal-bright: #ED4545;
+					--signal-deep: #A91D1D;
+					--signal-faint: rgba(214, 40, 40, 0.15);
+					--ok: #7CCF94;
+					--warn: #E0B83D;
+					--danger: #E58A6E;
+					--info: #7FAEC9;
 				}
 
 				@media (prefers-color-scheme: light) {
 					:root {
-						--bg: #FAFAF9;
-						--bg-alt: #F5F5F4;
-						--bg-card: #FFFFFF;
-						--text: #0A0A0A;
-						--muted: #57534E;
-						--faint: #A8A29E;
-						--border: #E7E5E4;
-						--border-strong: #D6D3D1;
-						--accent: #EA580C;
-						--accent-hover: #C2410C;
-						--accent-light: #FFF7ED;
-						--ok: #16A34A;
-						--ok-light: #F0FDF4;
-						--danger: #DC2626;
-						--danger-light: #FEF2F2;
-						--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-						--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-						--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
-						--glass-bg: rgba(250, 250, 249, 0.85);
-						--glass-border: rgba(231, 229, 228, 0.8);
-						--dialog-backdrop: rgba(10, 10, 9, 0.4);
+						--bg: #EDE6D2;
+						--bg-alt: #D4CCB3;
+						--bg-card: #E3DCC6;
+						--text: #0E1812;
+						--muted: #3B4A40;
+						--faint: #6E7A6F;
+						--border: #BFB69C;
+						--border-strong: #948C76;
+						--accent: var(--signal);
+						--accent-hover: var(--signal-deep);
+						--accent-light: var(--signal-faint);
+						--ok-light: rgba(124, 207, 148, 0.15);
+						--danger-light: rgba(229, 138, 110, 0.15);
+						--shadow-sm: none;
+						--shadow-md: none;
+						--shadow-lg: none;
+						--glass-bg: rgba(237, 230, 210, 0.92);
+						--glass-border: rgba(191, 182, 156, 0.8);
+						--dialog-backdrop: rgba(14, 24, 18, 0.4);
 					}
 				}
 
 				@media (prefers-color-scheme: dark) {
 					:root {
-						--bg: #0C0A09;
-						--bg-alt: #1C1917;
-						--bg-card: #171514;
-						--text: #FAFAF9;
-						--muted: #A8A29E;
-						--faint: #78716C;
-						--border: #292524;
-						--border-strong: #44403C;
-						--accent: #F97316;
-						--accent-hover: #FB923C;
-						--accent-light: #2C1405;
-						--ok: #22C55E;
-						--ok-light: #052E16;
-						--danger: #EF4444;
-						--danger-light: #450A0A;
-						--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
-						--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-						--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
-						--glass-bg: rgba(12, 10, 9, 0.85);
-						--glass-border: rgba(41, 37, 36, 0.8);
-						--dialog-backdrop: rgba(0, 0, 0, 0.6);
+						--bg: #04090A;
+						--bg-alt: #112019;
+						--bg-card: #0C1812;
+						--text: #EDE6D2;
+						--muted: #B5BCAE;
+						--faint: #7E8A7F;
+						--border: #1F2D24;
+						--border-strong: #2E3D32;
+						--accent: var(--signal);
+						--accent-hover: var(--signal-bright);
+						--accent-light: var(--signal-faint);
+						--ok-light: rgba(124, 207, 148, 0.15);
+						--danger-light: rgba(229, 138, 110, 0.15);
+						--shadow-sm: none;
+						--shadow-md: none;
+						--shadow-lg: none;
+						--glass-bg: rgba(4, 9, 10, 0.92);
+						--glass-border: rgba(31, 45, 36, 0.8);
+						--dialog-backdrop: rgba(4, 9, 10, 0.6);
 					}
 				}
 
@@ -109,7 +116,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.link-button:hover { background: var(--accent-light); color: var(--accent-hover); border-radius: 4px; }
 				.icon-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--bg-card); border: 1px solid var(--border); }
 				.icon-button:hover { color: var(--text); background: var(--bg-alt); border-color: var(--border-strong); }
-				.toolbar-icon { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+				.toolbar-icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; }
 				.client-icon { width: 20px; height: 20px; }
 				.toolbar-count { font-weight: 700; color: var(--text); }
 				.icon-button .toolbar-icon { width: 17px; height: 17px; }
@@ -129,7 +136,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 					transition: background var(--transition-normal), border var(--transition-normal);
 				}
 				.brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 16px; margin-right: auto; color: var(--text); letter-spacing: -0.01em; }
-				.brand-mark { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 800; font-size: 15px; line-height: 1; font-family: var(--font-mono); }
+				.brand-logo { height: 36px; width: auto; display: block; }
 				.brand-pending { min-width: 1.45rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 .45rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1; }
 				.pill { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); white-space: nowrap; }
 				.toolbar-pill { height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: 0 .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-mute); font-size: 13px; line-height: 1; font-weight: 500; white-space: nowrap; box-shadow: var(--shadow-sm); transition: all var(--transition-fast); }
@@ -140,9 +147,8 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.topbar-menu summary { list-style: none; user-select: none; }
 				.topbar-menu summary::-webkit-details-marker { display: none; }
 				.topbar-menu[open] > summary { background: var(--bg-alt); border-color: var(--muted); }
-				.live-target { width: 36px; height: 36px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all var(--transition-fast); }
-				.live-target:hover { background: var(--bg-alt); border-color: var(--border-strong); }
-				.live-target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+				.live-target { width: 32px; height: 32px; display: inline-grid; place-items: center; }
+				.live-target:focus-visible { outline: 2px solid var(--faint); outline-offset: -2px; }
 				.dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 999px; background: var(--ok); margin-right: .35rem; }
 				.dot.toolbar-dot { width: .6rem; height: .6rem; margin: 0; }
 				.dot.warn { background: #f59e0b; animation: pulse-warn 2s infinite; }
@@ -189,9 +195,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.backup-codes h3 { margin: 0 0 .5rem; font-size: 14px; font-weight: 600; color: var(--text); }
 				.backup-codes p { margin: 0 0 .75rem; color: var(--muted); font-size: 13px; line-height: 1.4; }
 				.backup-codes pre { background: var(--bg-card); border-color: var(--border); }
-				.intent { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem 1.25rem 0; overflow: hidden; box-shadow: var(--shadow-md); transition: transform var(--transition-normal), box-shadow var(--transition-normal), border var(--transition-normal); position: relative; }
-				.intent::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--border-strong)); }
-				.intent:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+				.intent { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem 1.25rem 0; overflow: hidden; transition: border var(--transition-normal); position: relative; }
 				.intent-head { display: block; margin-bottom: 1rem; }
 				.intent-primary { display: flex; align-items: center; gap: .65rem; }
 				.intent-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 0; color: var(--text); letter-spacing: -0.01em; }
@@ -204,8 +208,18 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.intent-menu summary { list-style: none; outline: none; }
 				.intent-menu summary::-webkit-details-marker { display: none; }
 				.menu-panel { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 15; min-width: 11rem; padding: .35rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); box-shadow: var(--shadow-lg); }
-				.menu-panel button { width: 100%; border: 0; text-align: left; background: transparent; padding: .5rem .75rem; box-shadow: none; }
-				.menu-panel button:hover { background: var(--bg-alt); }
+				.menu-panel button { width: 100%; border: 0; text-align: left; background: transparent; padding: .5rem .75rem; box-shadow: none; font-weight: 500; font-size: 13px; }
+				.menu-panel button:hover { background: var(--bg-alt); color: var(--text); }
+				.session-trigger { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--muted); cursor: pointer; transition: all var(--transition-fast); flex: 0 0 auto; }
+				.session-trigger:hover { background: var(--bg-alt); color: var(--text); }
+				.combo-button { display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); transition: all var(--transition-fast); height: 28px; flex: 0 0 auto; }
+				.combo-button:hover { border-color: var(--muted); }
+				.combo-button > button { border: 0; background: transparent; font-size: 12.5px; font-weight: 500; color: var(--text); padding: 0 .65rem; cursor: pointer; border-radius: var(--radius-sm) 0 0 var(--radius-sm); line-height: 1; }
+				.combo-button > button:hover { background: var(--bg-alt); }
+				.combo-button details { display: flex; position: relative; }
+				.combo-button details > summary { display: flex; align-items: center; justify-content: center; width: 26px; border-left: 1px solid var(--border); background: transparent; cursor: pointer; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--muted); font-size: 14px; font-weight: 700; line-height: 1; margin: 0; padding-bottom: 5px; }
+				.combo-button details > summary:hover { background: var(--bg-alt); color: var(--text); }
+				.combo-button .menu-panel { top: calc(100% + .35rem); right: 0; }
 				.package { margin: .75rem 0 1rem; padding: 1rem 1rem .35rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-alt); }
 				.package-title { display: flex; align-items: center; gap: .55rem; font-weight: 600; padding-bottom: .55rem; border-bottom: 1px solid var(--border-strong); font-size: 14px; color: var(--text); }
 				.count-badge { min-width: 1.35rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 0.4rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; }
@@ -232,7 +246,7 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.row details > summary::after { content: ""; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; display: inline-block; transition: transform var(--transition-fast) ease; }
 				.row details[open] > summary::after { transform: rotate(180deg); }
 				.topbar-menu > summary::after, .topbar-menu[open] > summary::after, .intent-menu > summary::after, .intent-menu[open] > summary::after { display: none; }
-				pre { margin: .5rem 0 0; padding: .75rem; background: #0C0F14; color: #E5E7EB; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
+				pre { margin: .5rem 0 0; padding: .75rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 14px; line-height: 1.55; }
 				.details-grid { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: .35rem 0.8rem; margin-top: .6rem; font-size: 13px; color: var(--muted); border-bottom: 1px dashed var(--border); padding-bottom: .6rem; }
 				.details-grid .label { color: var(--faint); }
 				.details-grid div:not(.label) { color: var(--text); }
@@ -272,8 +286,15 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 templ ApprovalTopbar(state approvalConsoleState) {
 	<header class="topbar" id="approval-topbar">
 		<div class="brand">
-			<span class="brand-mark" aria-hidden="true">T</span>
-			<span>Toolbox</span>
+			<svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 285 64" role="img" aria-label="include.tools toolbox">
+				<g transform="translate(4 8) scale(0.6)">
+					<rect x="14" y="22" width="52" height="42" rx="2" fill="var(--signal)"></rect>
+					<path d="M26 28 V14 H54 V28" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"></path>
+					<line x1="14" y1="34" x2="66" y2="34" stroke="#0E1812" stroke-width="2"></line>
+					<rect x="36" y="38" width="8" height="5" fill="currentColor"></rect>
+				</g>
+				<text x="60" y="42" font-family="var(--font-mono)" font-size="28" font-weight="500" letter-spacing="-0.56" fill="currentColor">include<tspan opacity="0.55">.</tspan>tools</text>
+			</svg>
 			if state.Summary.PendingApprovals > 0 {
 				<span class="brand-pending" aria-label="Pending approvals" title="Pending approvals">{ fmt.Sprintf("%d", state.Summary.PendingApprovals) }</span>
 			}
@@ -345,25 +366,18 @@ templ ClientPopover(state approvalConsoleState) {
 
 templ IconClients() {
 	<svg class="toolbar-icon client-icon" viewBox="0 0 24 24" aria-hidden="true">
-		<rect x="4" y="5" width="16" height="14" rx="2"></rect>
-		<path d="M4 8h16"></path>
-		<rect x="8" y="10.5" width="8" height="5.5" rx="1.5"></rect>
-		<path d="M12 10.5V9"></path>
-		<circle cx="10.3" cy="13.2" r=".35"></circle>
-		<circle cx="13.7" cy="13.2" r=".35"></circle>
-		<path d="M10.5 15h3"></path>
+		<polyline points="4 7 9 12 4 17"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>
 	</svg>
 }
 
 templ IconLock(status string) {
 	<svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
 		if secretIconStatus(status) == "unlocked" {
-			<path d="M7 10V7a5 5 0 0 1 9.8-1.4"></path>
+			<path d="M8 11V7a4 4 0 0 1 7.8-1.2"></path>
 		} else {
-			<path d="M7 10V7a5 5 0 0 1 10 0v3"></path>
+			<path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
 		}
-		<rect x="4" y="10" width="16" height="10" rx="2"></rect>
-		<path d="M12 14v2"></path>
+		<rect x="5" y="11" width="14" height="10" rx="1"></rect>
 	</svg>
 }
 
@@ -455,7 +469,14 @@ templ ApprovalSession(session approvalConsoleSession) {
 				}
 				<div class="intent-title">"{ session.Intent.Text }"</div>
 				<div class="session-popover">
-					<button type="button" class="icon-button" aria-label="Session details" aria-describedby={ approvalSessionTooltipID(session) }>i</button>
+					<button type="button" class="session-trigger" aria-label="Session details" aria-describedby={ approvalSessionTooltipID(session) }>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="16" height="16" role="img" aria-hidden="true">
+							<rect x="14" y="22" width="52" height="42" rx="2" fill="var(--signal)"></rect>
+							<path d="M26 28 V14 H54 V28" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="square"></path>
+							<line x1="14" y1="34" x2="66" y2="34" stroke="var(--bg-card)" stroke-width="3"></line>
+							<rect x="36" y="38" width="8" height="5" fill="currentColor"></rect>
+						</svg>
+					</button>
 					<div class="session-tooltip" id={ approvalSessionTooltipID(session) } role="tooltip">
 						if session.Active {
 							Session { session.TBSession }&#10;{ firstNonEmpty(session.Details.Mode, "codemode") } - PID { fmt.Sprintf("%d", session.Details.PID) }&#10;{ session.Details.WorkingDir }&#10;Synced { displayTime(session.Details.LastSyncAt) }
@@ -464,17 +485,19 @@ templ ApprovalSession(session approvalConsoleSession) {
 						}
 					</div>
 				</div>
+				<div class="combo-button">
+					<button type="button" data-on:click={ setSessionDraftsExpr(session, "approve") }>Mark all approved</button>
+					<details class="intent-menu" data-preserve-attr="open">
+						<summary aria-label="More actions" title="More actions">...</summary>
+						<div class="menu-panel">
+							<button type="button" data-on:click={ submitAllSessionExpr(session, "approve") }>Approve all</button>
+							<button type="button" data-on:click={ openRejectAllSessionExpr(session) }>Reject all</button>
+						</div>
+					</details>
+				</div>
 			</div>
 			<div class="intent-meta-row">
 				<div class="intent-meta">{ fmt.Sprintf("%d pending", countConsoleSessionCalls(session)) } &middot; Updated { displayTime(session.UpdatedAt) }</div>
-				<button type="button" class="link-button" data-on:click={ setSessionDraftsExpr(session, "approve") }>Mark all approved</button>
-				<details class="intent-menu" data-preserve-attr="open">
-					<summary class="icon-button" aria-label="More actions" title="More actions">...</summary>
-					<div class="menu-panel">
-						<button type="button" data-on:click={ submitAllSessionExpr(session, "approve") }>Approve all</button>
-						<button type="button" data-on:click={ openRejectAllSessionExpr(session) }>Reject all</button>
-					</div>
-				</details>
 			</div>
 		</div>
 		for _, group := range session.PackageGroups {

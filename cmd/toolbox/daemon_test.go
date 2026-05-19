@@ -729,8 +729,8 @@ func TestApprovalConsoleTopbarUsesCompactControls(t *testing.T) {
 	if strings.Contains(html, "Toolbox Approvals") {
 		t.Fatalf("topbar should not render Approvals in the navbar: %q", html)
 	}
-	if !strings.Contains(html, `<span>Toolbox</span>`) {
-		t.Fatalf("topbar missing compact Toolbox brand: %q", html)
+	if !strings.Contains(html, `<svg class="brand-logo"`) {
+		t.Fatalf("topbar missing compact Toolbox brand logo: %q", html)
 	}
 	if strings.Contains(html, "Settings") || strings.Contains(html, `id="secret-state"`) {
 		t.Fatalf("topbar still renders old settings/secret text controls: %q", html)

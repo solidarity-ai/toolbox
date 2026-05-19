@@ -36,14 +36,14 @@ func ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) t
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Toolbox Approvals</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin=\"\"><link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap\" rel=\"stylesheet\"><style>\n\t\t\t\t:root {\n\t\t\t\t\tcolor-scheme: light dark;\n\t\t\t\t\t--font-sans: 'Inter', system-ui, -apple-system, sans-serif;\n\t\t\t\t\t--font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;\n\t\t\t\t\t--transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);\n\t\t\t\t\t--transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);\n\t\t\t\t}\n\n\t\t\t\t@media (prefers-color-scheme: light) {\n\t\t\t\t\t:root {\n\t\t\t\t\t\t--bg: #FAFAF9;\n\t\t\t\t\t\t--bg-alt: #F5F5F4;\n\t\t\t\t\t\t--bg-card: #FFFFFF;\n\t\t\t\t\t\t--text: #0A0A0A;\n\t\t\t\t\t\t--muted: #57534E;\n\t\t\t\t\t\t--faint: #A8A29E;\n\t\t\t\t\t\t--border: #E7E5E4;\n\t\t\t\t\t\t--border-strong: #D6D3D1;\n\t\t\t\t\t\t--accent: #EA580C;\n\t\t\t\t\t\t--accent-hover: #C2410C;\n\t\t\t\t\t\t--accent-light: #FFF7ED;\n\t\t\t\t\t\t--ok: #16A34A;\n\t\t\t\t\t\t--ok-light: #F0FDF4;\n\t\t\t\t\t\t--danger: #DC2626;\n\t\t\t\t\t\t--danger-light: #FEF2F2;\n\t\t\t\t\t\t--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);\n\t\t\t\t\t\t--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);\n\t\t\t\t\t\t--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -4px rgba(0, 0, 0, 0.04);\n\t\t\t\t\t\t--glass-bg: rgba(250, 250, 249, 0.85);\n\t\t\t\t\t\t--glass-border: rgba(231, 229, 228, 0.8);\n\t\t\t\t\t\t--dialog-backdrop: rgba(10, 10, 9, 0.4);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t@media (prefers-color-scheme: dark) {\n\t\t\t\t\t:root {\n\t\t\t\t\t\t--bg: #0C0A09;\n\t\t\t\t\t\t--bg-alt: #1C1917;\n\t\t\t\t\t\t--bg-card: #171514;\n\t\t\t\t\t\t--text: #FAFAF9;\n\t\t\t\t\t\t--muted: #A8A29E;\n\t\t\t\t\t\t--faint: #78716C;\n\t\t\t\t\t\t--border: #292524;\n\t\t\t\t\t\t--border-strong: #44403C;\n\t\t\t\t\t\t--accent: #F97316;\n\t\t\t\t\t\t--accent-hover: #FB923C;\n\t\t\t\t\t\t--accent-light: #2C1405;\n\t\t\t\t\t\t--ok: #22C55E;\n\t\t\t\t\t\t--ok-light: #052E16;\n\t\t\t\t\t\t--danger: #EF4444;\n\t\t\t\t\t\t--danger-light: #450A0A;\n\t\t\t\t\t\t--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);\n\t\t\t\t\t\t--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);\n\t\t\t\t\t\t--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);\n\t\t\t\t\t\t--glass-bg: rgba(12, 10, 9, 0.85);\n\t\t\t\t\t\t--glass-border: rgba(41, 37, 36, 0.8);\n\t\t\t\t\t\t--dialog-backdrop: rgba(0, 0, 0, 0.6);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t* { box-sizing: border-box; margin: 0; padding: 0; }\n\t\t\t\tbody {\n\t\t\t\t\tmargin: 0;\n\t\t\t\t\tbackground: var(--bg);\n\t\t\t\t\tcolor: var(--text);\n\t\t\t\t\tfont-family: var(--font-sans);\n\t\t\t\t\tfont-size: 14px;\n\t\t\t\t\tline-height: 1.5;\n\t\t\t\t\t-webkit-font-smoothing: antialiased;\n\t\t\t\t\ttransition: background var(--transition-normal), color var(--transition-normal);\n\t\t\t\t}\n\t\t\t\tbutton, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }\n\t\t\t\tbutton {\n\t\t\t\t\tborder: 1px solid var(--border-strong);\n\t\t\t\t\tbackground: var(--bg-card);\n\t\t\t\t\tcolor: var(--text);\n\t\t\t\t\tborder-radius: var(--radius-sm);\n\t\t\t\t\tpadding: 0.42rem 0.8rem;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t\tcursor: pointer;\n\t\t\t\t\ttransition: all var(--transition-fast);\n\t\t\t\t\tbox-shadow: var(--shadow-sm);\n\t\t\t\t}\n\t\t\t\tbutton:hover { background: var(--bg-alt); border-color: var(--muted); }\n\t\t\t\tbutton.primary { background: var(--accent); border-color: var(--accent); color: #fff; }\n\t\t\t\tbutton.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); transform: translateY(-0.5px); box-shadow: var(--shadow-md); }\n\t\t\t\tbutton:disabled { opacity: .5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }\n\t\t\t\t.link-button { border: 0; background: transparent; color: var(--accent); padding: .2rem .4rem; box-shadow: none; font-weight: 500; }\n\t\t\t\t.link-button:hover { background: var(--accent-light); color: var(--accent-hover); border-radius: 4px; }\n\t\t\t\t.icon-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--bg-card); border: 1px solid var(--border); }\n\t\t\t\t.icon-button:hover { color: var(--text); background: var(--bg-alt); border-color: var(--border-strong); }\n\t\t\t\t.toolbar-icon { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\n\t\t\t\t.client-icon { width: 20px; height: 20px; }\n\t\t\t\t.toolbar-count { font-weight: 700; color: var(--text); }\n\t\t\t\t.icon-button .toolbar-icon { width: 17px; height: 17px; }\n\t\t\t\t.topbar {\n\t\t\t\t\tposition: sticky;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tz-index: 100;\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\talign-items: center;\n\t\t\t\t\tgap: .75rem;\n\t\t\t\t\tpadding: .75rem 1.5rem;\n\t\t\t\t\tbackground: var(--glass-bg);\n\t\t\t\t\tbackdrop-filter: blur(8px);\n\t\t\t\t\t-webkit-backdrop-filter: blur(8px);\n\t\t\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\t\t\tbox-shadow: 0 1px 3px 0 rgba(0,0,0,0.02);\n\t\t\t\t\ttransition: background var(--transition-normal), border var(--transition-normal);\n\t\t\t\t}\n\t\t\t\t.brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 16px; margin-right: auto; color: var(--text); letter-spacing: -0.01em; }\n\t\t\t\t.brand-mark { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 800; font-size: 15px; line-height: 1; font-family: var(--font-mono); }\n\t\t\t\t.brand-pending { min-width: 1.45rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 .45rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1; }\n\t\t\t\t.pill { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); white-space: nowrap; }\n\t\t\t\t.toolbar-pill { height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: 0 .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-mute); font-size: 13px; line-height: 1; font-weight: 500; white-space: nowrap; box-shadow: var(--shadow-sm); transition: all var(--transition-fast); }\n\t\t\t\t.toolbar-pill:hover { border-color: var(--muted); background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.toolbar-button { cursor: pointer; }\n\t\t\t\t.topbar-popover, .topbar-menu { position: relative; }\n\t\t\t\t.topbar-menu { margin: 0; }\n\t\t\t\t.topbar-menu summary { list-style: none; user-select: none; }\n\t\t\t\t.topbar-menu summary::-webkit-details-marker { display: none; }\n\t\t\t\t.topbar-menu[open] > summary { background: var(--bg-alt); border-color: var(--muted); }\n\t\t\t\t.live-target { width: 36px; height: 36px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all var(--transition-fast); }\n\t\t\t\t.live-target:hover { background: var(--bg-alt); border-color: var(--border-strong); }\n\t\t\t\t.live-target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n\t\t\t\t.dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 999px; background: var(--ok); margin-right: .35rem; }\n\t\t\t\t.dot.toolbar-dot { width: .6rem; height: .6rem; margin: 0; }\n\t\t\t\t.dot.warn { background: #f59e0b; animation: pulse-warn 2s infinite; }\n\t\t\t\t.dot.off { background: var(--faint); }\n\t\t\t\t@keyframes pulse-warn {\n\t\t\t\t\t0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }\n\t\t\t\t\t70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }\n\t\t\t\t\t100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }\n\t\t\t\t}\n\t\t\t\t.topbar-tooltip { position: absolute; right: calc(100% + .5rem); top: 50%; transform: translateY(-50%); z-index: 30; display: none; width: max-content; max-width: min(18rem, calc(100vw - 2rem)); padding: .5rem .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-alt); color: var(--text); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.4; white-space: nowrap; }\n\t\t\t\t.topbar-popover:hover .topbar-tooltip, .topbar-popover:focus-within .topbar-tooltip { display: block; }\n\t\t\t\t.topbar-panel { position: absolute; right: 0; top: calc(100% + .5rem); z-index: 30; width: min(30rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); padding: .5rem; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-card); box-shadow: var(--shadow-lg); }\n\t\t\t\t.client-empty { padding: 1rem; color: var(--muted); text-align: center; }\n\t\t\t\t.client-row { padding: .75rem; border-bottom: 1px solid var(--border); }\n\t\t\t\t.client-row:last-child { border-bottom: 0; }\n\t\t\t\t.client-title { display: flex; align-items: center; gap: .5rem; min-width: 0; color: var(--text); font-weight: 600; }\n\t\t\t\t.client-title .dot { margin: 0; flex: 0 0 auto; }\n\t\t\t\t.client-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\t\t\t\t.client-facts { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .25rem .75rem; margin-top: .5rem; font-size: 12px; color: var(--muted); }\n\t\t\t\t.client-facts .label { color: var(--faint); }\n\t\t\t\t.client-facts .value { overflow-wrap: anywhere; color: var(--text); }\n\t\t\t\t.lock-button.unlocked { color: var(--ok); border-color: var(--ok); }\n\t\t\t\t.lock-button.locked { color: var(--danger); border-color: var(--danger); }\n\t\t\t\t.lock-button.unavailable { color: var(--faint); border-color: var(--border); }\n\t\t\t\t.lock-button .toolbar-icon { width: 20px; height: 20px; stroke-width: 2; }\n\t\t\t\t.ok-text { color: var(--ok); }\n\t\t\t\t.danger-text { color: var(--danger); }\n\t\t\t\tmain { max-width: 1120px; margin: 1.5rem auto 4rem; padding: 0 1.5rem; }\n\t\t\t\t.message { min-height: 1.3rem; color: var(--danger); white-space: pre-wrap; margin-bottom: 1rem; font-weight: 500; }\n\t\t\t\t.secret-panel { display: none; max-width: 32rem; margin: 2rem auto 1rem; padding: 1.5rem; border: 1px solid var(--border-strong); background: var(--bg-card); border-radius: var(--radius); box-shadow: var(--shadow-lg); transition: all var(--transition-normal); }\n\t\t\t\t.secret-panel.open { display: block; }\n\t\t\t\t.secret-panel-card { display: grid; gap: 1rem; }\n\t\t\t\t.secret-panel-eyebrow { margin: 0; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-family: var(--font-mono); }\n\t\t\t\t.secret-panel h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }\n\t\t\t\t.secret-panel-subtitle { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; }\n\t\t\t\t.secret-panel form { display: grid; gap: .75rem; }\n\t\t\t\t.secret-panel label { font-weight: 600; color: var(--text); }\n\t\t\t\t.secret-panel input { width: 100%; min-width: 0; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: var(--radius-sm); padding: 0.62rem 0.75rem; transition: all var(--transition-fast); }\n\t\t\t\t.secret-panel input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }\n\t\t\t\t.secret-panel .primary { width: 100%; padding: 0.65rem 0.8rem; }\n\t\t\t\t.secret-panel-note { margin: .25rem 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }\n\t\t\t\t.backup-codes { display: none; margin: 1rem 0 0; padding: 1rem; border: 1px solid var(--border-strong); background: var(--bg-alt); border-radius: var(--radius-sm); }\n\t\t\t\t.backup-codes.open { display: block; }\n\t\t\t\t.backup-codes h3 { margin: 0 0 .5rem; font-size: 14px; font-weight: 600; color: var(--text); }\n\t\t\t\t.backup-codes p { margin: 0 0 .75rem; color: var(--muted); font-size: 13px; line-height: 1.4; }\n\t\t\t\t.backup-codes pre { background: var(--bg-card); border-color: var(--border); }\n\t\t\t\t.intent { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem 1.25rem 0; overflow: hidden; box-shadow: var(--shadow-md); transition: transform var(--transition-normal), box-shadow var(--transition-normal), border var(--transition-normal); position: relative; }\n\t\t\t\t.intent::before { content: \"\"; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--border-strong)); }\n\t\t\t\t.intent:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }\n\t\t\t\t.intent-head { display: block; margin-bottom: 1rem; }\n\t\t\t\t.intent-primary { display: flex; align-items: center; gap: .65rem; }\n\t\t\t\t.intent-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 0; color: var(--text); letter-spacing: -0.01em; }\n\t\t\t\t.intent-meta-row { display: flex; align-items: center; gap: .75rem; margin-top: .65rem; padding-left: 1.45rem; }\n\t\t\t\t.intent-meta { color: var(--muted); font-size: 13px; margin-right: auto; }\n\t\t\t\t.session-popover { position: relative; }\n\t\t\t\t.session-tooltip { position: absolute; right: 0; top: calc(100% + .5rem); z-index: 20; display: none; width: max-content; max-width: min(28rem, calc(100vw - 2rem)); padding: .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-alt); color: var(--text); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.5; white-space: pre-line; }\n\t\t\t\t.session-popover:hover .session-tooltip, .session-popover:focus-within .session-tooltip { display: block; }\n\t\t\t\t.intent-menu { position: relative; margin: 0; }\n\t\t\t\t.intent-menu summary { list-style: none; outline: none; }\n\t\t\t\t.intent-menu summary::-webkit-details-marker { display: none; }\n\t\t\t\t.menu-panel { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 15; min-width: 11rem; padding: .35rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); box-shadow: var(--shadow-lg); }\n\t\t\t\t.menu-panel button { width: 100%; border: 0; text-align: left; background: transparent; padding: .5rem .75rem; box-shadow: none; }\n\t\t\t\t.menu-panel button:hover { background: var(--bg-alt); }\n\t\t\t\t.package { margin: .75rem 0 1rem; padding: 1rem 1rem .35rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-alt); }\n\t\t\t\t.package-title { display: flex; align-items: center; gap: .55rem; font-weight: 600; padding-bottom: .55rem; border-bottom: 1px solid var(--border-strong); font-size: 14px; color: var(--text); }\n\t\t\t\t.count-badge { min-width: 1.35rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 0.4rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; }\n\t\t\t\t.row { padding: .85rem 0; border-bottom: 1px solid var(--border); }\n\t\t\t\t.row:last-child { border-bottom: 0; padding-bottom: 0; }\n\t\t\t\t.row-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .8rem; align-items: center; }\n\t\t\t\t.tool-name { display: flex; align-items: center; gap: .45rem; font-weight: 600; white-space: nowrap; min-width: 0; color: var(--text); }\n\t\t\t\t.tool-name-text { overflow: hidden; text-overflow: ellipsis; }\n\t\t\t\t.tool-icon { width: 24px; height: 24px; object-fit: contain; flex: 0 0 24px; }\n\t\t\t\t.desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }\n\t\t\t\t.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; height: 32px; background: var(--bg-card); box-shadow: var(--shadow-sm); }\n\t\t\t\t.seg button { border: 0; border-right: 1px solid var(--border-strong); border-radius: 0; padding: 0 0.75rem; width: 5.5rem; font-size: 13px; box-shadow: none; font-weight: 500; background: transparent; color: var(--muted); transition: all var(--transition-fast); }\n\t\t\t\t.seg button:last-child { border-right: 0; }\n\t\t\t\t.seg button:hover { background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.seg button.active { background: var(--ok); color: #fff; font-weight: 600; }\n\t\t\t\t.seg button.reject.active { background: var(--danger); color: #fff; }\n\t\t\t\t.sent { color: var(--muted); font-size: 13px; font-style: italic; }\n\t\t\t\t.summary { display: grid; grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr); gap: .25rem 1rem; margin-top: .65rem; font-size: 13px; }\n\t\t\t\t.summary .label { color: var(--muted); font-weight: 500; }\n\t\t\t\t.summary .value { overflow-wrap: anywhere; color: var(--text); font-family: var(--font-mono); font-size: 12px; background: var(--bg-alt); padding: 2px 6px; border-radius: 4px; width: fit-content; max-width: 100%; }\n\t\t\t\t.row details { margin-top: .65rem; border-top: 1px dashed var(--border); padding-top: .5rem; }\n\t\t\t\t.row details > summary { color: var(--accent); cursor: pointer; width: fit-content; list-style: none; font-weight: 500; display: flex; align-items: center; gap: .25rem; user-select: none; font-size: 13px; }\n\t\t\t\t.row details > summary::-webkit-details-marker { display: none; }\n\t\t\t\t.row details > summary::after { content: \"\"; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; display: inline-block; transition: transform var(--transition-fast) ease; }\n\t\t\t\t.row details[open] > summary::after { transform: rotate(180deg); }\n\t\t\t\t.topbar-menu > summary::after, .topbar-menu[open] > summary::after, .intent-menu > summary::after, .intent-menu[open] > summary::after { display: none; }\n\t\t\t\tpre { margin: .5rem 0 0; padding: .75rem; background: #0C0F14; color: #E5E7EB; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }\n\t\t\t\t.details-grid { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: .35rem 0.8rem; margin-top: .6rem; font-size: 13px; color: var(--muted); border-bottom: 1px dashed var(--border); padding-bottom: .6rem; }\n\t\t\t\t.details-grid .label { color: var(--faint); }\n\t\t\t\t.details-grid div:not(.label) { color: var(--text); }\n\t\t\t\t.footer { position: sticky; bottom: 0; display: flex; align-items: center; gap: .75rem; margin: .5rem -1.25rem 0; padding: .75rem 1.25rem; background: var(--glass-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-top: 1px solid var(--border); box-shadow: 0 -4px 12px -2px rgba(0, 0, 0, 0.03); transition: background var(--transition-normal), border var(--transition-normal); z-index: 10; }\n\t\t\t\t.footer .counts { margin-right: auto; color: var(--muted); font-size: 13px; font-weight: 500; }\n\t\t\t\t.empty { text-align: center; color: var(--muted); padding: 4rem 1rem; border: 2px dashed var(--border-strong); background: var(--bg-card); border-radius: var(--radius); }\n\t\t\t\t.empty h2 { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 0.5rem; }\n\t\t\t\t.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }\n\t\t\t\tdialog { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 1.5rem; max-width: 420px; width: calc(100% - 2rem); background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-lg); margin: auto; transition: opacity var(--transition-normal); }\n\t\t\t\tdialog h3 { font-size: 16px; font-weight: 600; margin-bottom: 0.5rem; }\n\t\t\t\tdialog label { font-size: 13px; font-weight: 500; color: var(--muted); }\n\t\t\t\tdialog textarea { width: 100%; min-height: 5rem; margin: 0.5rem 0; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: var(--radius-sm); padding: 0.5rem; font-family: inherit; }\n\t\t\t\tdialog textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }\n\t\t\t\tdialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(4px); }\n\t\t\t\t.dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 0.5rem; }\n\t\t\t\t@media (max-width: 700px) { .topbar { flex-wrap: wrap; padding: 0.75rem 1rem; } main { padding: 0 0.75rem; } .intent-meta-row { align-items: flex-start; flex-wrap: wrap; padding-left: 0; } .row-head { grid-template-columns: 1fr; } .desc { display: none; } .summary, .details-grid { grid-template-columns: 1fr; } .footer { flex-wrap: wrap; } }\n\t\t\t</style><script type=\"module\" src=\"/assets/datastar-v1.0.1.js\"></script></head><body data-signals=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Toolbox Approvals</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin=\"\"><link href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap\" rel=\"stylesheet\"><style>\n\t\t\t\t:root {\n\t\t\t\t\tcolor-scheme: light dark;\n\t\t\t\t\t--font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;\n\t\t\t\t\t--font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;\n\t\t\t\t\t--transition-fast: 120ms cubic-bezier(0.2, 0.7, 0.2, 1);\n\t\t\t\t\t--transition-normal: 200ms cubic-bezier(0.2, 0.7, 0.2, 1);\n\t\t\t\t\t--radius-sm: 2px;\n\t\t\t\t\t--radius: 2px;\n\t\t\t\t\t--radius-lg: 8px;\n\t\t\t\t\t--signal: #D62828;\n\t\t\t\t\t--signal-bright: #ED4545;\n\t\t\t\t\t--signal-deep: #A91D1D;\n\t\t\t\t\t--signal-faint: rgba(214, 40, 40, 0.15);\n\t\t\t\t\t--ok: #7CCF94;\n\t\t\t\t\t--warn: #E0B83D;\n\t\t\t\t\t--danger: #E58A6E;\n\t\t\t\t\t--info: #7FAEC9;\n\t\t\t\t}\n\n\t\t\t\t@media (prefers-color-scheme: light) {\n\t\t\t\t\t:root {\n\t\t\t\t\t\t--bg: #EDE6D2;\n\t\t\t\t\t\t--bg-alt: #D4CCB3;\n\t\t\t\t\t\t--bg-card: #E3DCC6;\n\t\t\t\t\t\t--text: #0E1812;\n\t\t\t\t\t\t--muted: #3B4A40;\n\t\t\t\t\t\t--faint: #6E7A6F;\n\t\t\t\t\t\t--border: #BFB69C;\n\t\t\t\t\t\t--border-strong: #948C76;\n\t\t\t\t\t\t--accent: var(--signal);\n\t\t\t\t\t\t--accent-hover: var(--signal-deep);\n\t\t\t\t\t\t--accent-light: var(--signal-faint);\n\t\t\t\t\t\t--ok-light: rgba(124, 207, 148, 0.15);\n\t\t\t\t\t\t--danger-light: rgba(229, 138, 110, 0.15);\n\t\t\t\t\t\t--shadow-sm: none;\n\t\t\t\t\t\t--shadow-md: none;\n\t\t\t\t\t\t--shadow-lg: none;\n\t\t\t\t\t\t--glass-bg: rgba(237, 230, 210, 0.92);\n\t\t\t\t\t\t--glass-border: rgba(191, 182, 156, 0.8);\n\t\t\t\t\t\t--dialog-backdrop: rgba(14, 24, 18, 0.4);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t@media (prefers-color-scheme: dark) {\n\t\t\t\t\t:root {\n\t\t\t\t\t\t--bg: #04090A;\n\t\t\t\t\t\t--bg-alt: #112019;\n\t\t\t\t\t\t--bg-card: #0C1812;\n\t\t\t\t\t\t--text: #EDE6D2;\n\t\t\t\t\t\t--muted: #B5BCAE;\n\t\t\t\t\t\t--faint: #7E8A7F;\n\t\t\t\t\t\t--border: #1F2D24;\n\t\t\t\t\t\t--border-strong: #2E3D32;\n\t\t\t\t\t\t--accent: var(--signal);\n\t\t\t\t\t\t--accent-hover: var(--signal-bright);\n\t\t\t\t\t\t--accent-light: var(--signal-faint);\n\t\t\t\t\t\t--ok-light: rgba(124, 207, 148, 0.15);\n\t\t\t\t\t\t--danger-light: rgba(229, 138, 110, 0.15);\n\t\t\t\t\t\t--shadow-sm: none;\n\t\t\t\t\t\t--shadow-md: none;\n\t\t\t\t\t\t--shadow-lg: none;\n\t\t\t\t\t\t--glass-bg: rgba(4, 9, 10, 0.92);\n\t\t\t\t\t\t--glass-border: rgba(31, 45, 36, 0.8);\n\t\t\t\t\t\t--dialog-backdrop: rgba(4, 9, 10, 0.6);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t* { box-sizing: border-box; margin: 0; padding: 0; }\n\t\t\t\tbody {\n\t\t\t\t\tmargin: 0;\n\t\t\t\t\tbackground: var(--bg);\n\t\t\t\t\tcolor: var(--text);\n\t\t\t\t\tfont-family: var(--font-sans);\n\t\t\t\t\tfont-size: 14px;\n\t\t\t\t\tline-height: 1.5;\n\t\t\t\t\t-webkit-font-smoothing: antialiased;\n\t\t\t\t\ttransition: background var(--transition-normal), color var(--transition-normal);\n\t\t\t\t}\n\t\t\t\tbutton, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }\n\t\t\t\tbutton {\n\t\t\t\t\tborder: 1px solid var(--border-strong);\n\t\t\t\t\tbackground: var(--bg-card);\n\t\t\t\t\tcolor: var(--text);\n\t\t\t\t\tborder-radius: var(--radius-sm);\n\t\t\t\t\tpadding: 0.42rem 0.8rem;\n\t\t\t\t\tfont-weight: 500;\n\t\t\t\t\tcursor: pointer;\n\t\t\t\t\ttransition: all var(--transition-fast);\n\t\t\t\t\tbox-shadow: var(--shadow-sm);\n\t\t\t\t}\n\t\t\t\tbutton:hover { background: var(--bg-alt); border-color: var(--muted); }\n\t\t\t\tbutton.primary { background: var(--accent); border-color: var(--accent); color: #fff; }\n\t\t\t\tbutton.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); transform: translateY(-0.5px); box-shadow: var(--shadow-md); }\n\t\t\t\tbutton:disabled { opacity: .5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }\n\t\t\t\t.link-button { border: 0; background: transparent; color: var(--accent); padding: .2rem .4rem; box-shadow: none; font-weight: 500; }\n\t\t\t\t.link-button:hover { background: var(--accent-light); color: var(--accent-hover); border-radius: 4px; }\n\t\t\t\t.icon-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--bg-card); border: 1px solid var(--border); }\n\t\t\t\t.icon-button:hover { color: var(--text); background: var(--bg-alt); border-color: var(--border-strong); }\n\t\t\t\t.toolbar-icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; }\n\t\t\t\t.client-icon { width: 20px; height: 20px; }\n\t\t\t\t.toolbar-count { font-weight: 700; color: var(--text); }\n\t\t\t\t.icon-button .toolbar-icon { width: 17px; height: 17px; }\n\t\t\t\t.topbar {\n\t\t\t\t\tposition: sticky;\n\t\t\t\t\ttop: 0;\n\t\t\t\t\tz-index: 100;\n\t\t\t\t\tdisplay: flex;\n\t\t\t\t\talign-items: center;\n\t\t\t\t\tgap: .75rem;\n\t\t\t\t\tpadding: .75rem 1.5rem;\n\t\t\t\t\tbackground: var(--glass-bg);\n\t\t\t\t\tbackdrop-filter: blur(8px);\n\t\t\t\t\t-webkit-backdrop-filter: blur(8px);\n\t\t\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\t\t\tbox-shadow: 0 1px 3px 0 rgba(0,0,0,0.02);\n\t\t\t\t\ttransition: background var(--transition-normal), border var(--transition-normal);\n\t\t\t\t}\n\t\t\t\t.brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 16px; margin-right: auto; color: var(--text); letter-spacing: -0.01em; }\n\t\t\t\t.brand-logo { height: 36px; width: auto; display: block; }\n\t\t\t\t.brand-pending { min-width: 1.45rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 .45rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1; }\n\t\t\t\t.pill { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); white-space: nowrap; }\n\t\t\t\t.toolbar-pill { height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: 0 .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-mute); font-size: 13px; line-height: 1; font-weight: 500; white-space: nowrap; box-shadow: var(--shadow-sm); transition: all var(--transition-fast); }\n\t\t\t\t.toolbar-pill:hover { border-color: var(--muted); background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.toolbar-button { cursor: pointer; }\n\t\t\t\t.topbar-popover, .topbar-menu { position: relative; }\n\t\t\t\t.topbar-menu { margin: 0; }\n\t\t\t\t.topbar-menu summary { list-style: none; user-select: none; }\n\t\t\t\t.topbar-menu summary::-webkit-details-marker { display: none; }\n\t\t\t\t.topbar-menu[open] > summary { background: var(--bg-alt); border-color: var(--muted); }\n\t\t\t\t.live-target { width: 32px; height: 32px; display: inline-grid; place-items: center; }\n\t\t\t\t.live-target:focus-visible { outline: 2px solid var(--faint); outline-offset: -2px; }\n\t\t\t\t.dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 999px; background: var(--ok); margin-right: .35rem; }\n\t\t\t\t.dot.toolbar-dot { width: .6rem; height: .6rem; margin: 0; }\n\t\t\t\t.dot.warn { background: #f59e0b; animation: pulse-warn 2s infinite; }\n\t\t\t\t.dot.off { background: var(--faint); }\n\t\t\t\t@keyframes pulse-warn {\n\t\t\t\t\t0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }\n\t\t\t\t\t70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }\n\t\t\t\t\t100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }\n\t\t\t\t}\n\t\t\t\t.topbar-tooltip { position: absolute; right: calc(100% + .5rem); top: 50%; transform: translateY(-50%); z-index: 30; display: none; width: max-content; max-width: min(18rem, calc(100vw - 2rem)); padding: .5rem .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-alt); color: var(--text); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.4; white-space: nowrap; }\n\t\t\t\t.topbar-popover:hover .topbar-tooltip, .topbar-popover:focus-within .topbar-tooltip { display: block; }\n\t\t\t\t.topbar-panel { position: absolute; right: 0; top: calc(100% + .5rem); z-index: 30; width: min(30rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); padding: .5rem; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-card); box-shadow: var(--shadow-lg); }\n\t\t\t\t.client-empty { padding: 1rem; color: var(--muted); text-align: center; }\n\t\t\t\t.client-row { padding: .75rem; border-bottom: 1px solid var(--border); }\n\t\t\t\t.client-row:last-child { border-bottom: 0; }\n\t\t\t\t.client-title { display: flex; align-items: center; gap: .5rem; min-width: 0; color: var(--text); font-weight: 600; }\n\t\t\t\t.client-title .dot { margin: 0; flex: 0 0 auto; }\n\t\t\t\t.client-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n\t\t\t\t.client-facts { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .25rem .75rem; margin-top: .5rem; font-size: 12px; color: var(--muted); }\n\t\t\t\t.client-facts .label { color: var(--faint); }\n\t\t\t\t.client-facts .value { overflow-wrap: anywhere; color: var(--text); }\n\t\t\t\t.lock-button.unlocked { color: var(--ok); border-color: var(--ok); }\n\t\t\t\t.lock-button.locked { color: var(--danger); border-color: var(--danger); }\n\t\t\t\t.lock-button.unavailable { color: var(--faint); border-color: var(--border); }\n\t\t\t\t.lock-button .toolbar-icon { width: 20px; height: 20px; stroke-width: 2; }\n\t\t\t\t.ok-text { color: var(--ok); }\n\t\t\t\t.danger-text { color: var(--danger); }\n\t\t\t\tmain { max-width: 1120px; margin: 1.5rem auto 4rem; padding: 0 1.5rem; }\n\t\t\t\t.message { min-height: 1.3rem; color: var(--danger); white-space: pre-wrap; margin-bottom: 1rem; font-weight: 500; }\n\t\t\t\t.secret-panel { display: none; max-width: 32rem; margin: 2rem auto 1rem; padding: 1.5rem; border: 1px solid var(--border-strong); background: var(--bg-card); border-radius: var(--radius); box-shadow: var(--shadow-lg); transition: all var(--transition-normal); }\n\t\t\t\t.secret-panel.open { display: block; }\n\t\t\t\t.secret-panel-card { display: grid; gap: 1rem; }\n\t\t\t\t.secret-panel-eyebrow { margin: 0; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-family: var(--font-mono); }\n\t\t\t\t.secret-panel h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }\n\t\t\t\t.secret-panel-subtitle { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; }\n\t\t\t\t.secret-panel form { display: grid; gap: .75rem; }\n\t\t\t\t.secret-panel label { font-weight: 600; color: var(--text); }\n\t\t\t\t.secret-panel input { width: 100%; min-width: 0; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: var(--radius-sm); padding: 0.62rem 0.75rem; transition: all var(--transition-fast); }\n\t\t\t\t.secret-panel input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }\n\t\t\t\t.secret-panel .primary { width: 100%; padding: 0.65rem 0.8rem; }\n\t\t\t\t.secret-panel-note { margin: .25rem 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }\n\t\t\t\t.backup-codes { display: none; margin: 1rem 0 0; padding: 1rem; border: 1px solid var(--border-strong); background: var(--bg-alt); border-radius: var(--radius-sm); }\n\t\t\t\t.backup-codes.open { display: block; }\n\t\t\t\t.backup-codes h3 { margin: 0 0 .5rem; font-size: 14px; font-weight: 600; color: var(--text); }\n\t\t\t\t.backup-codes p { margin: 0 0 .75rem; color: var(--muted); font-size: 13px; line-height: 1.4; }\n\t\t\t\t.backup-codes pre { background: var(--bg-card); border-color: var(--border); }\n\t\t\t\t.intent { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem 1.25rem 0; overflow: hidden; transition: border var(--transition-normal); position: relative; }\n\t\t\t\t.intent-head { display: block; margin-bottom: 1rem; }\n\t\t\t\t.intent-primary { display: flex; align-items: center; gap: .65rem; }\n\t\t\t\t.intent-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 0; color: var(--text); letter-spacing: -0.01em; }\n\t\t\t\t.intent-meta-row { display: flex; align-items: center; gap: .75rem; margin-top: .65rem; padding-left: 1.45rem; }\n\t\t\t\t.intent-meta { color: var(--muted); font-size: 13px; margin-right: auto; }\n\t\t\t\t.session-popover { position: relative; }\n\t\t\t\t.session-tooltip { position: absolute; right: 0; top: calc(100% + .5rem); z-index: 20; display: none; width: max-content; max-width: min(28rem, calc(100vw - 2rem)); padding: .75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-alt); color: var(--text); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.5; white-space: pre-line; }\n\t\t\t\t.session-popover:hover .session-tooltip, .session-popover:focus-within .session-tooltip { display: block; }\n\t\t\t\t.intent-menu { position: relative; margin: 0; }\n\t\t\t\t.intent-menu summary { list-style: none; outline: none; }\n\t\t\t\t.intent-menu summary::-webkit-details-marker { display: none; }\n\t\t\t\t.menu-panel { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 15; min-width: 11rem; padding: .35rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); box-shadow: var(--shadow-lg); }\n\t\t\t\t.menu-panel button { width: 100%; border: 0; text-align: left; background: transparent; padding: .5rem .75rem; box-shadow: none; font-weight: 500; font-size: 13px; }\n\t\t\t\t.menu-panel button:hover { background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.session-trigger { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--muted); cursor: pointer; transition: all var(--transition-fast); flex: 0 0 auto; }\n\t\t\t\t.session-trigger:hover { background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.combo-button { display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-card); transition: all var(--transition-fast); height: 28px; flex: 0 0 auto; }\n\t\t\t\t.combo-button:hover { border-color: var(--muted); }\n\t\t\t\t.combo-button > button { border: 0; background: transparent; font-size: 12.5px; font-weight: 500; color: var(--text); padding: 0 .65rem; cursor: pointer; border-radius: var(--radius-sm) 0 0 var(--radius-sm); line-height: 1; }\n\t\t\t\t.combo-button > button:hover { background: var(--bg-alt); }\n\t\t\t\t.combo-button details { display: flex; position: relative; }\n\t\t\t\t.combo-button details > summary { display: flex; align-items: center; justify-content: center; width: 26px; border-left: 1px solid var(--border); background: transparent; cursor: pointer; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--muted); font-size: 14px; font-weight: 700; line-height: 1; margin: 0; padding-bottom: 5px; }\n\t\t\t\t.combo-button details > summary:hover { background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.combo-button .menu-panel { top: calc(100% + .35rem); right: 0; }\n\t\t\t\t.package { margin: .75rem 0 1rem; padding: 1rem 1rem .35rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-alt); }\n\t\t\t\t.package-title { display: flex; align-items: center; gap: .55rem; font-weight: 600; padding-bottom: .55rem; border-bottom: 1px solid var(--border-strong); font-size: 14px; color: var(--text); }\n\t\t\t\t.count-badge { min-width: 1.35rem; height: 1.35rem; display: inline-grid; place-items: center; padding: 0 0.4rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; }\n\t\t\t\t.row { padding: .85rem 0; border-bottom: 1px solid var(--border); }\n\t\t\t\t.row:last-child { border-bottom: 0; padding-bottom: 0; }\n\t\t\t\t.row-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .8rem; align-items: center; }\n\t\t\t\t.tool-name { display: flex; align-items: center; gap: .45rem; font-weight: 600; white-space: nowrap; min-width: 0; color: var(--text); }\n\t\t\t\t.tool-name-text { overflow: hidden; text-overflow: ellipsis; }\n\t\t\t\t.tool-icon { width: 24px; height: 24px; object-fit: contain; flex: 0 0 24px; }\n\t\t\t\t.desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }\n\t\t\t\t.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; height: 32px; background: var(--bg-card); box-shadow: var(--shadow-sm); }\n\t\t\t\t.seg button { border: 0; border-right: 1px solid var(--border-strong); border-radius: 0; padding: 0 0.75rem; width: 5.5rem; font-size: 13px; box-shadow: none; font-weight: 500; background: transparent; color: var(--muted); transition: all var(--transition-fast); }\n\t\t\t\t.seg button:last-child { border-right: 0; }\n\t\t\t\t.seg button:hover { background: var(--bg-alt); color: var(--text); }\n\t\t\t\t.seg button.active { background: var(--ok); color: #fff; font-weight: 600; }\n\t\t\t\t.seg button.reject.active { background: var(--danger); color: #fff; }\n\t\t\t\t.sent { color: var(--muted); font-size: 13px; font-style: italic; }\n\t\t\t\t.summary { display: grid; grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr); gap: .25rem 1rem; margin-top: .65rem; font-size: 13px; }\n\t\t\t\t.summary .label { color: var(--muted); font-weight: 500; }\n\t\t\t\t.summary .value { overflow-wrap: anywhere; color: var(--text); font-family: var(--font-mono); font-size: 12px; background: var(--bg-alt); padding: 2px 6px; border-radius: 4px; width: fit-content; max-width: 100%; }\n\t\t\t\t.row details { margin-top: .65rem; border-top: 1px dashed var(--border); padding-top: .5rem; }\n\t\t\t\t.row details > summary { color: var(--accent); cursor: pointer; width: fit-content; list-style: none; font-weight: 500; display: flex; align-items: center; gap: .25rem; user-select: none; font-size: 13px; }\n\t\t\t\t.row details > summary::-webkit-details-marker { display: none; }\n\t\t\t\t.row details > summary::after { content: \"\"; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; display: inline-block; transition: transform var(--transition-fast) ease; }\n\t\t\t\t.row details[open] > summary::after { transform: rotate(180deg); }\n\t\t\t\t.topbar-menu > summary::after, .topbar-menu[open] > summary::after, .intent-menu > summary::after, .intent-menu[open] > summary::after { display: none; }\n\t\t\t\tpre { margin: .5rem 0 0; padding: .75rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; white-space: pre-wrap; font-family: var(--font-mono); font-size: 14px; line-height: 1.55; }\n\t\t\t\t.details-grid { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: .35rem 0.8rem; margin-top: .6rem; font-size: 13px; color: var(--muted); border-bottom: 1px dashed var(--border); padding-bottom: .6rem; }\n\t\t\t\t.details-grid .label { color: var(--faint); }\n\t\t\t\t.details-grid div:not(.label) { color: var(--text); }\n\t\t\t\t.footer { position: sticky; bottom: 0; display: flex; align-items: center; gap: .75rem; margin: .5rem -1.25rem 0; padding: .75rem 1.25rem; background: var(--glass-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-top: 1px solid var(--border); box-shadow: 0 -4px 12px -2px rgba(0, 0, 0, 0.03); transition: background var(--transition-normal), border var(--transition-normal); z-index: 10; }\n\t\t\t\t.footer .counts { margin-right: auto; color: var(--muted); font-size: 13px; font-weight: 500; }\n\t\t\t\t.empty { text-align: center; color: var(--muted); padding: 4rem 1rem; border: 2px dashed var(--border-strong); background: var(--bg-card); border-radius: var(--radius); }\n\t\t\t\t.empty h2 { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 0.5rem; }\n\t\t\t\t.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }\n\t\t\t\tdialog { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 1.5rem; max-width: 420px; width: calc(100% - 2rem); background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-lg); margin: auto; transition: opacity var(--transition-normal); }\n\t\t\t\tdialog h3 { font-size: 16px; font-weight: 600; margin-bottom: 0.5rem; }\n\t\t\t\tdialog label { font-size: 13px; font-weight: 500; color: var(--muted); }\n\t\t\t\tdialog textarea { width: 100%; min-height: 5rem; margin: 0.5rem 0; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: var(--radius-sm); padding: 0.5rem; font-family: inherit; }\n\t\t\t\tdialog textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }\n\t\t\t\tdialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(4px); }\n\t\t\t\t.dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 0.5rem; }\n\t\t\t\t@media (max-width: 700px) { .topbar { flex-wrap: wrap; padding: 0.75rem 1rem; } main { padding: 0 0.75rem; } .intent-meta-row { align-items: flex-start; flex-wrap: wrap; padding-left: 0; } .row-head { grid-template-columns: 1fr; } .desc { display: none; } .summary, .details-grid { grid-template-columns: 1fr; } .footer { flex-wrap: wrap; } }\n\t\t\t</style><script type=\"module\" src=\"/assets/datastar-v1.0.1.js\"></script></head><body data-signals=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(approvalConsoleInitialSignals(state))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 256, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 270, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -56,7 +56,7 @@ func ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) t
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(datastarFetchStateExpr())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 258, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 272, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -77,7 +77,7 @@ func ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) t
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(page.StatusText)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 262, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 276, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -132,7 +132,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 			templ_7745c5c3_Var5 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<header class=\"topbar\" id=\"approval-topbar\"><div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\">T</span> <span>Toolbox</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<header class=\"topbar\" id=\"approval-topbar\"><div class=\"brand\"><svg class=\"brand-logo\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 285 64\" role=\"img\" aria-label=\"include.tools toolbox\"><g transform=\"translate(4 8) scale(0.6)\"><rect x=\"14\" y=\"22\" width=\"52\" height=\"42\" rx=\"2\" fill=\"var(--signal)\"></rect> <path d=\"M26 28 V14 H54 V28\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"square\"></path> <line x1=\"14\" y1=\"34\" x2=\"66\" y2=\"34\" stroke=\"#0E1812\" stroke-width=\"2\"></line> <rect x=\"36\" y=\"38\" width=\"8\" height=\"5\" fill=\"currentColor\"></rect></g> <text x=\"60\" y=\"42\" font-family=\"var(--font-mono)\" font-size=\"28\" font-weight=\"500\" letter-spacing=\"-0.56\" fill=\"currentColor\">include<tspan opacity=\"0.55\">.</tspan>tools</text></svg> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -144,7 +144,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", state.Summary.PendingApprovals))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 278, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 299, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -162,7 +162,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(liveDotClassExpr())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 283, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 304, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -183,7 +183,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", state.Summary.ActiveClients))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 290, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 311, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -213,7 +213,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var9).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 1, Col: 0}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -226,7 +226,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(secretStoreIconLabel(state.SecretStore.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 296, Col: 135}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 317, Col: 135}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -239,7 +239,7 @@ func ApprovalTopbar(state approvalConsoleState) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(secretStoreIconLabel(state.SecretStore.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 296, Col: 192}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 317, Col: 192}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -311,7 +311,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(approvalClientTitle(client))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 314, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 335, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -329,7 +329,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(client.Host)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 318, Col: 67}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 339, Col: 67}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
@@ -348,7 +348,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(approvalClientParentLabel(client))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 321, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 342, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 					if templ_7745c5c3_Err != nil {
@@ -367,7 +367,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var17 string
 					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(client.Mode)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 324, Col: 67}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 345, Col: 67}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 					if templ_7745c5c3_Err != nil {
@@ -386,7 +386,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var18 string
 					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(client.BoundTBSession)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 327, Col: 80}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 348, Col: 80}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 					if templ_7745c5c3_Err != nil {
@@ -405,7 +405,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var19 string
 					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(client.WorkingDir)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 330, Col: 78}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 351, Col: 78}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 					if templ_7745c5c3_Err != nil {
@@ -423,7 +423,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d pending", client.PendingApprovals))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 332, Col: 110}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 353, Col: 110}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -436,7 +436,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d prepared", client.PreparedTools))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 333, Col: 104}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 354, Col: 104}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -454,7 +454,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var22 string
 					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(client.LastSyncAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 335, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 356, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 					if templ_7745c5c3_Err != nil {
@@ -473,7 +473,7 @@ func ClientPopover(state approvalConsoleState) templ.Component {
 					var templ_7745c5c3_Var23 string
 					templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(client.ConnectedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 338, Col: 92}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 359, Col: 92}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 					if templ_7745c5c3_Err != nil {
@@ -515,7 +515,7 @@ func IconClients() templ.Component {
 			templ_7745c5c3_Var24 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<svg class=\"toolbar-icon client-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"5\" width=\"16\" height=\"14\" rx=\"2\"></rect> <path d=\"M4 8h16\"></path> <rect x=\"8\" y=\"10.5\" width=\"8\" height=\"5.5\" rx=\"1.5\"></rect> <path d=\"M12 10.5V9\"></path> <circle cx=\"10.3\" cy=\"13.2\" r=\".35\"></circle> <circle cx=\"13.7\" cy=\"13.2\" r=\".35\"></circle> <path d=\"M10.5 15h3\"></path></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<svg class=\"toolbar-icon client-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><polyline points=\"4 7 9 12 4 17\"></polyline><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"></line></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -549,17 +549,17 @@ func IconLock(status string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if secretIconStatus(status) == "unlocked" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<path d=\"M7 10V7a5 5 0 0 1 9.8-1.4\"></path> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<path d=\"M8 11V7a4 4 0 0 1 7.8-1.2\"></path> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<path d=\"M7 10V7a5 5 0 0 1 10 0v3\"></path> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<path d=\"M8 11V7a4 4 0 0 1 8 0v4\"></path> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<rect x=\"4\" y=\"10\" width=\"16\" height=\"10\" rx=\"2\"></rect> <path d=\"M12 14v2\"></path></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"1\"></rect></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -600,7 +600,7 @@ func SecretPanel(page daemonIndexPageData) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var27).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 1, Col: 0}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -613,7 +613,7 @@ func SecretPanel(page daemonIndexPageData) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(secretPanelClassExpr(page))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 371, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 385, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -758,7 +758,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(approvalSessionID(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 448, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 462, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
@@ -771,7 +771,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(session.TBSession)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 448, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 462, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
@@ -799,33 +799,33 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(session.Intent.Text)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 456, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 470, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\"</div><div class=\"session-popover\"><button type=\"button\" class=\"icon-button\" aria-label=\"Session details\" aria-describedby=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\"</div><div class=\"session-popover\"><button type=\"button\" class=\"session-trigger\" aria-label=\"Session details\" aria-describedby=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(approvalSessionTooltipID(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 458, Col: 128}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 472, Col: 132}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\">i</button><div class=\"session-tooltip\" id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 80 80\" width=\"16\" height=\"16\" role=\"img\" aria-hidden=\"true\"><rect x=\"14\" y=\"22\" width=\"52\" height=\"42\" rx=\"2\" fill=\"var(--signal)\"></rect> <path d=\"M26 28 V14 H54 V28\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"4\" stroke-linecap=\"square\"></path> <line x1=\"14\" y1=\"34\" x2=\"66\" y2=\"34\" stroke=\"var(--bg-card)\" stroke-width=\"3\"></line> <rect x=\"36\" y=\"38\" width=\"8\" height=\"5\" fill=\"currentColor\"></rect></svg></button><div class=\"session-tooltip\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(approvalSessionTooltipID(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 459, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 480, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 		if templ_7745c5c3_Err != nil {
@@ -843,7 +843,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(session.TBSession)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 461, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 482, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -856,7 +856,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(firstNonEmpty(session.Details.Mode, "codemode"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 461, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 482, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -869,7 +869,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", session.Details.PID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 461, Col: 139}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 482, Col: 139}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -882,7 +882,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(session.Details.WorkingDir)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 461, Col: 174}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 482, Col: 174}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -895,7 +895,7 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(session.Details.LastSyncAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 461, Col: 229}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 482, Col: 229}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -909,79 +909,79 @@ func ApprovalSession(session approvalConsoleSession) templ.Component {
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(session.Details.LastSyncAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 463, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 484, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</div></div></div><div class=\"intent-meta-row\"><div class=\"intent-meta\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</div></div><div class=\"combo-button\"><button type=\"button\" data-on:click=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var43 string
-		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d pending", countConsoleSessionCalls(session)))
+		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(setSessionDraftsExpr(session, "approve"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 469, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 489, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " &middot; Updated ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "\">Mark all approved</button> <details class=\"intent-menu\" data-preserve-attr=\"open\"><summary aria-label=\"More actions\" title=\"More actions\">...</summary><div class=\"menu-panel\"><button type=\"button\" data-on:click=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var44 string
-		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(session.UpdatedAt))
+		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(submitAllSessionExpr(session, "approve"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 469, Col: 143}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 493, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "</div><button type=\"button\" class=\"link-button\" data-on:click=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "\">Approve all</button> <button type=\"button\" data-on:click=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(setSessionDraftsExpr(session, "approve"))
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(openRejectAllSessionExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 470, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 494, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "\">Mark all approved</button> <details class=\"intent-menu\" data-preserve-attr=\"open\"><summary class=\"icon-button\" aria-label=\"More actions\" title=\"More actions\">...</summary><div class=\"menu-panel\"><button type=\"button\" data-on:click=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "\">Reject all</button></div></details></div></div><div class=\"intent-meta-row\"><div class=\"intent-meta\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var46 string
-		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(submitAllSessionExpr(session, "approve"))
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d pending", countConsoleSessionCalls(session)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 474, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 500, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "\">Approve all</button> <button type=\"button\" data-on:click=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, " &middot; Updated ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var47 string
-		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(openRejectAllSessionExpr(session))
+		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(session.UpdatedAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 475, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 500, Col: 143}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "\">Reject all</button></div></details></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "</div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1031,7 +1031,7 @@ func ApprovalPackage(session approvalConsoleSession, group approvalConsolePackag
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(approvalPackageID(session, group))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 488, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 511, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 		if templ_7745c5c3_Err != nil {
@@ -1044,7 +1044,7 @@ func ApprovalPackage(session approvalConsoleSession, group approvalConsolePackag
 		var templ_7745c5c3_Var50 string
 		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(firstNonEmpty(group.PackageLabel, group.PackageKey))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 490, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 513, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 		if templ_7745c5c3_Err != nil {
@@ -1057,7 +1057,7 @@ func ApprovalPackage(session approvalConsoleSession, group approvalConsolePackag
 		var templ_7745c5c3_Var51 string
 		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(group.ToolCalls)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 491, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 514, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 		if templ_7745c5c3_Err != nil {
@@ -1109,7 +1109,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var53 string
 		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(approvalRowID(call.ToolCallID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 500, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 523, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 		if templ_7745c5c3_Err != nil {
@@ -1122,7 +1122,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(call.ToolCallID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 500, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 523, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 		if templ_7745c5c3_Err != nil {
@@ -1140,7 +1140,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var55 string
 			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(iconURI)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 504, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 527, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 			if templ_7745c5c3_Err != nil {
@@ -1153,7 +1153,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var56 string
 			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(approvalDisplayIconAlt(call))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 504, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 527, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
@@ -1171,7 +1171,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(approvalDisplayTitle(call))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 506, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 529, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 		if templ_7745c5c3_Err != nil {
@@ -1184,7 +1184,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(approvalDisplayDescription(call))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 508, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 531, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 		if templ_7745c5c3_Err != nil {
@@ -1207,7 +1207,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(decisionToggleExpr(call.ToolCallID, "reject"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 513, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 536, Col: 103}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 			if templ_7745c5c3_Err != nil {
@@ -1220,7 +1220,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var60 string
 			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(decisionClassExpr(call.ToolCallID, "reject"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 513, Col: 163}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 536, Col: 163}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 			if templ_7745c5c3_Err != nil {
@@ -1233,7 +1233,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var61 string
 			templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(decisionToggleExpr(call.ToolCallID, "approve"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 514, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 537, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 			if templ_7745c5c3_Err != nil {
@@ -1246,7 +1246,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var62 string
 			templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(decisionClassExpr(call.ToolCallID, "approve"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 514, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 537, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 			if templ_7745c5c3_Err != nil {
@@ -1269,7 +1269,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 			var templ_7745c5c3_Var63 string
 			templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(call.ParamsInspect)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 520, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 543, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 			if templ_7745c5c3_Err != nil {
@@ -1288,7 +1288,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 				var templ_7745c5c3_Var64 string
 				templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(field[0])
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 523, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 546, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 				if templ_7745c5c3_Err != nil {
@@ -1301,7 +1301,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 				var templ_7745c5c3_Var65 string
 				templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(field[1])
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 523, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 546, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 				if templ_7745c5c3_Err != nil {
@@ -1320,7 +1320,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var66 string
 		templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(approvalDetailsID(call.ToolCallID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 527, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 550, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 		if templ_7745c5c3_Err != nil {
@@ -1333,7 +1333,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var67 string
 		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinStringErrs(firstNonEmpty(call.FullToolName, call.ToolName))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 530, Col: 92}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 553, Col: 92}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 		if templ_7745c5c3_Err != nil {
@@ -1346,7 +1346,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var68 string
 		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(call.ToolCallID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 531, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 554, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 		if templ_7745c5c3_Err != nil {
@@ -1359,7 +1359,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(call.CellID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 532, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 555, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 		if templ_7745c5c3_Err != nil {
@@ -1372,7 +1372,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(displayTime(call.CreatedAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 533, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 556, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 		if templ_7745c5c3_Err != nil {
@@ -1385,7 +1385,7 @@ func ApprovalRow(call daemon.PendingApprovalSnapshot) templ.Component {
 		var templ_7745c5c3_Var71 string
 		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(call.ParamsInspect)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 536, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 559, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 		if templ_7745c5c3_Err != nil {
@@ -1427,7 +1427,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var73 string
 		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(sessionDecisionCountExpr(session, "approve"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 544, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 567, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 		if templ_7745c5c3_Err != nil {
@@ -1440,7 +1440,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var74 string
 		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs(sessionDecisionCountExpr(session, "reject"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 545, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 568, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 		if templ_7745c5c3_Err != nil {
@@ -1453,7 +1453,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var75 string
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(sessionUnchangedCountExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 546, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 569, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 		if templ_7745c5c3_Err != nil {
@@ -1466,7 +1466,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var76 string
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", countConsoleSessionCalls(session)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 546, Col: 112}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 569, Col: 112}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 		if templ_7745c5c3_Err != nil {
@@ -1479,7 +1479,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(clearSessionDraftsExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 548, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 571, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 		if templ_7745c5c3_Err != nil {
@@ -1492,7 +1492,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var78 string
 		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(submitSessionExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 549, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 572, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 		if templ_7745c5c3_Err != nil {
@@ -1505,7 +1505,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var79 string
 		templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(sessionSubmitDisabledExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 549, Col: 140}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 572, Col: 140}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 		if templ_7745c5c3_Err != nil {
@@ -1518,7 +1518,7 @@ func ApprovalFooter(session approvalConsoleSession) templ.Component {
 		var templ_7745c5c3_Var80 string
 		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(sessionSubmitLabelExpr(session))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 549, Col: 186}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 572, Col: 186}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 		if templ_7745c5c3_Err != nil {
@@ -1560,7 +1560,7 @@ func RejectDialog() templ.Component {
 		var templ_7745c5c3_Var82 string
 		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(rejectDialogTitleExpr())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 555, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 578, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 		if templ_7745c5c3_Err != nil {
@@ -1573,7 +1573,7 @@ func RejectDialog() templ.Component {
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(cancelRejectDialogExpr())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 559, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 582, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 		if templ_7745c5c3_Err != nil {
@@ -1586,7 +1586,7 @@ func RejectDialog() templ.Component {
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(submitRejectDialogExpr())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `approval_console.templ`, Line: 560, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `cmd/toolbox/approval_console.templ`, Line: 583, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 		if templ_7745c5c3_Err != nil {

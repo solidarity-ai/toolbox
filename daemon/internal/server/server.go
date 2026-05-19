@@ -113,14 +113,21 @@ func (s *Server) GenerateSecretStoreRecoveryCodes(ctx context.Context, unlockKey
 	if s == nil || s.secretService == nil {
 		return nil, nil
 	}
-	return s.secretService.RecoveryCodes(ctx, unlockKey)
+	return s.secretService.GenerateRecoveryCodes(ctx, unlockKey)
 }
 
 func (s *Server) SecretStoreRecoveryUnlocked(ctx context.Context) (bool, error) {
 	if s == nil || s.secretService == nil {
 		return false, nil
 	}
-	return s.secretService.RecoveryUnlocked(ctx)
+	return s.secretService.RecoveryUnlockedStore(ctx)
+}
+
+func (s *Server) RewrapSecretStoreAfterRecovery(ctx context.Context, unlockKey string) error {
+	if s == nil || s.secretService == nil {
+		return nil
+	}
+	return s.secretService.RewrapStoreAfterRecovery(ctx, unlockKey)
 }
 
 func (s *Server) LockSecretStore(ctx context.Context) error {

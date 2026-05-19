@@ -12,6 +12,85 @@ import (
 )
 
 var _ secrets.ManagedSecretStore = (*SecretStore)(nil)
+var _ secrets.LifecycleSecretStore = (*SecretStore)(nil)
+
+func (s *SecretStore) Initialized() (bool, error) {
+	var initialized bool
+	err := s.withSecretStore(context.Background(), func(service daemonv1connect.SecretStoreServiceClient) error {
+		resp, err := service.Initialized(context.Background(), connect.NewRequest(&daemonv1.SecretInitializedRequest{}))
+		if err != nil {
+			return mapSecretStoreError(err)
+		}
+		initialized = resp.Msg.GetInitialized()
+		return nil
+	})
+	return initialized, err
+}
+
+func (s *SecretStore) Setup(ctx context.Context, unlockKey string) ([]string, error) {
+	var codes []string
+	err := s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
+		var err error
+		codes, err = s.setupWithService(ctx, service, unlockKey)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+func (s *SecretStore) BackupCodes(ctx context.Context, unlockKey string) ([]string, error) {
+	var codes []string
+	err := s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
+		resp, err := service.BackupCodes(ctx, connect.NewRequest(&daemonv1.SecretBackupCodesRequest{UnlockKey: unlockKey}))
+		if err != nil {
+			return mapSecretStoreError(err)
+		}
+		codes = append([]string(nil), resp.Msg.GetBackupCodes()...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+func (s *SecretStore) RecoveryCodes(ctx context.Context) ([]string, error) {
+	var codes []string
+	err := s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
+		resp, err := service.RecoveryCodes(ctx, connect.NewRequest(&daemonv1.SecretRecoveryCodesRequest{}))
+		if err != nil {
+			return mapSecretStoreError(err)
+		}
+		codes = append([]string(nil), resp.Msg.GetRecoveryCodes()...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+func (s *SecretStore) RecoveryUnlocked(ctx context.Context) (bool, error) {
+	var unlocked bool
+	err := s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
+		resp, err := service.RecoveryUnlocked(ctx, connect.NewRequest(&daemonv1.SecretRecoveryUnlockedRequest{}))
+		if err != nil {
+			return mapSecretStoreError(err)
+		}
+		unlocked = resp.Msg.GetRecoveryUnlocked()
+		return nil
+	})
+	return unlocked, err
+}
+
+func (s *SecretStore) RewrapAfterRecovery(ctx context.Context, newUnlockKey string) error {
+	return s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
+		_, err := service.RewrapAfterRecovery(ctx, connect.NewRequest(&daemonv1.SecretRewrapAfterRecoveryRequest{UnlockKey: newUnlockKey}))
+		return mapSecretStoreError(err)
+	})
+}
 
 func (s *SecretStore) Unlock(ctx context.Context, unlockKey string) error {
 	return s.withSecretStore(ctx, func(service daemonv1connect.SecretStoreServiceClient) error {
@@ -153,6 +232,15 @@ func mapSecretStoreError(err error) error {
 		msg := connectErr.Message()
 		if strings.Contains(msg, secrets.ErrNotInitialized.Error()) {
 			return secrets.ErrNotInitialized
+		}
+		if strings.Contains(msg, secrets.ErrRecoveryRequired.Error()) {
+			return secrets.ErrRecoveryRequired
+		}
+		if strings.Contains(msg, secrets.ErrRecoveryWindowExpired.Error()) {
+			return secrets.ErrRecoveryWindowExpired
+		}
+		if strings.Contains(msg, secrets.ErrLocked.Error()) {
+			return secrets.ErrLocked
 		}
 		return secrets.ErrLocked
 	case connect.CodeCanceled:

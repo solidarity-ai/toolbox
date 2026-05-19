@@ -508,6 +508,9 @@ func resolveIdentityPath(identityPath string) string {
 }
 
 func defaultStorePath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "toolbox", "secrets")
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		configDir = filepath.Join(os.Getenv("HOME"), ".config")
@@ -516,6 +519,9 @@ func defaultStorePath() string {
 }
 
 func defaultWrappedIdentityPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "toolbox", "keys.txt.age")
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		configDir = filepath.Join(os.Getenv("HOME"), ".config")

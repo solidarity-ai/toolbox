@@ -1674,6 +1674,657 @@ func TestDeleteCredentialWithRepoRemovesOAuth2SharedAndAccountSecrets(t *testing
 	}
 }
 
+func TestRunAuthCommandLocalStatusRequiresExplicitLocal(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{"--no-daemon", "--secret-key", "test-secret-key", "auth", "status", fixture}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous_target") || !strings.Contains(err.Error(), "--local") {
+		t.Fatalf("runWithIO(auth status local path) error = %v, want explicit --local ambiguity", err)
+	}
+}
+
+func TestRunAuthCommandLocalSecretSetFromEnvDoesNotPrintSecret(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "set", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runWithIO(auth secret set --from-env) error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "super-secret-api-key") || strings.Contains(stderr.String(), "super-secret-api-key") {
+		t.Fatalf("secret value leaked: stdout=%q stderr=%q", out, stderr.String())
+	}
+	if !strings.Contains(out, "Configuring static secret in local package auth-test") {
+		t.Fatalf("stdout = %q, want explicit local context", out)
+	}
+	if !strings.Contains(out, "Authorized test_api (api_key)") {
+		t.Fatalf("stdout = %q, want authorization confirmation", out)
+	}
+}
+
+func TestRunAuthCommandStaticSecretStatusRotateAndClear(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "initial-secret")
+	t.Setenv("TEST_API_KEY_ROTATED", "rotated-secret")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	for _, args := range [][]string{
+		{"auth", "secret", "set", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY", fixture},
+		{"auth", "secret", "rotate", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY_ROTATED", fixture},
+	} {
+		stdout.Reset()
+		fullArgs := append([]string{"--no-daemon", "--secret-key", "test-secret-key"}, args...)
+		if err := runWithIO(fullArgs, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("runWithIO(%v) error: %v\nstdout=%s", fullArgs, err, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "status", "--local", "--json", "--credential", "test_api", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth secret status --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(secret status): %v: %s", err, stdout.String())
+	}
+	if status.State != "configured" || len(status.Credentials) != 1 || status.Credentials[0].Accounts[0].Secrets[0].State != "configured" {
+		t.Fatalf("secret status = %#v, want configured", status)
+	}
+	if strings.Contains(stdout.String(), "initial-secret") || strings.Contains(stdout.String(), "rotated-secret") {
+		t.Fatalf("secret status leaked secret value: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "clear", "--local", "--credential", "test_api", "--yes", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth secret clear --yes error: %v\nstdout=%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "1 secrets removed") {
+		t.Fatalf("stdout = %q, want clear confirmation", stdout.String())
+	}
+}
+
+func TestRunAuthCommandStatusJSONReportsMissingCredentials(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "status", "--local", "--json", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runWithIO(auth status --json) error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", stdout.String(), err)
+	}
+	if status.State != "missing_credentials" || status.TargetClass != "local" {
+		t.Fatalf("status = %#v, want missing_credentials/local", status)
+	}
+	if len(status.Credentials) != 2 {
+		t.Fatalf("credentials = %#v, want two credentials", status.Credentials)
+	}
+}
+
+func TestRunAuthCommandInstalledTargetResolutionReportsOverrideContext(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test"))
+	if err != nil {
+		t.Fatalf("Abs(auth-test fixture): %v", err)
+	}
+	dir := t.TempDir()
+	toolsetPath := filepath.Join(dir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]any{"fixtures.local/auth-test": "v0.0.0"},
+		"tools":    []map[string]any{},
+	})
+	writeJSONFile(t, filepath.Join(dir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]any{"fixtures.local/auth-test": fixture},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	err = runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "status", "--toolset", toolsetPath, "--json", "auth-test",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("auth status installed target error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", stdout.String(), err)
+	}
+	if status.Package != "auth-test" || status.TargetClass != "override" || status.Source != fixture {
+		t.Fatalf("status = %#v, want installed package resolved through override source", status)
+	}
+}
+
+func TestRunAuthCommandInstalledTargetResolutionAcceptsModulePath(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test"))
+	if err != nil {
+		t.Fatalf("Abs(auth-test fixture): %v", err)
+	}
+	dir := t.TempDir()
+	toolsetPath := filepath.Join(dir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]any{"fixtures.local/auth-test": "v0.0.0"},
+		"tools":    []map[string]any{},
+	})
+	writeJSONFile(t, filepath.Join(dir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]any{"fixtures.local/auth-test": fixture},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	err = runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "status", "--toolset", toolsetPath, "--json", "fixtures.local/auth-test",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("auth status module target error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", stdout.String(), err)
+	}
+	if status.Package != "auth-test" || status.Module != "fixtures.local/auth-test" || status.TargetClass != "override" {
+		t.Fatalf("status = %#v, want installed package resolved by module path", status)
+	}
+}
+
+func TestRunAuthCommandListReportsOverrideSource(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test"))
+	if err != nil {
+		t.Fatalf("Abs(auth-test fixture): %v", err)
+	}
+	dir := t.TempDir()
+	toolsetPath := filepath.Join(dir, "toolbox.toolset.json")
+	writeJSONFile(t, toolsetPath, map[string]any{
+		"packages": map[string]any{"fixtures.local/auth-test": "v0.0.0"},
+		"tools":    []map[string]any{},
+	})
+	writeJSONFile(t, filepath.Join(dir, "toolbox.toolset.local.json"), map[string]any{
+		"replace": map[string]any{"fixtures.local/auth-test": fixture},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "list", "--toolset", toolsetPath, "--json",
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth list --json error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var statuses []authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &statuses); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", stdout.String(), err)
+	}
+	if len(statuses) != 1 || statuses[0].Package != "auth-test" || statuses[0].TargetClass != "override" || statuses[0].Source != fixture {
+		t.Fatalf("statuses = %#v, want auth-test override with source", statuses)
+	}
+}
+
+func TestRunAuthCommandStatusJSONAppliesCredentialAndAccountFilters(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	for _, account := range []string{"work", "personal"} {
+		stdout.Reset()
+		if err := runWithIO([]string{
+			"--no-daemon", "--secret-key", "test-secret-key",
+			"auth", "secret", "set", "--local", "--credential", "test_api", "--account", account, "--from-env", "TEST_API_KEY", fixture,
+		}, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("auth secret set account %s error: %v\nstdout=%s", account, err, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "status", "--local", "--json", "--credential", "test_api", "--account", "work", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth status filtered --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(status): %v: %s", err, stdout.String())
+	}
+	if len(status.Credentials) != 1 || status.Credentials[0].Name != "test_api" {
+		t.Fatalf("credentials = %#v, want only test_api", status.Credentials)
+	}
+	if len(status.Credentials[0].Accounts) != 1 || status.Credentials[0].Accounts[0].Account != "work" {
+		t.Fatalf("accounts = %#v, want only work", status.Credentials[0].Accounts)
+	}
+}
+
+func TestRunAuthCommandUninitializedStoreIsActionable(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "set", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "secret_store_uninitialized") || !strings.Contains(err.Error(), "toolbox auth setup") {
+		t.Fatalf("runWithIO(auth secret set uninitialized) error = %v, want setup-required state", err)
+	}
+}
+
+func TestRunAuthCommandLockedStoreIsActionable(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	if err := runWithIO([]string{"--no-daemon", "auth", "lock", "--json"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth lock --json error: %v", err)
+	}
+	stdout.Reset()
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{
+		"--no-daemon",
+		"auth", "secret", "set", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "secret_store_locked") || !strings.Contains(err.Error(), "toolbox auth unlock") {
+		t.Fatalf("runWithIO(auth secret set locked) error = %v, want unlock-required state", err)
+	}
+}
+
+func TestRunAuthCommandOAuth2ConfigureStatusAndNonInteractiveLogin(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+
+	stdout.Reset()
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "login", "--local", "--credential", "test_oauth", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "missing_credentials") || !strings.Contains(err.Error(), "oauth2 configure") {
+		t.Fatalf("auth oauth2 login without client config error = %v, want deterministic configure guidance", err)
+	}
+
+	stdout.Reset()
+	err = runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "configure", "--local", "--credential", "test_oauth", "--stdin", fixture,
+	}, strings.NewReader("client-id\n\n"), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("auth oauth2 configure --stdin error: %v\nstdout=%s", err, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "client-id") {
+		t.Fatalf("oauth2 configure leaked client id: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	err = runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "status", "--local", "--json", "--credential", "test_oauth", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("auth oauth2 status --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(oauth2 status): %v: %s", err, stdout.String())
+	}
+	if len(status.Credentials) != 1 || status.Credentials[0].Shared[0].State != "configured" || status.Credentials[0].State != "missing_credentials" {
+		t.Fatalf("oauth2 status = %#v, want configured client and missing token", status)
+	}
+}
+
+func TestRunAuthCommandAccountsAndOAuth2Logout(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	stdout.Reset()
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "configure", "--local", "--credential", "test_oauth", "--stdin", fixture,
+	}, strings.NewReader("client-id\n\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth oauth2 configure --stdin error: %v\nstdout=%s", err, stdout.String())
+	}
+
+	repo := newCredentialRepository(secretStoreOptions{NoDaemon: true, SecretKey: "test-secret-key"})
+	loaded, err := packaging.LoadDev(fixture)
+	if err != nil {
+		t.Fatalf("LoadDev(%s): %v", fixture, err)
+	}
+	if err := repo.Set(context.Background(), credentialrepo.OAuth2RefreshTokenRef(loaded.Package, "test_oauth", "work"), []byte("refresh-token")); err != nil {
+		t.Fatalf("Set(refresh token): %v", err)
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "accounts", "--local", "--json", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth accounts --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	var accounts map[string][]string
+	if err := json.Unmarshal(stdout.Bytes(), &accounts); err != nil {
+		t.Fatalf("json.Unmarshal(accounts): %v: %s", err, stdout.String())
+	}
+	if got := strings.Join(accounts["test_oauth"], ","); got != "work" {
+		t.Fatalf("accounts[test_oauth] = %q, want work", got)
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "logout", "--local", "--credential", "test_oauth", "--account", "work", "--yes", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth oauth2 logout --yes error: %v\nstdout=%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "OAuth2 client configuration was left intact") {
+		t.Fatalf("stdout = %q, want client configuration retained message", stdout.String())
+	}
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "accounts", "--local", "--json", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth accounts after logout --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	accounts = nil
+	if err := json.Unmarshal(stdout.Bytes(), &accounts); err != nil {
+		t.Fatalf("json.Unmarshal(accounts after logout): %v: %s", err, stdout.String())
+	}
+	if got := strings.Join(accounts["test_oauth"], ","); got != "" {
+		t.Fatalf("accounts[test_oauth] after logout = %q, want no token account", got)
+	}
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "oauth2", "status", "--local", "--json", "--credential", "test_oauth", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth oauth2 status after logout --json error: %v\nstdout=%s", err, stdout.String())
+	}
+	var status authPackageStatus
+	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(status after logout): %v: %s", err, stdout.String())
+	}
+	if len(status.Credentials) != 1 || status.Credentials[0].Shared[0].State != "configured" || status.Credentials[0].State != "missing_credentials" {
+		t.Fatalf("oauth2 status after logout = %#v, want client config retained and token missing", status)
+	}
+}
+
+func TestRunAuthCommandAccountsJSONAppliesCredentialFilter(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	loaded, err := packaging.LoadDev(fixture)
+	if err != nil {
+		t.Fatalf("LoadDev(%s): %v", fixture, err)
+	}
+	repo := newCredentialRepository(secretStoreOptions{NoDaemon: true, SecretKey: "test-secret-key"})
+	if err := repo.Set(context.Background(), credentialrepo.APIKeyRef(loaded.Package, "test_api", "default"), []byte("api-key")); err != nil {
+		t.Fatalf("Set(api key): %v", err)
+	}
+	if err := repo.Set(context.Background(), credentialrepo.OAuth2RefreshTokenRef(loaded.Package, "test_oauth", "work"), []byte("refresh-token")); err != nil {
+		t.Fatalf("Set(refresh token): %v", err)
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "accounts", "--local", "--json", "--credential", "test_oauth", fixture,
+	}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth accounts --json --credential error: %v\nstdout=%s", err, stdout.String())
+	}
+	var accounts map[string][]string
+	if err := json.Unmarshal(stdout.Bytes(), &accounts); err != nil {
+		t.Fatalf("json.Unmarshal(accounts): %v: %s", err, stdout.String())
+	}
+	if len(accounts) != 1 || strings.Join(accounts["test_oauth"], ",") != "work" {
+		t.Fatalf("accounts = %#v, want only test_oauth/work", accounts)
+	}
+}
+
+func TestRunAuthCommandUnsupportedRefreshAndValidateStates(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runWithIO([]string{
+		"--no-daemon",
+		"auth", "oauth2", "refresh", "--local", "--credential", "test_oauth",
+		filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test"),
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unsupported_auth_type") || !strings.Contains(err.Error(), "login") {
+		t.Fatalf("auth oauth2 refresh error = %v, want deterministic unsupported state", err)
+	}
+
+	stdout.Reset()
+	err = runWithIO([]string{
+		"--no-daemon",
+		"auth", "secret", "validate", "--local", "--credential", "test_api",
+		filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test"),
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unsupported_auth_type") || !strings.Contains(err.Error(), "secret status") {
+		t.Fatalf("auth secret validate error = %v, want deterministic unsupported state", err)
+	}
+}
+
+func TestRunAuthCommandAmbiguousAccount(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	for _, account := range []string{"one", "two"} {
+		stdout.Reset()
+		if err := runWithIO([]string{
+			"--no-daemon", "--secret-key", "test-secret-key",
+			"auth", "secret", "set", "--local", "--credential", "test_api", "--account", account, "--from-env", "TEST_API_KEY", fixture,
+		}, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("auth secret set account %s error: %v", account, err)
+		}
+	}
+	stdout.Reset()
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "clear", "--local", "--credential", "test_api", "--yes", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous_account") || !strings.Contains(err.Error(), "--account") {
+		t.Fatalf("auth secret clear ambiguous account error = %v, want ambiguous_account", err)
+	}
+}
+
+func TestRunAuthCommandSecretSetRequiresAccountWhenMultipleAccountsExist(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TEST_API_KEY", "super-secret-api-key")
+	t.Setenv("TEST_API_KEY_NEW", "new-secret-api-key")
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("test-secret-key\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v", err)
+	}
+	fixture := filepath.Join("..", "..", "testutil", "fixtures", "toolbox.pkgs", "auth-test")
+	for _, account := range []string{"one", "two"} {
+		stdout.Reset()
+		if err := runWithIO([]string{
+			"--no-daemon", "--secret-key", "test-secret-key",
+			"auth", "secret", "set", "--local", "--credential", "test_api", "--account", account, "--from-env", "TEST_API_KEY", fixture,
+		}, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("auth secret set account %s error: %v", account, err)
+		}
+	}
+
+	stdout.Reset()
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "set", "--local", "--credential", "test_api", "--from-env", "TEST_API_KEY_NEW", fixture,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous_account") || !strings.Contains(err.Error(), "--account") {
+		t.Fatalf("auth secret set ambiguous account error = %v, want ambiguous_account", err)
+	}
+}
+
+func TestRunAuthCommandAmbiguousStaticCredential(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	dir := t.TempDir()
+	manifest := map[string]any{
+		"module":  "fixtures.local/multi-secret",
+		"name":    "multi-secret",
+		"runtime": "typescript-sandbox",
+		"credentials": []map[string]any{
+			{"name": "one", "type": "api_key", "inject": map[string]any{"hosts": []string{"example.com"}, "method": "api_key_header"}},
+			{"name": "two", "type": "bearer", "inject": map[string]any{"hosts": []string{"example.org"}, "method": "bearer_header"}},
+		},
+		"tools": []map[string]any{},
+	}
+	writeJSONFile(t, filepath.Join(dir, packaging.DevManifestFilename), manifest)
+
+	var stdout, stderr bytes.Buffer
+	err := runWithIO([]string{
+		"--no-daemon", "--secret-key", "test-secret-key",
+		"auth", "secret", "set", "--local", dir,
+	}, strings.NewReader("secret\n"), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous_credential") || !strings.Contains(err.Error(), "--credential") {
+		t.Fatalf("runWithIO(auth secret set ambiguous) error = %v, want ambiguous_credential", err)
+	}
+}
+
+func TestRunAuthCommandSecretStoreSetupUnlockAndLockJSON(t *testing.T) {
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if err := runWithIO([]string{"--no-daemon", "auth", "setup", "--json"}, strings.NewReader("hunter2\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth setup --json error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var setup authCommandResult
+	if err := json.Unmarshal(stdout.Bytes(), &setup); err != nil {
+		t.Fatalf("json.Unmarshal(setup): %v: %s", err, stdout.String())
+	}
+	if setup.State != "configured" || len(setup.Codes) == 0 {
+		t.Fatalf("setup result = %#v, want configured with recovery codes", setup)
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{"--no-daemon", "auth", "lock", "--json"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("auth lock --json error: %v", err)
+	}
+	var locked authCommandResult
+	if err := json.Unmarshal(stdout.Bytes(), &locked); err != nil {
+		t.Fatalf("json.Unmarshal(lock): %v: %s", err, stdout.String())
+	}
+	if locked.State != "secret_store_locked" {
+		t.Fatalf("lock result = %#v, want secret_store_locked", locked)
+	}
+
+	stdout.Reset()
+	if err := runWithIO([]string{"--no-daemon", "auth", "unlock", "--json"}, strings.NewReader("hunter2\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("auth unlock --json error: %v", err)
+	}
+	var unlocked authCommandResult
+	if err := json.Unmarshal(stdout.Bytes(), &unlocked); err != nil {
+		t.Fatalf("json.Unmarshal(unlock): %v: %s", err, stdout.String())
+	}
+	if unlocked.State != "authenticated" {
+		t.Fatalf("unlock result = %#v, want authenticated", unlocked)
+	}
+}
+
 func testModule(name string) tooldef.ModulePath {
 	return tooldef.ModulePath(testModuleString(name))
 }

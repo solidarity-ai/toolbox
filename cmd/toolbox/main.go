@@ -20,7 +20,7 @@ type cli struct {
 	Search         searchCmd        `cmd:"" help:"Search the tool registry for packages or tools."`
 	MCP            mcpCmd           `cmd:"" help:"Serve the selected toolset over MCP stdio."`
 	Codemode       codemodeCmd      `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
-	Auth           authCmd          `cmd:"" help:"Legacy auth surface. This command is intentionally left on the existing parser while the auth CLI redesign is finalized."`
+	Auth           authCmd          `cmd:"" help:"Inspect and manage package authentication."`
 	Daemon         daemonControlCmd `cmd:"" name:"daemon" help:"Manage the toolbox daemon."`
 	InternalDaemon daemonCmd        `cmd:"" name:"_daemon" hidden:"" help:"Internal daemon commands."`
 	SDKBridge      sdkBridgeCmd     `cmd:"" name:"_sdkbridge" hidden:"" help:"Internal SDK bridge commands."`
@@ -95,7 +95,142 @@ type codemodeSessionCmd struct {
 type codemodeSessionNewCmd struct{}
 
 type authCmd struct {
-	Args []string `arg:"" optional:"" passthrough:"all" name:"arg" help:"Legacy auth arguments."`
+	Status   authStatusCmd   `cmd:"" help:"Show auth state for one package or the active toolset."`
+	List     authListCmd     `cmd:"" help:"List auth-relevant packages in the active toolset."`
+	Accounts authAccountsCmd `cmd:"" help:"List accounts/profiles known for a package."`
+	OAuth2   authOAuth2Cmd   `cmd:"" name:"oauth2" help:"Manage OAuth2 credentials."`
+	Secret   authSecretCmd   `cmd:"" help:"Manage static secret credentials."`
+	Setup    authSetupCmd    `cmd:"" help:"Initialize the secret store intentionally."`
+	Unlock   authUnlockCmd   `cmd:"" help:"Unlock the secret store."`
+	Lock     authLockCmd     `cmd:"" help:"Lock the secret store."`
+	Recovery authRecoveryCmd `cmd:"" help:"Manage secret-store recovery codes."`
+}
+
+type authTargetFlags struct {
+	Toolset    string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file used to resolve installed package targets."`
+	Local      bool   `name:"local" help:"Treat TARGET as a local development package directory."`
+	Credential string `name:"credential" help:"Credential name when a package declares more than one relevant credential."`
+	Account    string `name:"account" help:"Account/profile name for account-scoped credentials."`
+	JSON       bool   `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authStatusCmd struct {
+	authTargetFlags
+	Target string `arg:"" optional:"" name:"target" help:"Package name/module target. Omit to show the active toolset summary."`
+}
+
+type authListCmd struct {
+	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file to inspect."`
+	JSON    bool   `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authAccountsCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authOAuth2Cmd struct {
+	Status    authOAuth2StatusCmd    `cmd:"" help:"Show OAuth2-specific status."`
+	Configure authOAuth2ConfigureCmd `cmd:"" help:"Configure OAuth2 client setup values."`
+	Login     authOAuth2LoginCmd     `cmd:"" help:"Run OAuth2 authorization and store account token material."`
+	Logout    authOAuth2LogoutCmd    `cmd:"" help:"Remove OAuth2 token material for an account."`
+	Refresh   authOAuth2RefreshCmd   `cmd:"" help:"Refresh OAuth2 token material where supported."`
+}
+
+type authOAuth2StatusCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authOAuth2ConfigureCmd struct {
+	authTargetFlags
+	Stdin               bool   `name:"stdin" help:"Read client_id and client_secret from stdin, one line each. Blank client_secret is allowed for PKCE public clients."`
+	ClientIDFromEnv     string `name:"client-id-from-env" help:"Read the OAuth2 client_id from this environment variable."`
+	ClientSecretFromEnv string `name:"client-secret-from-env" help:"Read the OAuth2 client_secret from this environment variable."`
+	Target              string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authOAuth2LoginCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authOAuth2LogoutCmd struct {
+	authTargetFlags
+	Yes    bool   `name:"yes" help:"Confirm destructive removal without prompting."`
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authOAuth2RefreshCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSecretCmd struct {
+	Status   authSecretStatusCmd   `cmd:"" help:"Show static-secret-specific status."`
+	Set      authSecretSetCmd      `cmd:"" help:"Set static secret material."`
+	Clear    authSecretClearCmd    `cmd:"" help:"Clear static secret material."`
+	Rotate   authSecretRotateCmd   `cmd:"" help:"Rotate static secret material."`
+	Validate authSecretValidateCmd `cmd:"" help:"Validate static secret material where supported."`
+}
+
+type authSecretStatusCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSecretSetCmd struct {
+	authTargetFlags
+	Stdin           bool   `name:"stdin" help:"Read secret material from stdin instead of prompting."`
+	FromEnv         string `name:"from-env" help:"Read single-value secret material from this environment variable."`
+	UsernameFromEnv string `name:"username-from-env" help:"Read basic-auth username from this environment variable."`
+	PasswordFromEnv string `name:"password-from-env" help:"Read basic-auth password from this environment variable."`
+	Target          string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSecretClearCmd struct {
+	authTargetFlags
+	Yes    bool   `name:"yes" help:"Confirm destructive removal without prompting."`
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSecretRotateCmd struct {
+	authTargetFlags
+	Stdin           bool   `name:"stdin" help:"Read replacement secret material from stdin instead of prompting."`
+	FromEnv         string `name:"from-env" help:"Read single-value replacement secret material from this environment variable."`
+	UsernameFromEnv string `name:"username-from-env" help:"Read replacement basic-auth username from this environment variable."`
+	PasswordFromEnv string `name:"password-from-env" help:"Read replacement basic-auth password from this environment variable."`
+	Target          string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSecretValidateCmd struct {
+	authTargetFlags
+	Target string `arg:"" name:"target" help:"Package name/module target or local directory with --local."`
+}
+
+type authSetupCmd struct {
+	JSON bool `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authUnlockCmd struct {
+	JSON bool `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authLockCmd struct {
+	JSON bool `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authRecoveryCmd struct {
+	Codes  authRecoveryCodesCmd  `cmd:"" help:"Generate replacement recovery codes."`
+	Rewrap authRecoveryRewrapCmd `cmd:"" help:"Rewrap the secret store after unlocking with a recovery code."`
+}
+
+type authRecoveryCodesCmd struct {
+	JSON bool `name:"json" help:"Emit machine-readable JSON output."`
+}
+
+type authRecoveryRewrapCmd struct {
+	JSON bool `name:"json" help:"Emit machine-readable JSON output."`
 }
 
 type daemonControlCmd struct {
@@ -176,7 +311,7 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case strings.HasPrefix(command, "codemode mcp"):
 		return runCodemodeMCP(parsed.Codemode.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "auth"):
-		return runAuth(parsed.Auth.Args, secretOpts, stdin, stdout, stderr)
+		return runAuthCommand(parsed.Auth, command, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "daemon stop"):
 		return runDaemonStop(stdout, stderr)
 	case strings.HasPrefix(command, "daemon logs"):

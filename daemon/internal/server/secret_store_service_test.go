@@ -43,12 +43,12 @@ func TestSecretStoreRecoveryCodesRequirePassphraseExceptRecoveryUnlock(t *testin
 	if _, err := service.SetupStore(ctx, "hunter2"); err != nil {
 		t.Fatalf("SetupStore(): %v", err)
 	}
-	if _, err := service.RecoveryCodes(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
-		t.Fatalf("RecoveryCodes(empty) error = %v, want ErrLocked", err)
+	if _, err := service.GenerateRecoveryCodes(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
+		t.Fatalf("GenerateRecoveryCodes(empty) error = %v, want ErrLocked", err)
 	}
-	codes, err := service.RecoveryCodes(ctx, "hunter2")
+	codes, err := service.GenerateRecoveryCodes(ctx, "hunter2")
 	if err != nil {
-		t.Fatalf("RecoveryCodes(passphrase): %v", err)
+		t.Fatalf("GenerateRecoveryCodes(passphrase): %v", err)
 	}
 	if err := store.Lock(ctx); err != nil {
 		t.Fatalf("Lock(): %v", err)
@@ -56,13 +56,13 @@ func TestSecretStoreRecoveryCodesRequirePassphraseExceptRecoveryUnlock(t *testin
 	if err := store.Unlock(ctx, codes[0]); err != nil {
 		t.Fatalf("Unlock(recovery code): %v", err)
 	}
-	if _, err := service.RecoveryCodes(ctx, ""); err != nil {
-		t.Fatalf("RecoveryCodes(recovery unlocked): %v", err)
+	if _, err := service.GenerateRecoveryCodes(ctx, ""); err != nil {
+		t.Fatalf("GenerateRecoveryCodes(recovery unlocked): %v", err)
 	}
 	if err := store.Lock(ctx); err != nil {
 		t.Fatalf("Lock(): %v", err)
 	}
-	if _, err := service.RecoveryCodes(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
-		t.Fatalf("RecoveryCodes(after lock) error = %v, want ErrLocked", err)
+	if _, err := service.GenerateRecoveryCodes(ctx, ""); !errors.Is(err, secrets.ErrLocked) {
+		t.Fatalf("GenerateRecoveryCodes(after lock) error = %v, want ErrLocked", err)
 	}
 }

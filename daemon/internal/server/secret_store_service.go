@@ -67,6 +67,45 @@ func (s *SecretStoreService) Lock(ctx context.Context, req *connect.Request[daem
 	return connect.NewResponse(&daemonv1.SecretLockResponse{}), nil
 }
 
+func (s *SecretStoreService) Initialized(ctx context.Context, req *connect.Request[daemonv1.SecretInitializedRequest]) (*connect.Response[daemonv1.SecretInitializedResponse], error) {
+	initialized, err := s.InitializedStore(ctx)
+	if err != nil {
+		return nil, secretStoreConnectError(err)
+	}
+	return connect.NewResponse(&daemonv1.SecretInitializedResponse{Initialized: initialized}), nil
+}
+
+func (s *SecretStoreService) BackupCodes(ctx context.Context, req *connect.Request[daemonv1.SecretBackupCodesRequest]) (*connect.Response[daemonv1.SecretBackupCodesResponse], error) {
+	codes, err := s.GenerateBackupCodes(ctx, req.Msg.GetUnlockKey())
+	if err != nil {
+		return nil, secretStoreConnectError(err)
+	}
+	return connect.NewResponse(&daemonv1.SecretBackupCodesResponse{BackupCodes: codes}), nil
+}
+
+func (s *SecretStoreService) RecoveryCodes(ctx context.Context, req *connect.Request[daemonv1.SecretRecoveryCodesRequest]) (*connect.Response[daemonv1.SecretRecoveryCodesResponse], error) {
+	codes, err := s.GenerateRecoveryCodes(ctx, "")
+	if err != nil {
+		return nil, secretStoreConnectError(err)
+	}
+	return connect.NewResponse(&daemonv1.SecretRecoveryCodesResponse{RecoveryCodes: codes}), nil
+}
+
+func (s *SecretStoreService) RecoveryUnlocked(ctx context.Context, req *connect.Request[daemonv1.SecretRecoveryUnlockedRequest]) (*connect.Response[daemonv1.SecretRecoveryUnlockedResponse], error) {
+	unlocked, err := s.RecoveryUnlockedStore(ctx)
+	if err != nil {
+		return nil, secretStoreConnectError(err)
+	}
+	return connect.NewResponse(&daemonv1.SecretRecoveryUnlockedResponse{RecoveryUnlocked: unlocked}), nil
+}
+
+func (s *SecretStoreService) RewrapAfterRecovery(ctx context.Context, req *connect.Request[daemonv1.SecretRewrapAfterRecoveryRequest]) (*connect.Response[daemonv1.SecretRewrapAfterRecoveryResponse], error) {
+	if err := s.RewrapStoreAfterRecovery(ctx, req.Msg.GetUnlockKey()); err != nil {
+		return nil, secretStoreConnectError(err)
+	}
+	return connect.NewResponse(&daemonv1.SecretRewrapAfterRecoveryResponse{}), nil
+}
+
 func (s *SecretStoreService) Get(ctx context.Context, req *connect.Request[daemonv1.SecretGetRequest]) (*connect.Response[daemonv1.SecretGetResponse], error) {
 	value, err := s.store.Get(ctx, req.Msg.GetKey())
 	if err != nil {
@@ -128,7 +167,23 @@ func (s *SecretStoreService) SetupStore(ctx context.Context, unlockKey string) (
 	return codes, nil
 }
 
-func (s *SecretStoreService) RecoveryCodes(ctx context.Context, unlockKey string) ([]string, error) {
+func (s *SecretStoreService) GenerateBackupCodes(ctx context.Context, unlockKey string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(unlockKey) == "" {
+		return nil, secrets.ErrLocked
+	}
+	generator, ok := s.store.(interface {
+		BackupCodes(context.Context, string) ([]string, error)
+	})
+	if !ok {
+		return nil, secrets.ErrLocked
+	}
+	return generator.BackupCodes(ctx, unlockKey)
+}
+
+func (s *SecretStoreService) GenerateRecoveryCodes(ctx context.Context, unlockKey string) ([]string, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -171,7 +226,7 @@ func (s *SecretStoreService) RecoveryCodes(ctx context.Context, unlockKey string
 	return codes, nil
 }
 
-func (s *SecretStoreService) RecoveryUnlocked(ctx context.Context) (bool, error) {
+func (s *SecretStoreService) RecoveryUnlockedStore(ctx context.Context) (bool, error) {
 	if s == nil {
 		return false, nil
 	}
@@ -182,6 +237,23 @@ func (s *SecretStoreService) RecoveryUnlocked(ctx context.Context) (bool, error)
 		return false, nil
 	}
 	return recoveryState.RecoveryUnlocked(ctx)
+}
+
+func (s *SecretStoreService) RewrapStoreAfterRecovery(ctx context.Context, newUnlockKey string) error {
+	if s == nil {
+		return nil
+	}
+	rewrapper, ok := s.store.(interface {
+		RewrapAfterRecovery(context.Context, string) error
+	})
+	if !ok {
+		return secrets.ErrRecoveryRequired
+	}
+	if err := rewrapper.RewrapAfterRecovery(ctx, newUnlockKey); err != nil {
+		return err
+	}
+	s.markSecretChanged()
+	return nil
 }
 
 func (s *SecretStoreService) LockStore(ctx context.Context) error {
@@ -210,23 +282,30 @@ func (s *SecretStoreService) Locked(ctx context.Context) (bool, error) {
 	}
 }
 
-func (s *SecretStoreService) SetupRequired(ctx context.Context) (bool, error) {
+func (s *SecretStoreService) InitializedStore(ctx context.Context) (bool, error) {
 	if s == nil {
-		return false, nil
+		return true, nil
 	}
 	if initializedStore, ok := s.store.(interface{ Initialized() (bool, error) }); ok {
-		initialized, err := initializedStore.Initialized()
-		return !initialized, err
+		return initializedStore.Initialized()
 	}
 	_, err := s.store.List(ctx, "")
 	switch {
 	case errors.Is(err, secrets.ErrNotInitialized):
-		return true, nil
-	case err == nil, errors.Is(err, secrets.ErrLocked):
 		return false, nil
+	case err == nil, errors.Is(err, secrets.ErrLocked):
+		return true, nil
 	default:
 		return false, err
 	}
+}
+
+func (s *SecretStoreService) SetupRequired(ctx context.Context) (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	initialized, err := s.InitializedStore(ctx)
+	return !initialized, err
 }
 
 func (s *SecretStoreService) markSecretChanged() {
@@ -252,6 +331,8 @@ func secretStoreConnectError(err error) error {
 	case errors.Is(err, secrets.ErrInvalidKey):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, secrets.ErrNotInitialized):
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, secrets.ErrRecoveryRequired), errors.Is(err, secrets.ErrRecoveryWindowExpired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, secrets.ErrLocked):
 		return connect.NewError(connect.CodeFailedPrecondition, err)

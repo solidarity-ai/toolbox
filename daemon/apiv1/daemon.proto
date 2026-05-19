@@ -125,6 +125,38 @@ message SecretLockRequest {}
 
 message SecretLockResponse {}
 
+message SecretInitializedRequest {}
+
+message SecretInitializedResponse {
+  bool initialized = 1;
+}
+
+message SecretBackupCodesRequest {
+  string unlock_key = 1;
+}
+
+message SecretBackupCodesResponse {
+  repeated string backup_codes = 1;
+}
+
+message SecretRecoveryCodesRequest {}
+
+message SecretRecoveryCodesResponse {
+  repeated string recovery_codes = 1;
+}
+
+message SecretRecoveryUnlockedRequest {}
+
+message SecretRecoveryUnlockedResponse {
+  bool recovery_unlocked = 1;
+}
+
+message SecretRewrapAfterRecoveryRequest {
+  string unlock_key = 1;
+}
+
+message SecretRewrapAfterRecoveryResponse {}
+
 service SessionService {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc SyncState(stream SessionState) returns (stream StateUpdate);
@@ -134,6 +166,11 @@ service SecretStoreService {
   rpc Unlock(SecretUnlockRequest) returns (SecretUnlockResponse);
   rpc Setup(SecretSetupRequest) returns (SecretSetupResponse);
   rpc Lock(SecretLockRequest) returns (SecretLockResponse);
+  rpc Initialized(SecretInitializedRequest) returns (SecretInitializedResponse);
+  rpc BackupCodes(SecretBackupCodesRequest) returns (SecretBackupCodesResponse);
+  rpc RecoveryCodes(SecretRecoveryCodesRequest) returns (SecretRecoveryCodesResponse);
+  rpc RecoveryUnlocked(SecretRecoveryUnlockedRequest) returns (SecretRecoveryUnlockedResponse);
+  rpc RewrapAfterRecovery(SecretRewrapAfterRecoveryRequest) returns (SecretRewrapAfterRecoveryResponse);
   rpc Get(SecretGetRequest) returns (SecretGetResponse);
   rpc Set(SecretSetRequest) returns (SecretSetResponse);
   rpc Delete(SecretDeleteRequest) returns (SecretDeleteResponse);

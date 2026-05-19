@@ -39,15 +39,40 @@ func newCredentialRepository(opts secretStoreOptions) *credentialrepo.Repository
 	return credentialrepo.New(newSecretStore(opts))
 }
 
-func newSecretStore(opts secretStoreOptions) secrets.SecretStore {
+func newLocalSecretStore(opts secretStoreOptions) *secrets.LocalSecretStore {
 	local := secrets.NewLocalSecretStoreWithKey("", "", opts.SecretKey)
 	local.SetBackupCodeWriter(opts.BackupCodeWriter)
+	return local
+}
+
+func newSecretStore(opts secretStoreOptions) secrets.SecretStore {
+	local := newLocalSecretStore(opts)
 	if opts.NoDaemon {
 		return local
 	}
 	return &daemonPreferredSecretStore{
 		primary:  daemon.NewSecretStoreWithBackupCodeWriter(opts.SecretKey, opts.BackupCodeWriter),
 		fallback: local,
+	}
+}
+
+func newManagedSecretStore(opts secretStoreOptions) secrets.ManagedSecretStore {
+	if opts.NoDaemon {
+		return newLocalSecretStore(opts)
+	}
+	return &daemonPreferredSecretStore{
+		primary:  daemon.NewSecretStoreWithBackupCodeWriter(opts.SecretKey, opts.BackupCodeWriter),
+		fallback: newLocalSecretStore(opts),
+	}
+}
+
+func newLifecycleSecretStore(opts secretStoreOptions) secrets.LifecycleSecretStore {
+	if opts.NoDaemon {
+		return newLocalSecretStore(opts)
+	}
+	return &daemonPreferredSecretStore{
+		primary:  daemon.NewSecretStoreWithBackupCodeWriter(opts.SecretKey, opts.BackupCodeWriter),
+		fallback: newLocalSecretStore(opts),
 	}
 }
 
@@ -147,12 +172,14 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type daemonPreferredSecretStore struct {
-	primary  secrets.SecretStore
-	fallback secrets.SecretStore
+	primary  secrets.LifecycleSecretStore
+	fallback secrets.LifecycleSecretStore
 
 	mu          sync.RWMutex
 	useFallback bool
 }
+
+var _ secrets.LifecycleSecretStore = (*daemonPreferredSecretStore)(nil)
 
 func (s *daemonPreferredSecretStore) Get(ctx context.Context, key string) ([]byte, error) {
 	if s.shouldUseFallback() {
@@ -200,6 +227,102 @@ func (s *daemonPreferredSecretStore) List(ctx context.Context, prefix string) ([
 		return s.fallback.List(ctx, prefix)
 	}
 	return keys, err
+}
+
+func (s *daemonPreferredSecretStore) Unlock(ctx context.Context, unlockKey string) error {
+	if s.shouldUseFallback() {
+		return s.fallback.Unlock(ctx, unlockKey)
+	}
+	err := s.primary.Unlock(ctx, unlockKey)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Unlock(ctx, unlockKey)
+	}
+	return err
+}
+
+func (s *daemonPreferredSecretStore) Lock(ctx context.Context) error {
+	if s.shouldUseFallback() {
+		return s.fallback.Lock(ctx)
+	}
+	err := s.primary.Lock(ctx)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Lock(ctx)
+	}
+	return err
+}
+
+func (s *daemonPreferredSecretStore) Initialized() (bool, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.Initialized()
+	}
+	initialized, err := s.primary.Initialized()
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Initialized()
+	}
+	return initialized, err
+}
+
+func (s *daemonPreferredSecretStore) Setup(ctx context.Context, unlockKey string) ([]string, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.Setup(ctx, unlockKey)
+	}
+	codes, err := s.primary.Setup(ctx, unlockKey)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.Setup(ctx, unlockKey)
+	}
+	return codes, err
+}
+
+func (s *daemonPreferredSecretStore) BackupCodes(ctx context.Context, unlockKey string) ([]string, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.BackupCodes(ctx, unlockKey)
+	}
+	codes, err := s.primary.BackupCodes(ctx, unlockKey)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.BackupCodes(ctx, unlockKey)
+	}
+	return codes, err
+}
+
+func (s *daemonPreferredSecretStore) RecoveryCodes(ctx context.Context) ([]string, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.RecoveryCodes(ctx)
+	}
+	codes, err := s.primary.RecoveryCodes(ctx)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.RecoveryCodes(ctx)
+	}
+	return codes, err
+}
+
+func (s *daemonPreferredSecretStore) RecoveryUnlocked(ctx context.Context) (bool, error) {
+	if s.shouldUseFallback() {
+		return s.fallback.RecoveryUnlocked(ctx)
+	}
+	unlocked, err := s.primary.RecoveryUnlocked(ctx)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.RecoveryUnlocked(ctx)
+	}
+	return unlocked, err
+}
+
+func (s *daemonPreferredSecretStore) RewrapAfterRecovery(ctx context.Context, newUnlockKey string) error {
+	if s.shouldUseFallback() {
+		return s.fallback.RewrapAfterRecovery(ctx, newUnlockKey)
+	}
+	err := s.primary.RewrapAfterRecovery(ctx, newUnlockKey)
+	if errors.Is(err, daemon.ErrUnsupportedPlatform) {
+		s.enableFallback()
+		return s.fallback.RewrapAfterRecovery(ctx, newUnlockKey)
+	}
+	return err
 }
 
 func (s *daemonPreferredSecretStore) shouldUseFallback() bool {

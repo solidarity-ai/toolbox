@@ -48,6 +48,21 @@ const (
 	SecretStoreServiceSetupProcedure = "/toolbox.daemon.v1.SecretStoreService/Setup"
 	// SecretStoreServiceLockProcedure is the fully-qualified name of the SecretStoreService's Lock RPC.
 	SecretStoreServiceLockProcedure = "/toolbox.daemon.v1.SecretStoreService/Lock"
+	// SecretStoreServiceInitializedProcedure is the fully-qualified name of the SecretStoreService's
+	// Initialized RPC.
+	SecretStoreServiceInitializedProcedure = "/toolbox.daemon.v1.SecretStoreService/Initialized"
+	// SecretStoreServiceBackupCodesProcedure is the fully-qualified name of the SecretStoreService's
+	// BackupCodes RPC.
+	SecretStoreServiceBackupCodesProcedure = "/toolbox.daemon.v1.SecretStoreService/BackupCodes"
+	// SecretStoreServiceRecoveryCodesProcedure is the fully-qualified name of the SecretStoreService's
+	// RecoveryCodes RPC.
+	SecretStoreServiceRecoveryCodesProcedure = "/toolbox.daemon.v1.SecretStoreService/RecoveryCodes"
+	// SecretStoreServiceRecoveryUnlockedProcedure is the fully-qualified name of the
+	// SecretStoreService's RecoveryUnlocked RPC.
+	SecretStoreServiceRecoveryUnlockedProcedure = "/toolbox.daemon.v1.SecretStoreService/RecoveryUnlocked"
+	// SecretStoreServiceRewrapAfterRecoveryProcedure is the fully-qualified name of the
+	// SecretStoreService's RewrapAfterRecovery RPC.
+	SecretStoreServiceRewrapAfterRecoveryProcedure = "/toolbox.daemon.v1.SecretStoreService/RewrapAfterRecovery"
 	// SecretStoreServiceGetProcedure is the fully-qualified name of the SecretStoreService's Get RPC.
 	SecretStoreServiceGetProcedure = "/toolbox.daemon.v1.SecretStoreService/Get"
 	// SecretStoreServiceSetProcedure is the fully-qualified name of the SecretStoreService's Set RPC.
@@ -160,6 +175,11 @@ type SecretStoreServiceClient interface {
 	Unlock(context.Context, *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error)
 	Setup(context.Context, *connect.Request[apiv1.SecretSetupRequest]) (*connect.Response[apiv1.SecretSetupResponse], error)
 	Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error)
+	Initialized(context.Context, *connect.Request[apiv1.SecretInitializedRequest]) (*connect.Response[apiv1.SecretInitializedResponse], error)
+	BackupCodes(context.Context, *connect.Request[apiv1.SecretBackupCodesRequest]) (*connect.Response[apiv1.SecretBackupCodesResponse], error)
+	RecoveryCodes(context.Context, *connect.Request[apiv1.SecretRecoveryCodesRequest]) (*connect.Response[apiv1.SecretRecoveryCodesResponse], error)
+	RecoveryUnlocked(context.Context, *connect.Request[apiv1.SecretRecoveryUnlockedRequest]) (*connect.Response[apiv1.SecretRecoveryUnlockedResponse], error)
+	RewrapAfterRecovery(context.Context, *connect.Request[apiv1.SecretRewrapAfterRecoveryRequest]) (*connect.Response[apiv1.SecretRewrapAfterRecoveryResponse], error)
 	Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error)
 	Set(context.Context, *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error)
 	Delete(context.Context, *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error)
@@ -195,6 +215,36 @@ func NewSecretStoreServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(secretStoreServiceMethods.ByName("Lock")),
 			connect.WithClientOptions(opts...),
 		),
+		initialized: connect.NewClient[apiv1.SecretInitializedRequest, apiv1.SecretInitializedResponse](
+			httpClient,
+			baseURL+SecretStoreServiceInitializedProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("Initialized")),
+			connect.WithClientOptions(opts...),
+		),
+		backupCodes: connect.NewClient[apiv1.SecretBackupCodesRequest, apiv1.SecretBackupCodesResponse](
+			httpClient,
+			baseURL+SecretStoreServiceBackupCodesProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("BackupCodes")),
+			connect.WithClientOptions(opts...),
+		),
+		recoveryCodes: connect.NewClient[apiv1.SecretRecoveryCodesRequest, apiv1.SecretRecoveryCodesResponse](
+			httpClient,
+			baseURL+SecretStoreServiceRecoveryCodesProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("RecoveryCodes")),
+			connect.WithClientOptions(opts...),
+		),
+		recoveryUnlocked: connect.NewClient[apiv1.SecretRecoveryUnlockedRequest, apiv1.SecretRecoveryUnlockedResponse](
+			httpClient,
+			baseURL+SecretStoreServiceRecoveryUnlockedProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("RecoveryUnlocked")),
+			connect.WithClientOptions(opts...),
+		),
+		rewrapAfterRecovery: connect.NewClient[apiv1.SecretRewrapAfterRecoveryRequest, apiv1.SecretRewrapAfterRecoveryResponse](
+			httpClient,
+			baseURL+SecretStoreServiceRewrapAfterRecoveryProcedure,
+			connect.WithSchema(secretStoreServiceMethods.ByName("RewrapAfterRecovery")),
+			connect.WithClientOptions(opts...),
+		),
 		get: connect.NewClient[apiv1.SecretGetRequest, apiv1.SecretGetResponse](
 			httpClient,
 			baseURL+SecretStoreServiceGetProcedure,
@@ -224,13 +274,18 @@ func NewSecretStoreServiceClient(httpClient connect.HTTPClient, baseURL string, 
 
 // secretStoreServiceClient implements SecretStoreServiceClient.
 type secretStoreServiceClient struct {
-	unlock *connect.Client[apiv1.SecretUnlockRequest, apiv1.SecretUnlockResponse]
-	setup  *connect.Client[apiv1.SecretSetupRequest, apiv1.SecretSetupResponse]
-	lock   *connect.Client[apiv1.SecretLockRequest, apiv1.SecretLockResponse]
-	get    *connect.Client[apiv1.SecretGetRequest, apiv1.SecretGetResponse]
-	set    *connect.Client[apiv1.SecretSetRequest, apiv1.SecretSetResponse]
-	delete *connect.Client[apiv1.SecretDeleteRequest, apiv1.SecretDeleteResponse]
-	list   *connect.Client[apiv1.SecretListRequest, apiv1.SecretListResponse]
+	unlock              *connect.Client[apiv1.SecretUnlockRequest, apiv1.SecretUnlockResponse]
+	setup               *connect.Client[apiv1.SecretSetupRequest, apiv1.SecretSetupResponse]
+	lock                *connect.Client[apiv1.SecretLockRequest, apiv1.SecretLockResponse]
+	initialized         *connect.Client[apiv1.SecretInitializedRequest, apiv1.SecretInitializedResponse]
+	backupCodes         *connect.Client[apiv1.SecretBackupCodesRequest, apiv1.SecretBackupCodesResponse]
+	recoveryCodes       *connect.Client[apiv1.SecretRecoveryCodesRequest, apiv1.SecretRecoveryCodesResponse]
+	recoveryUnlocked    *connect.Client[apiv1.SecretRecoveryUnlockedRequest, apiv1.SecretRecoveryUnlockedResponse]
+	rewrapAfterRecovery *connect.Client[apiv1.SecretRewrapAfterRecoveryRequest, apiv1.SecretRewrapAfterRecoveryResponse]
+	get                 *connect.Client[apiv1.SecretGetRequest, apiv1.SecretGetResponse]
+	set                 *connect.Client[apiv1.SecretSetRequest, apiv1.SecretSetResponse]
+	delete              *connect.Client[apiv1.SecretDeleteRequest, apiv1.SecretDeleteResponse]
+	list                *connect.Client[apiv1.SecretListRequest, apiv1.SecretListResponse]
 }
 
 // Unlock calls toolbox.daemon.v1.SecretStoreService.Unlock.
@@ -246,6 +301,31 @@ func (c *secretStoreServiceClient) Setup(ctx context.Context, req *connect.Reque
 // Lock calls toolbox.daemon.v1.SecretStoreService.Lock.
 func (c *secretStoreServiceClient) Lock(ctx context.Context, req *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error) {
 	return c.lock.CallUnary(ctx, req)
+}
+
+// Initialized calls toolbox.daemon.v1.SecretStoreService.Initialized.
+func (c *secretStoreServiceClient) Initialized(ctx context.Context, req *connect.Request[apiv1.SecretInitializedRequest]) (*connect.Response[apiv1.SecretInitializedResponse], error) {
+	return c.initialized.CallUnary(ctx, req)
+}
+
+// BackupCodes calls toolbox.daemon.v1.SecretStoreService.BackupCodes.
+func (c *secretStoreServiceClient) BackupCodes(ctx context.Context, req *connect.Request[apiv1.SecretBackupCodesRequest]) (*connect.Response[apiv1.SecretBackupCodesResponse], error) {
+	return c.backupCodes.CallUnary(ctx, req)
+}
+
+// RecoveryCodes calls toolbox.daemon.v1.SecretStoreService.RecoveryCodes.
+func (c *secretStoreServiceClient) RecoveryCodes(ctx context.Context, req *connect.Request[apiv1.SecretRecoveryCodesRequest]) (*connect.Response[apiv1.SecretRecoveryCodesResponse], error) {
+	return c.recoveryCodes.CallUnary(ctx, req)
+}
+
+// RecoveryUnlocked calls toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked.
+func (c *secretStoreServiceClient) RecoveryUnlocked(ctx context.Context, req *connect.Request[apiv1.SecretRecoveryUnlockedRequest]) (*connect.Response[apiv1.SecretRecoveryUnlockedResponse], error) {
+	return c.recoveryUnlocked.CallUnary(ctx, req)
+}
+
+// RewrapAfterRecovery calls toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery.
+func (c *secretStoreServiceClient) RewrapAfterRecovery(ctx context.Context, req *connect.Request[apiv1.SecretRewrapAfterRecoveryRequest]) (*connect.Response[apiv1.SecretRewrapAfterRecoveryResponse], error) {
+	return c.rewrapAfterRecovery.CallUnary(ctx, req)
 }
 
 // Get calls toolbox.daemon.v1.SecretStoreService.Get.
@@ -274,6 +354,11 @@ type SecretStoreServiceHandler interface {
 	Unlock(context.Context, *connect.Request[apiv1.SecretUnlockRequest]) (*connect.Response[apiv1.SecretUnlockResponse], error)
 	Setup(context.Context, *connect.Request[apiv1.SecretSetupRequest]) (*connect.Response[apiv1.SecretSetupResponse], error)
 	Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error)
+	Initialized(context.Context, *connect.Request[apiv1.SecretInitializedRequest]) (*connect.Response[apiv1.SecretInitializedResponse], error)
+	BackupCodes(context.Context, *connect.Request[apiv1.SecretBackupCodesRequest]) (*connect.Response[apiv1.SecretBackupCodesResponse], error)
+	RecoveryCodes(context.Context, *connect.Request[apiv1.SecretRecoveryCodesRequest]) (*connect.Response[apiv1.SecretRecoveryCodesResponse], error)
+	RecoveryUnlocked(context.Context, *connect.Request[apiv1.SecretRecoveryUnlockedRequest]) (*connect.Response[apiv1.SecretRecoveryUnlockedResponse], error)
+	RewrapAfterRecovery(context.Context, *connect.Request[apiv1.SecretRewrapAfterRecoveryRequest]) (*connect.Response[apiv1.SecretRewrapAfterRecoveryResponse], error)
 	Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error)
 	Set(context.Context, *connect.Request[apiv1.SecretSetRequest]) (*connect.Response[apiv1.SecretSetResponse], error)
 	Delete(context.Context, *connect.Request[apiv1.SecretDeleteRequest]) (*connect.Response[apiv1.SecretDeleteResponse], error)
@@ -303,6 +388,36 @@ func NewSecretStoreServiceHandler(svc SecretStoreServiceHandler, opts ...connect
 		SecretStoreServiceLockProcedure,
 		svc.Lock,
 		connect.WithSchema(secretStoreServiceMethods.ByName("Lock")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceInitializedHandler := connect.NewUnaryHandler(
+		SecretStoreServiceInitializedProcedure,
+		svc.Initialized,
+		connect.WithSchema(secretStoreServiceMethods.ByName("Initialized")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceBackupCodesHandler := connect.NewUnaryHandler(
+		SecretStoreServiceBackupCodesProcedure,
+		svc.BackupCodes,
+		connect.WithSchema(secretStoreServiceMethods.ByName("BackupCodes")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceRecoveryCodesHandler := connect.NewUnaryHandler(
+		SecretStoreServiceRecoveryCodesProcedure,
+		svc.RecoveryCodes,
+		connect.WithSchema(secretStoreServiceMethods.ByName("RecoveryCodes")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceRecoveryUnlockedHandler := connect.NewUnaryHandler(
+		SecretStoreServiceRecoveryUnlockedProcedure,
+		svc.RecoveryUnlocked,
+		connect.WithSchema(secretStoreServiceMethods.ByName("RecoveryUnlocked")),
+		connect.WithHandlerOptions(opts...),
+	)
+	secretStoreServiceRewrapAfterRecoveryHandler := connect.NewUnaryHandler(
+		SecretStoreServiceRewrapAfterRecoveryProcedure,
+		svc.RewrapAfterRecovery,
+		connect.WithSchema(secretStoreServiceMethods.ByName("RewrapAfterRecovery")),
 		connect.WithHandlerOptions(opts...),
 	)
 	secretStoreServiceGetHandler := connect.NewUnaryHandler(
@@ -337,6 +452,16 @@ func NewSecretStoreServiceHandler(svc SecretStoreServiceHandler, opts ...connect
 			secretStoreServiceSetupHandler.ServeHTTP(w, r)
 		case SecretStoreServiceLockProcedure:
 			secretStoreServiceLockHandler.ServeHTTP(w, r)
+		case SecretStoreServiceInitializedProcedure:
+			secretStoreServiceInitializedHandler.ServeHTTP(w, r)
+		case SecretStoreServiceBackupCodesProcedure:
+			secretStoreServiceBackupCodesHandler.ServeHTTP(w, r)
+		case SecretStoreServiceRecoveryCodesProcedure:
+			secretStoreServiceRecoveryCodesHandler.ServeHTTP(w, r)
+		case SecretStoreServiceRecoveryUnlockedProcedure:
+			secretStoreServiceRecoveryUnlockedHandler.ServeHTTP(w, r)
+		case SecretStoreServiceRewrapAfterRecoveryProcedure:
+			secretStoreServiceRewrapAfterRecoveryHandler.ServeHTTP(w, r)
 		case SecretStoreServiceGetProcedure:
 			secretStoreServiceGetHandler.ServeHTTP(w, r)
 		case SecretStoreServiceSetProcedure:
@@ -364,6 +489,26 @@ func (UnimplementedSecretStoreServiceHandler) Setup(context.Context, *connect.Re
 
 func (UnimplementedSecretStoreServiceHandler) Lock(context.Context, *connect.Request[apiv1.SecretLockRequest]) (*connect.Response[apiv1.SecretLockResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Lock is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) Initialized(context.Context, *connect.Request[apiv1.SecretInitializedRequest]) (*connect.Response[apiv1.SecretInitializedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.Initialized is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) BackupCodes(context.Context, *connect.Request[apiv1.SecretBackupCodesRequest]) (*connect.Response[apiv1.SecretBackupCodesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.BackupCodes is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) RecoveryCodes(context.Context, *connect.Request[apiv1.SecretRecoveryCodesRequest]) (*connect.Response[apiv1.SecretRecoveryCodesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.RecoveryCodes is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) RecoveryUnlocked(context.Context, *connect.Request[apiv1.SecretRecoveryUnlockedRequest]) (*connect.Response[apiv1.SecretRecoveryUnlockedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked is not implemented"))
+}
+
+func (UnimplementedSecretStoreServiceHandler) RewrapAfterRecovery(context.Context, *connect.Request[apiv1.SecretRewrapAfterRecoveryRequest]) (*connect.Response[apiv1.SecretRewrapAfterRecoveryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery is not implemented"))
 }
 
 func (UnimplementedSecretStoreServiceHandler) Get(context.Context, *connect.Request[apiv1.SecretGetRequest]) (*connect.Response[apiv1.SecretGetResponse], error) {

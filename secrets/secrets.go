@@ -38,6 +38,21 @@ type ManagedSecretStore interface {
 	Lock(ctx context.Context) error
 }
 
+// LifecycleSecretStore exposes explicit setup and recovery operations.
+//
+// Implementations must not perform first-time setup from ordinary Get/Set/List
+// calls. Setup is intentionally modeled separately so product surfaces can show
+// recovery codes at the time they are created.
+type LifecycleSecretStore interface {
+	ManagedSecretStore
+	Initialized() (bool, error)
+	Setup(ctx context.Context, unlockKey string) ([]string, error)
+	BackupCodes(ctx context.Context, unlockKey string) ([]string, error)
+	RecoveryCodes(ctx context.Context) ([]string, error)
+	RecoveryUnlocked(ctx context.Context) (bool, error)
+	RewrapAfterRecovery(ctx context.Context, newUnlockKey string) error
+}
+
 func validateKey(key string) error {
 	if key == "" {
 		return ErrInvalidKey

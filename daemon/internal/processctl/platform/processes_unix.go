@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,12 +181,20 @@ func splitPIDField(line string) (pidField string, rest string, ok bool) {
 }
 
 func isDaemonServeCommand(command string) bool {
-	idx := strings.Index(command, " _daemon serve")
-	if idx < 0 {
+	fields := strings.Fields(command)
+	daemonIdx := -1
+	for i := 0; i < len(fields)-1; i++ {
+		if fields[i] == "_daemon" && fields[i+1] == "serve" {
+			daemonIdx = i
+			break
+		}
+	}
+	if daemonIdx <= 0 {
 		return false
 	}
-	tail := command[idx+len(" _daemon serve"):]
-	return tail == "" || tail[0] == ' ' || tail[0] == '\t'
+	exePath := strings.Join(fields[:daemonIdx], " ")
+	exeBase := filepath.Base(exePath)
+	return strings.Contains(strings.ToLower(exeBase), "toolbox")
 }
 
 func joinPIDs(pids []int) string {

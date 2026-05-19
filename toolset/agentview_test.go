@@ -41,6 +41,56 @@ func TestAgentViewNoBindingsShowsAllParams(t *testing.T) {
 	}
 }
 
+func TestAgentViewReturnsDefensiveCopy(t *testing.T) {
+	t.Parallel()
+
+	prepared := calcToolset(t, toolset.Config{
+		EnvContext: map[string]any{
+			"fixed_a": 42,
+			"fixed_b": 7,
+		},
+		Tools: []toolset.BoundTool{
+			{
+				ToolRef: "calc.add",
+				Bindings: map[string]toolset.Binding{
+					"a": {Value: "context.fixed_a", Hidden: true},
+					"b": {Value: "context.fixed_b"},
+				},
+			},
+		},
+	})
+
+	view := prepared.AgentView()
+	addIdx := findAgentToolIndex(t, view, "calc.add")
+	addTool := view.Tools[addIdx]
+	view.Tools[addIdx].Name = "mutated"
+	addTool.ParamsSchema["x-mutated"] = true
+	props := addTool.ParamsSchema["properties"].(map[string]any)
+	props["mutated"] = map[string]any{"type": "string"}
+	addTool.HiddenParams()["mutated"] = true
+	addTool.BoundLiterals()["mutated"] = true
+
+	fresh := prepared.AgentView()
+	if hasAgentTool(fresh, "mutated") {
+		t.Fatal("AgentView tool slice mutation leaked into cached view")
+	}
+
+	freshTool := findAgentTool(t, fresh, "calc.add")
+	if _, ok := freshTool.ParamsSchema["x-mutated"]; ok {
+		t.Fatal("AgentView top-level ParamsSchema mutation leaked into cached view")
+	}
+	freshProps := freshTool.ParamsSchema["properties"].(map[string]any)
+	if _, ok := freshProps["mutated"]; ok {
+		t.Fatal("AgentView nested ParamsSchema mutation leaked into cached view")
+	}
+	if hidden := freshTool.HiddenParams(); hidden["mutated"] {
+		t.Fatal("AgentView hidden params mutation leaked into cached view")
+	}
+	if _, ok := freshTool.BoundLiterals()["mutated"]; ok {
+		t.Fatal("AgentView bound literals mutation leaked into cached view")
+	}
+}
+
 func TestAgentViewHiddenParamRemovedFromSchema(t *testing.T) {
 	t.Parallel()
 
@@ -231,13 +281,31 @@ func calcLoadedTool(t testing.TB, name string) assembler.LoadedTool {
 
 func findAgentTool(t testing.TB, view toolset.AgentView, name string) toolset.AgentTool {
 	t.Helper()
-	for _, tool := range view.Tools {
-		if tool.Name == name {
-			return tool
-		}
+	if idx := findAgentToolIndex(t, view, name); idx >= 0 {
+		return view.Tools[idx]
 	}
 	t.Fatalf("tool %q not found in AgentView", name)
 	return toolset.AgentTool{}
+}
+
+func findAgentToolIndex(t testing.TB, view toolset.AgentView, name string) int {
+	t.Helper()
+	for i, tool := range view.Tools {
+		if tool.Name == name {
+			return i
+		}
+	}
+	t.Fatalf("tool %q not found in AgentView", name)
+	return -1
+}
+
+func hasAgentTool(view toolset.AgentView, name string) bool {
+	for _, tool := range view.Tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 type lockedModulePolicySource map[tooldef.ModulePath]error
@@ -339,5 +407,36 @@ func TestResourceBindingTwoTierFlow(t *testing.T) {
 	}
 	if params["b"] != 10 {
 		t.Errorf("expected b=10, got %v", params["b"])
+	}
+}
+
+func TestAgentViewConcurrency(t *testing.T) {
+	prepared := calcToolset(t, toolset.Config{})
+
+	const numGoroutines = 20
+	const iterations = 50
+
+	errChan := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				view := prepared.AgentView()
+				if len(view.Tools) == 0 {
+					errChan <- errors.New("expected tools in view")
+					return
+				}
+				for _, tool := range view.Tools {
+					_ = tool.ParamsType()
+				}
+			}
+			errChan <- nil
+		}()
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		if err := <-errChan; err != nil {
+			t.Fatal(err)
+		}
 	}
 }

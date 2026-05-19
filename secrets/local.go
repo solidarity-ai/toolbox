@@ -212,6 +212,9 @@ func (s *LocalSecretStore) ensureUnlocked() error {
 			return ErrNotInitialized
 		}
 		codes, setupErr := s.Setup(context.Background(), s.defaultUnlockKey)
+		if errors.Is(setupErr, ErrAlreadyInitialized) {
+			return s.Unlock(context.Background(), s.defaultUnlockKey)
+		}
 		if setupErr == nil {
 			s.writeBackupCodes(codes)
 		}
@@ -434,6 +437,11 @@ func writeEncryptedFile(path string, recipient age.Recipient, plaintext []byte) 
 	if err := tmpFile.Chmod(0600); err != nil {
 		_ = tmpFile.Close()
 		return fmt.Errorf("setting file permissions: %w", err)
+	}
+
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("syncing temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {

@@ -26,6 +26,10 @@ func VerifyPeerBinary(conn *net.UnixConn) (int, error) {
 			controlErr = err
 			return
 		}
+		if int(cred.Uid) != os.Getuid() {
+			controlErr = fmt.Errorf("peer UID %d does not match current user UID %d", cred.Uid, os.Getuid())
+			return
+		}
 		pid = int(cred.Pid)
 	}); err != nil {
 		return 0, fmt.Errorf("inspect peer credentials: %w", err)

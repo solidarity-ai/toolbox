@@ -27,6 +27,7 @@ type PreparedToolset struct {
 	byName         map[string]int
 	fetchTransport http.RoundTripper
 	omitted        []OmittedPackage
+	agentView      AgentView
 }
 
 type OmittedPackageReason string
@@ -157,12 +158,14 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		return omitted[i].Module.String() < omitted[j].Module.String()
 	})
 
-	return PreparedToolset{
+	ts := PreparedToolset{
 		tools:          out,
 		byName:         byName,
 		fetchTransport: cfg.FetchTransport,
 		omitted:        omitted,
-	}, nil
+	}
+	ts.agentView = ts.buildAgentView()
+	return ts, nil
 }
 
 // NewPreparedToolset creates a prepared toolset from a visible tool list
@@ -178,7 +181,9 @@ func NewPreparedToolset(tools []assembler.LoadedTool) PreparedToolset {
 		out[i].setJSONCallable()
 		byName[tool.Name] = i
 	}
-	return PreparedToolset{tools: out, byName: byName}
+	ts := PreparedToolset{tools: out, byName: byName}
+	ts.agentView = ts.buildAgentView()
+	return ts
 }
 
 // Tools returns a shallow copy of the visible tools for this prepared toolset.
@@ -219,18 +224,23 @@ func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedTools
 	}
 	out := make([]PreparedTool, 0, len(r.tools))
 	byName := make(map[string]int, len(r.tools))
-	for _, tool := range r.tools {
+	var filteredTools []AgentTool
+	for i, tool := range r.tools {
 		if !keep(tool) {
 			continue
 		}
 		byName[tool.Name] = len(out)
 		out = append(out, tool)
+		if i < len(r.agentView.Tools) {
+			filteredTools = append(filteredTools, r.agentView.Tools[i])
+		}
 	}
 	return PreparedToolset{
 		tools:          out,
 		byName:         byName,
 		fetchTransport: r.fetchTransport,
 		omitted:        r.OmittedPackages(),
+		agentView:      AgentView{Tools: filteredTools},
 	}
 }
 

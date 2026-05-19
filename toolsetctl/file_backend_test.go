@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
@@ -141,6 +142,39 @@ func TestFileBackendUninstallUpdatesConsumerAndToolsetFile(t *testing.T) {
 	}
 }
 
+func TestFileBackendNotifiesConsumerAfterUnlock(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc", true)
+	consumer := &reentrantPreparedToolConsumer{}
+
+	backend, err := toolsetctl.NewFileBackend(context.Background(), toolsetctl.FileBackendOptions{
+		ToolsetPath: path,
+		Consumer:    consumer,
+	})
+	if err != nil {
+		t.Fatalf("NewFileBackend(): %v", err)
+	}
+	consumer.backend = backend
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := backend.Uninstall(context.Background(), toolsetctl.UninstallRequest{Target: "calc"})
+		if err != nil {
+			done <- err
+			return
+		}
+		done <- consumer.err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Uninstall(): %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer callback deadlocked while calling back into FileBackend")
+	}
+}
+
 func preparedToolNames(tools []toolset.PreparedTool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
@@ -214,4 +248,16 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatalf("json.Marshal(%T): %v", value, err)
 	}
 	return data
+}
+
+type reentrantPreparedToolConsumer struct {
+	backend *toolsetctl.FileBackend
+	err     error
+}
+
+func (c *reentrantPreparedToolConsumer) SetPreparedTools(toolset.PreparedToolset) {
+	if c.backend == nil {
+		return
+	}
+	_, c.err = c.backend.Prepared(context.Background())
 }

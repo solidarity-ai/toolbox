@@ -48,7 +48,7 @@ func (s *LocalSecretStore) Setup(ctx context.Context, unlockKey string) ([]strin
 		return nil, err
 	}
 	if initialized {
-		return nil, fmt.Errorf("secret store already initialized")
+		return nil, ErrAlreadyInitialized
 	}
 	identityText, state, err := generateWrappedIdentity()
 	if err != nil {

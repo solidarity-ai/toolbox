@@ -28,7 +28,7 @@ func compileBinding(env *cel.Env, expr string) (cel.Program, error) {
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("compile CEL expression %q: %w", expr, issues.Err())
 	}
-	prg, err := env.Program(ast)
+	prg, err := env.Program(ast, cel.CostLimit(10000))
 	if err != nil {
 		return nil, fmt.Errorf("program CEL expression %q: %w", expr, err)
 	}

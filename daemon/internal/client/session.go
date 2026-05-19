@@ -24,8 +24,9 @@ type SessionRegistration struct {
 	client     daemonv1connect.SessionServiceClient
 	stream     *connect.BidiStreamForClient[daemonv1.SessionState, daemonv1.StateUpdate]
 
-	mu    sync.RWMutex
-	state daemonserver.SessionState
+	mu           sync.RWMutex
+	state        daemonserver.SessionState
+	streamNotify chan struct{}
 
 	secretEpoch              string
 	pendingSecretEpochChange bool
@@ -46,10 +47,11 @@ func OpenSessionRegistration(state daemonserver.SessionState) (*SessionRegistrat
 	_ = client.Close()
 
 	reg := &SessionRegistration{
-		socketPath: client.socketPath,
-		client:     daemonv1connect.NewSessionServiceClient(transport.NewUnixHTTPClient(client.socketPath), sessionServiceBaseURL),
-		state:      cloneSessionState(state),
-		done:       make(chan struct{}),
+		socketPath:   client.socketPath,
+		client:       daemonv1connect.NewSessionServiceClient(transport.NewUnixHTTPClient(client.socketPath), sessionServiceBaseURL),
+		state:        cloneSessionState(state),
+		streamNotify: make(chan struct{}, 1),
+		done:         make(chan struct{}),
 	}
 	if err := reg.ensureStream(reg.state); err != nil {
 		return nil, err
@@ -158,7 +160,7 @@ func (r *SessionRegistration) receiveLoop() {
 			select {
 			case <-r.done:
 				return
-			case <-time.After(50 * time.Millisecond):
+			case <-r.streamNotify:
 				continue
 			}
 		}
@@ -287,6 +289,10 @@ func (r *SessionRegistration) ensureStream(state daemonserver.SessionState) erro
 		}
 	}
 	r.stream = stream
+	select {
+	case r.streamNotify <- struct{}{}:
+	default:
+	}
 	return nil
 }
 

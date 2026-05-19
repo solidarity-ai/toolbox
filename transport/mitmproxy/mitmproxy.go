@@ -248,12 +248,19 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if p.Observer != nil {
 			const maxObserveBody = 10 << 20 // 10 MB
 			bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxObserveBody))
-			resp.Body.Close()
 			if err != nil {
+				resp.Body.Close()
 				return
 			}
-			// Replace body so we can still forward it to the client.
-			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			// Reconstruct response body so we can still forward it fully to the client.
+			restOfBody := resp.Body
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{
+				Reader: io.MultiReader(bytes.NewReader(bodyBytes), restOfBody),
+				Closer: restOfBody,
+			}
 
 			// Give observer a copy with its own body reader.
 			obsResp := *resp

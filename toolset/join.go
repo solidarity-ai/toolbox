@@ -22,6 +22,7 @@ func JoinPreparedToolsets(sets ...PreparedToolset) (PreparedToolset, error) {
 			out.byName[tool.Name] = len(out.tools)
 			out.tools = append(out.tools, tool)
 		}
+		out.agentView.Tools = append(out.agentView.Tools, set.agentView.Tools...)
 	}
 
 	return out, nil

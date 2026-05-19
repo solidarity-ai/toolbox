@@ -87,7 +87,10 @@ func (b *PreparedBackend) SetPrepared(prepared toolset.PreparedToolset) {
 	if b == nil {
 		return
 	}
-	b.SetSnapshot(prepared, b.EnableToolsForPackageDiscovery(), b.EnableToolsForToolsetManagement())
+	b.mu.Lock()
+	b.prepared = prepared
+	b.mu.Unlock()
+	b.notifyConsumer()
 }
 
 // SetEnableToolsForPackageDiscovery replaces the stored package-discovery flag.
@@ -95,14 +98,20 @@ func (b *PreparedBackend) SetEnableToolsForPackageDiscovery(enable bool) {
 	if b == nil {
 		return
 	}
-	b.SetSnapshot(b.basePrepared(), enable, b.EnableToolsForToolsetManagement())
+	b.mu.Lock()
+	b.enablePackageDiscovery = enable
+	b.mu.Unlock()
+	b.notifyConsumer()
 }
 
 func (b *PreparedBackend) SetEnableToolsForToolsetManagement(enable bool) {
 	if b == nil {
 		return
 	}
-	b.SetSnapshot(b.basePrepared(), b.EnableToolsForPackageDiscovery(), enable)
+	b.mu.Lock()
+	b.enableToolsetManagement = enable
+	b.mu.Unlock()
+	b.notifyConsumer()
 }
 
 // SetSnapshot replaces the stored base prepared toolset and both builtin flags

@@ -58,7 +58,7 @@ func buildAccountParams(tool PreparedTool, credAccounts map[string][]string) ([]
 
 func paramsSchema(tool PreparedTool) map[string]any {
 	if tool.Sig == nil {
-		panic("toolset: LoadedTool.Sig must be non-nil")
+		return nil
 	}
 	pt := tool.Sig.ParamsAsObject()
 	if pt == nil {

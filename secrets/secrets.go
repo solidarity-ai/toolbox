@@ -17,6 +17,9 @@ var ErrLocked = errors.New("secret store is locked")
 // ErrNotInitialized is returned when a secret store has not been set up yet.
 var ErrNotInitialized = errors.New("secret store is not initialized")
 
+// ErrAlreadyInitialized is returned when a secret store has already been set up.
+var ErrAlreadyInitialized = errors.New("secret store is already initialized")
+
 // ErrRecoveryWindowExpired is returned when a recovery-only operation is no longer allowed.
 var ErrRecoveryWindowExpired = errors.New("secret store recovery window expired")
 

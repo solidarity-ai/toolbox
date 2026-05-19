@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
@@ -37,6 +38,7 @@ type FileBackendOptions struct {
 // FileBackend persists runtime toolset mutations back to a toolset file and
 // pushes the resulting effective prepared snapshot to one live consumer.
 type FileBackend struct {
+	mu                   sync.RWMutex
 	toolsetPath          string
 	resolver             *registry.Resolver
 	config               toolset.Config
@@ -74,11 +76,26 @@ func (b *FileBackend) Prepared(ctx context.Context) (toolset.PreparedToolset, er
 	if b == nil {
 		return toolset.PreparedToolset{}, nil
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.preparedLocked(ctx)
+}
+
+func (b *FileBackend) preparedLocked(ctx context.Context) (toolset.PreparedToolset, error) {
 	prepared, err := b.prepared.Prepared(ctx)
 	if err != nil {
 		return toolset.PreparedToolset{}, err
 	}
-	return b.filterPrepared(prepared), nil
+	return b.filterPreparedLocked(prepared), nil
+}
+
+func (b *FileBackend) filterPreparedLocked(prepared toolset.PreparedToolset) toolset.PreparedToolset {
+	if len(b.allowedEffects) == 0 {
+		return prepared
+	}
+	return prepared.FilterTools(func(tool toolset.PreparedTool) bool {
+		return b.allowedEffects[tool.Effect]
+	})
 }
 
 func (b *FileBackend) Reload(ctx context.Context) (toolset.PreparedToolset, error) {
@@ -92,6 +109,8 @@ func (b *FileBackend) EnableToolsForPackageDiscovery() bool {
 	if b == nil {
 		return false
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.prepared.EnableToolsForPackageDiscovery()
 }
 
@@ -99,6 +118,8 @@ func (b *FileBackend) EnableToolsForToolsetManagement() bool {
 	if b == nil {
 		return false
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.prepared.EnableToolsForToolsetManagement()
 }
 
@@ -124,11 +145,14 @@ func (b *FileBackend) Search(ctx context.Context, req toolpkgdiscovery.SearchReq
 	if !req.Tools && !req.Packages {
 		req.Packages = true
 	}
-	if b.searchClientFactory == nil {
+	b.mu.RLock()
+	factory := b.searchClientFactory
+	b.mu.RUnlock()
+	if factory == nil {
 		return toolpkgdiscovery.SearchResult{}, fmt.Errorf("search: registry search is not configured")
 	}
 
-	client, err := b.searchClientFactory()
+	client, err := factory()
 	if err != nil {
 		return toolpkgdiscovery.SearchResult{}, err
 	}
@@ -161,6 +185,11 @@ func (b *FileBackend) Inspect(ctx context.Context, req toolpkgdiscovery.InspectR
 		return toolpkgdiscovery.InspectResult{}, fmt.Errorf("inspect: target is required")
 	}
 
+	b.mu.RLock()
+	resolver := b.resolver
+	toolsetPath := b.toolsetPath
+	b.mu.RUnlock()
+
 	if stat, err := os.Stat(target); err == nil && stat.IsDir() {
 		pkg, err := packaging.LoadDev(target)
 		if err != nil {
@@ -187,10 +216,10 @@ func (b *FileBackend) Inspect(ctx context.Context, req toolpkgdiscovery.InspectR
 				Package: pkg.Package,
 			}, nil
 		}
-		if b.resolver == nil {
+		if resolver == nil {
 			return toolpkgdiscovery.InspectResult{}, fmt.Errorf("inspect %s: resolver is not configured", target)
 		}
-		result, err := b.resolver.Resolve(ctx, registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
+		result, err := resolver.Resolve(ctx, registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
 		if err != nil {
 			return toolpkgdiscovery.InspectResult{}, err
 		}
@@ -202,11 +231,11 @@ func (b *FileBackend) Inspect(ctx context.Context, req toolpkgdiscovery.InspectR
 		}, nil
 	}
 
-	ts, err := toolsetfile.Load(b.toolsetPath)
+	ts, err := toolsetfile.Load(toolsetPath)
 	if err != nil {
 		return toolpkgdiscovery.InspectResult{}, err
 	}
-	loaded, err := loadInstalledPackages(ctx, b.resolver, ts)
+	loaded, err := loadInstalledPackages(ctx, resolver, ts)
 	if err != nil {
 		return toolpkgdiscovery.InspectResult{}, err
 	}
@@ -239,7 +268,14 @@ func (b *FileBackend) Install(ctx context.Context, req InstallRequest) (toolset.
 		return toolset.PreparedToolset{}, unsupportedManagementOp("install")
 	}
 
-	module, version, err := b.resolveInstallPackage(ctx, strings.TrimSpace(req.Package))
+	b.mu.Lock()
+	var notify preparedToolNotification
+	defer func() {
+		b.mu.Unlock()
+		notify.publish()
+	}()
+
+	module, version, err := b.resolveInstallPackageLocked(ctx, strings.TrimSpace(req.Package))
 	if err != nil {
 		return toolset.PreparedToolset{}, err
 	}
@@ -254,7 +290,11 @@ func (b *FileBackend) Install(ctx context.Context, req InstallRequest) (toolset.
 	if err := ts.Write(b.toolsetPath); err != nil {
 		return toolset.PreparedToolset{}, err
 	}
-	return b.reload(ctx)
+	prepared, notify, err := b.reloadLocked(ctx)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+	return prepared, nil
 }
 
 func (b *FileBackend) Uninstall(ctx context.Context, req UninstallRequest) (toolset.PreparedToolset, error) {
@@ -265,6 +305,13 @@ func (b *FileBackend) Uninstall(ctx context.Context, req UninstallRequest) (tool
 	if target == "" {
 		return toolset.PreparedToolset{}, fmt.Errorf("uninstall: target is required")
 	}
+
+	b.mu.Lock()
+	var notify preparedToolNotification
+	defer func() {
+		b.mu.Unlock()
+		notify.publish()
+	}()
 
 	ts, err := toolsetfile.Load(b.toolsetPath)
 	if err != nil {
@@ -280,13 +327,25 @@ func (b *FileBackend) Uninstall(ctx context.Context, req UninstallRequest) (tool
 	if err := ts.Write(b.toolsetPath); err != nil {
 		return toolset.PreparedToolset{}, err
 	}
-	return b.reload(ctx)
+	prepared, notify, err := b.reloadLocked(ctx)
+	if err != nil {
+		return toolset.PreparedToolset{}, err
+	}
+	return prepared, nil
 }
 
 func (b *FileBackend) Auth(ctx context.Context, req AuthRequest) (toolset.PreparedToolset, error) {
 	if b == nil {
 		return toolset.PreparedToolset{}, unsupportedManagementOp("auth")
 	}
+
+	b.mu.Lock()
+	var notify preparedToolNotification
+	defer func() {
+		b.mu.Unlock()
+		notify.publish()
+	}()
+
 	if b.credentialRepository == nil {
 		return toolset.PreparedToolset{}, fmt.Errorf("auth: credential repository is not configured")
 	}
@@ -317,7 +376,7 @@ func (b *FileBackend) Auth(ctx context.Context, req AuthRequest) (toolset.Prepar
 		return toolset.PreparedToolset{}, fmt.Errorf("auth: choose exactly one action")
 	}
 
-	loaded, err := b.loadInstalledPackage(ctx, target)
+	loaded, err := b.loadInstalledPackageLocked(ctx, target)
 	if err != nil {
 		return toolset.PreparedToolset{}, err
 	}
@@ -339,7 +398,7 @@ func (b *FileBackend) Auth(ctx context.Context, req AuthRequest) (toolset.Prepar
 		if len(missing) > 0 {
 			return toolset.PreparedToolset{}, fmt.Errorf("auth: package %s has unconfigured credentials: %s", loaded.Package.Name, strings.Join(missing, ", "))
 		}
-		return b.Prepared(ctx)
+		return b.preparedLocked(ctx)
 	case renameRequested:
 		from := strings.TrimSpace(req.RenameAccountFrom)
 		to := strings.TrimSpace(req.RenameAccountTo)
@@ -349,12 +408,22 @@ func (b *FileBackend) Auth(ctx context.Context, req AuthRequest) (toolset.Prepar
 		if _, err := b.credentialRepository.RenameAccount(ctx, loaded.Package, credentialName, from, to); err != nil {
 			return toolset.PreparedToolset{}, fmt.Errorf("auth: %w", err)
 		}
-		return b.reload(ctx)
+		var prepared toolset.PreparedToolset
+		prepared, notify, err = b.reloadLocked(ctx)
+		if err != nil {
+			return toolset.PreparedToolset{}, err
+		}
+		return prepared, nil
 	case strings.TrimSpace(req.DeleteAccount) != "":
 		if _, err := b.credentialRepository.DeleteAccount(ctx, loaded.Package, credentialName, strings.TrimSpace(req.DeleteAccount)); err != nil {
 			return toolset.PreparedToolset{}, fmt.Errorf("auth: %w", err)
 		}
-		return b.reload(ctx)
+		var prepared toolset.PreparedToolset
+		prepared, notify, err = b.reloadLocked(ctx)
+		if err != nil {
+			return toolset.PreparedToolset{}, err
+		}
+		return prepared, nil
 	case req.DeleteCredential:
 		if credentialName == "" {
 			return toolset.PreparedToolset{}, fmt.Errorf("auth: credential is required when deleteCredential is true")
@@ -362,13 +431,18 @@ func (b *FileBackend) Auth(ctx context.Context, req AuthRequest) (toolset.Prepar
 		if _, err := b.credentialRepository.DeleteCredential(ctx, loaded.Package, credentialName); err != nil {
 			return toolset.PreparedToolset{}, fmt.Errorf("auth: %w", err)
 		}
-		return b.reload(ctx)
+		var prepared toolset.PreparedToolset
+		prepared, notify, err = b.reloadLocked(ctx)
+		if err != nil {
+			return toolset.PreparedToolset{}, err
+		}
+		return prepared, nil
 	default:
 		return toolset.PreparedToolset{}, fmt.Errorf("auth: unsupported request")
 	}
 }
 
-func (b *FileBackend) resolveInstallPackage(ctx context.Context, spec string) (tooldef.ModulePath, tooldef.Version, error) {
+func (b *FileBackend) resolveInstallPackageLocked(ctx context.Context, spec string) (tooldef.ModulePath, tooldef.Version, error) {
 	if spec == "" {
 		return "", "", fmt.Errorf("install: package is required")
 	}
@@ -398,36 +472,50 @@ func (b *FileBackend) resolveInstallPackage(ctx context.Context, spec string) (t
 }
 
 func (b *FileBackend) reload(ctx context.Context) (toolset.PreparedToolset, error) {
-	ts, err := toolsetfile.Load(b.toolsetPath)
+	b.mu.Lock()
+	var notify preparedToolNotification
+	defer func() {
+		b.mu.Unlock()
+		notify.publish()
+	}()
+	prepared, notify, err := b.reloadLocked(ctx)
 	if err != nil {
 		return toolset.PreparedToolset{}, err
+	}
+	return prepared, nil
+}
+
+func (b *FileBackend) reloadLocked(ctx context.Context) (toolset.PreparedToolset, preparedToolNotification, error) {
+	ts, err := toolsetfile.Load(b.toolsetPath)
+	if err != nil {
+		return toolset.PreparedToolset{}, preparedToolNotification{}, err
 	}
 	prepared, err := ts.Prepare(ctx, b.resolver, b.config)
 	if err != nil {
-		return toolset.PreparedToolset{}, err
+		return toolset.PreparedToolset{}, preparedToolNotification{}, err
 	}
 
 	b.prepared.SetSnapshot(prepared, ts.AgentAllowsPackageDiscovery(), ts.AgentAllowsToolsetManagement())
-	effective, err := b.Prepared(ctx)
+	effective, err := b.preparedLocked(ctx)
 	if err != nil {
-		return toolset.PreparedToolset{}, err
+		return toolset.PreparedToolset{}, preparedToolNotification{}, err
 	}
-	if b.consumer != nil {
-		b.consumer.SetPreparedTools(effective)
-	}
-	return effective, nil
+	return effective, preparedToolNotification{consumer: b.consumer, prepared: effective}, nil
 }
 
-func (b *FileBackend) filterPrepared(prepared toolset.PreparedToolset) toolset.PreparedToolset {
-	if len(b.allowedEffects) == 0 {
-		return prepared
-	}
-	return prepared.FilterTools(func(tool toolset.PreparedTool) bool {
-		return b.allowedEffects[tool.Effect]
-	})
+type preparedToolNotification struct {
+	consumer PreparedToolConsumer
+	prepared toolset.PreparedToolset
 }
 
-func (b *FileBackend) loadInstalledPackage(ctx context.Context, target string) (packaging.LoadedPackage, error) {
+func (n preparedToolNotification) publish() {
+	if n.consumer == nil {
+		return
+	}
+	n.consumer.SetPreparedTools(n.prepared)
+}
+
+func (b *FileBackend) loadInstalledPackageLocked(ctx context.Context, target string) (packaging.LoadedPackage, error) {
 	ts, err := toolsetfile.Load(b.toolsetPath)
 	if err != nil {
 		return packaging.LoadedPackage{}, err

@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -159,3 +160,101 @@ func selfSignedCert(t *testing.T, host string) (certPEM, keyPEM []byte) {
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	return
 }
+
+func TestMITMProxyLargeBody(t *testing.T) {
+	upstreamCert, upstreamKey := selfSignedCert(t, "127.0.0.1")
+	
+	const largeSize = 11 << 20 // 11 MB
+	mux := http.NewServeMux()
+	mux.HandleFunc("/large", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		chunk := make([]byte, 1024)
+		for i := range chunk {
+			chunk[i] = 'a'
+		}
+		for i := 0; i < largeSize/len(chunk); i++ {
+			_, _ = w.Write(chunk)
+		}
+	})
+
+	tlsCert, err := tls.X509KeyPair(upstreamCert, upstreamKey)
+	if err != nil {
+		t.Fatalf("X509KeyPair: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	tlsListener := tls.NewListener(listener, &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+	})
+	server := &http.Server{Handler: mux}
+	go server.Serve(tlsListener)
+	defer server.Close()
+
+	upstreamAddr := listener.Addr().String()
+
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AppendCertsFromPEM(upstreamCert)
+
+	var (
+		mu          sync.Mutex
+		observedLen int
+	)
+
+	proxy, err := mitmproxy.New(mitmproxy.ObserverFunc(func(host string, req *http.Request, resp *http.Response) {
+		mu.Lock()
+		defer mu.Unlock()
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		observedLen = len(bodyBytes)
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	proxy.UpstreamTLSConfig = &tls.Config{RootCAs: upstreamPool}
+
+	proxyListener, err := proxy.ListenAndServe()
+	if err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+	defer proxyListener.Close()
+
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(mitmproxy.CACertPEM()) {
+		t.Fatal("failed to add CA cert")
+	}
+	proxyURL, _ := url.Parse("http://" + proxyListener.Addr().String())
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		},
+	}
+
+	resp, err := client.Get("https://" + upstreamAddr + "/large")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	fullBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	if len(fullBody) != largeSize {
+		t.Errorf("got client body size %d, want %d", len(fullBody), largeSize)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	const maxObserveBody = 10 << 20
+	if observedLen != maxObserveBody {
+		t.Errorf("got observed body size %d, want %d", observedLen, maxObserveBody)
+	}
+}
+

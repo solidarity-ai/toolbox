@@ -16,7 +16,7 @@ func TestParseRunningDaemonPIDs(t *testing.T) {
   102 toolbox daemon stop
   103 /Applications/Toolbox Dev/bin/toolbox _daemon serve --foreground
   104 toolbox _daemon serve-stdio
-  bad line
+  105 /usr/bin/nano _daemon serve
   101 /Applications/Toolbox/bin/toolbox _daemon serve
 `
 

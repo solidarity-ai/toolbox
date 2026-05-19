@@ -400,7 +400,7 @@ func (ci *CredentialInjector) matchedCredential(u *url.URL) (*InjectionRule, str
 	if rule == nil {
 		return nil, "", nil
 	}
-	if strings.EqualFold(u.Scheme, "http") && !rule.AllowUnsafeHTTPInjection {
+	if !strings.EqualFold(u.Scheme, "https") && !rule.AllowUnsafeHTTPInjection {
 		return nil, "", fmt.Errorf("unsafe http credential injection blocked for %s", u.Host)
 	}
 

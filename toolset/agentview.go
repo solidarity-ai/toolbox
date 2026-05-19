@@ -19,6 +19,7 @@ type AgentTool struct {
 	Description        string
 	ParamsSchema       map[string]any
 	Sig                *toolbox.FuncSignature
+	paramsType         *toolbox.TSType
 	hiddenParams       map[string]bool
 	boundLiterals      map[string]any // param name -> constant value for non-hidden bindings
 	Effect             tooldef.Effect
@@ -42,6 +43,10 @@ func (t AgentTool) BoundLiterals() map[string]any {
 // with hidden bound params removed and non-hidden bound params narrowed to
 // literal types. Returns nil if no signature is available.
 func (t AgentTool) ParamsType() *toolbox.TSType {
+	return t.paramsType
+}
+
+func (t AgentTool) deriveParamsType() *toolbox.TSType {
 	if t.Sig == nil {
 		return nil
 	}
@@ -63,8 +68,12 @@ func (t AgentTool) ParamsType() *toolbox.TSType {
 }
 
 // AgentView produces the agent-visible tool surface from the prepared toolset.
-// Hidden params are removed; non-hidden bound params are narrowed to literals.
 func (r PreparedToolset) AgentView() AgentView {
+	return cloneAgentView(r.agentView)
+}
+
+// buildAgentView constructs the AgentView once during toolset preparation.
+func (r PreparedToolset) buildAgentView() AgentView {
 	tools := make([]AgentTool, 0, len(r.tools))
 	for _, rt := range r.tools {
 		at := AgentTool{
@@ -89,15 +98,70 @@ func (r PreparedToolset) AgentView() AgentView {
 			at.Sig = sig
 		}
 
-		// Derive ParamsSchema from ParamsType (includes hidden removal,
-		// literal narrowing, and account params from the augmented Sig).
-		if pt := at.ParamsType(); pt != nil {
+		// Derive ParamsSchema and paramsType.
+		if pt := at.deriveParamsType(); pt != nil {
+			at.paramsType = pt
 			at.ParamsSchema = pt.ToJSONSchema()
 		}
 
 		tools = append(tools, at)
 	}
 	return AgentView{Tools: tools}
+}
+
+func cloneAgentView(view AgentView) AgentView {
+	if view.Tools == nil {
+		return AgentView{}
+	}
+	tools := make([]AgentTool, len(view.Tools))
+	for i, tool := range view.Tools {
+		tools[i] = cloneAgentTool(tool)
+	}
+	return AgentView{Tools: tools}
+}
+
+func cloneAgentTool(tool AgentTool) AgentTool {
+	tool.ParamsSchema = cloneAnyMap(tool.ParamsSchema)
+	tool.hiddenParams = cloneBoolMap(tool.hiddenParams)
+	tool.boundLiterals = cloneAnyMap(tool.boundLiterals)
+	return tool
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneAny(value)
+	}
+	return out
+}
+
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, elem := range typed {
+			out[i] = cloneAny(elem)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func agentToolDescription(tool PreparedTool) string {

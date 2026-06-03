@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/solidarity-ai/toolbox/credentialrepo"
+	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/oauth2flow"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/secrets"
@@ -23,8 +24,21 @@ import (
 
 // openBrowser opens a URL in the user's default browser.
 // It is a variable so tests can replace it.
-var openBrowser = func(url string) {
-	_ = exec.Command("open", url).Start()
+var openBrowser = func(url string) error {
+	return exec.Command("open", url).Start()
+}
+
+type daemonOAuthClientCloser interface {
+	daemonOAuthClient
+	Close() error
+}
+
+var connectDaemonOAuth = func(context.Context) (daemonOAuthClientCloser, error) {
+	return daemon.EnsureConnection()
+}
+
+type authRunOptions struct {
+	PreferDaemonOAuth bool
 }
 
 func runAuth(args []string, opts secretStoreOptions, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -136,10 +150,16 @@ func runAuth(args []string, opts secretStoreOptions, stdin io.Reader, stdout, st
 	if check {
 		return checkAuthWithRepo(loaded, repo, stdout)
 	}
-	return runAuthWithRepo(loaded, repo, stdin, stdout, stderr, account, credential)
+	return runAuthWithRepoWithOptions(loaded, repo, stdin, stdout, stderr, account, credential, authRunOptions{
+		PreferDaemonOAuth: !opts.NoDaemon,
+	})
 }
 
 func runAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Repository, stdin io.Reader, stdout, stderr io.Writer, account, credential string) error {
+	return runAuthWithRepoWithOptions(loaded, repo, stdin, stdout, stderr, account, credential, authRunOptions{})
+}
+
+func runAuthWithRepoWithOptions(loaded packaging.LoadedPackage, repo *credentialrepo.Repository, stdin io.Reader, stdout, stderr io.Writer, account, credential string, opts authRunOptions) error {
 	creds := loaded.Package.Credentials
 	if len(creds) == 0 {
 		fmt.Fprintln(stdout, "no credentials required")
@@ -185,7 +205,7 @@ func runAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Reposi
 		writeCredentialInstructions(stdout, cred, "")
 		switch cred.Type {
 		case "oauth2":
-			if err := authOAuth2(ctx, repo, input, loaded.Package, cred, account, stdout, stderr); err != nil {
+			if err := authOAuth2(ctx, repo, input, loaded.Package, cred, account, stdout, stderr, opts); err != nil {
 				return fmt.Errorf("auth: oauth2 credential %q: %w", cred.Name, err)
 			}
 		case "api_key":
@@ -204,7 +224,7 @@ func runAuthWithRepo(loaded packaging.LoadedPackage, repo *credentialrepo.Reposi
 	return nil
 }
 
-func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *authInput, pkg tooldef.Package, cred tooldef.PackageCredential, account string, stdout, stderr io.Writer) error {
+func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *authInput, pkg tooldef.Package, cred tooldef.PackageCredential, account string, stdout, stderr io.Writer, runOpts authRunOptions) error {
 	if account == "" {
 		account = "default"
 	}
@@ -282,49 +302,22 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 		Scopes:       cred.Scopes,
 	}
 
-	// Build code receiver: callback server + manual paste, first wins.
-	callbackRecv, err := oauth2flow.NewCallbackReceiver()
-	if err != nil {
-		return fmt.Errorf("starting callback server: %w", err)
-	}
-	defer callbackRecv.Close()
-
-	manualRecv := oauth2flow.NewManualReceiver(input, callbackRecv.RedirectURI())
-	receiver := oauth2flow.NewRaceReceiver(callbackRecv.RedirectURI(), callbackRecv, manualRecv)
-	defer receiver.Close()
-
 	// Build auth options from manifest.
 	verifier := ""
 	if pkceEnabled {
 		verifier = oauth2.GenerateVerifier()
 	}
-	var opts []oauth2.AuthCodeOption
+	var authOpts []oauth2.AuthCodeOption
 	if cred.Provider != nil {
 		for k, v := range cred.Provider.AuthParams {
-			opts = append(opts, oauth2.SetAuthURLParam(k, v))
+			authOpts = append(authOpts, oauth2.SetAuthURLParam(k, v))
 		}
 	}
 
 	flowCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	code, err := oauth2flow.AuthorizeCode(flowCtx, cfg, receiver, verifier, opts, func(authorizationURL string) {
-		fmt.Fprintf(stdout, "Authorizing %s (oauth2)\n", cred.Name)
-		if cred.Provider != nil && cred.Provider.Name != "" {
-			fmt.Fprintf(stdout, "  Provider: %s\n", cred.Provider.Name)
-		}
-		if len(cred.Scopes) > 0 {
-			fmt.Fprintf(stdout, "  Scopes:\n")
-			for _, s := range cred.Scopes {
-				fmt.Fprintf(stdout, "    - %s\n", s)
-			}
-		}
-		fmt.Fprintln(stdout)
-		fmt.Fprintf(stdout, "Opening browser to authorize...\n")
-		fmt.Fprintf(stdout, "If the browser does not open, visit:\n%s\n", authorizationURL)
-		fmt.Fprintf(stdout, "\nOr paste the full redirect URL or authorization code here: ")
-		openBrowser(authorizationURL)
-	})
+	code, err := authorizeOAuth2Code(flowCtx, cfg, input, pkg, cred, account, verifier, authOpts, runOpts.PreferDaemonOAuth, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("oauth2 authorization: %w", err)
 	}
@@ -359,6 +352,103 @@ func authOAuth2(ctx context.Context, repo *credentialrepo.Repository, input *aut
 	fmt.Fprintf(stdout, "\nCredentials stored. Tools in this package can now make authenticated requests.\n")
 
 	return nil
+}
+
+func authorizeOAuth2Code(ctx context.Context, cfg *oauth2.Config, input *authInput, pkg tooldef.Package, cred tooldef.PackageCredential, account, verifier string, opts []oauth2.AuthCodeOption, preferDaemon bool, stdout, stderr io.Writer) (string, error) {
+	if preferDaemon {
+		code, used, err := authorizeOAuth2CodeWithDaemon(ctx, cfg, input, pkg, cred, account, verifier, opts, stdout, stderr)
+		if used {
+			return code, err
+		}
+	}
+	return authorizeOAuth2CodeWithLocalCallback(ctx, cfg, input, cred, verifier, opts, stdout)
+}
+
+func authorizeOAuth2CodeWithDaemon(ctx context.Context, cfg *oauth2.Config, input *authInput, pkg tooldef.Package, cred tooldef.PackageCredential, account, verifier string, opts []oauth2.AuthCodeOption, stdout, stderr io.Writer) (code string, used bool, err error) {
+	client, err := connectDaemonOAuth(ctx)
+	if err != nil {
+		return "", false, nil
+	}
+	if client == nil {
+		return "", false, nil
+	}
+	defer client.Close()
+
+	daemonRecv, err := newDaemonOAuthReceiver(ctx, client, oauthAuthorizationLabel(pkg, cred, account))
+	if err != nil {
+		return "", false, nil
+	}
+	defer daemonRecv.Close()
+
+	manualRecv := oauth2flow.NewManualReceiver(input, daemonRecv.RedirectURI())
+	receiver := oauth2flow.NewRaceReceiver(daemonRecv.RedirectURI(), daemonRecv, manualRecv)
+	defer receiver.Close()
+
+	code, err = oauth2flow.AuthorizeCode(ctx, cfg, receiver, verifier, opts, func(authorizationURL string) {
+		printOAuthAuthorizationSummary(stdout, cred)
+		fmt.Fprintf(stdout, "Authorization is waiting in the Toolbox daemon.\n\n")
+		fmt.Fprintf(stdout, "Opening daemon page...\n")
+		if err := openBrowser(daemonRecv.DaemonURL()); err != nil && stderr != nil {
+			fmt.Fprintf(stderr, "toolbox auth: could not open daemon page: %v\n", err)
+		}
+		fmt.Fprintf(stdout, "If it does not open, visit:\n%s\n\n", daemonRecv.DaemonURL())
+		fmt.Fprintf(stdout, "Then click Continue authorization.\n\n")
+		fmt.Fprintf(stdout, "Or visit directly:\n%s\n\n", authorizationURL)
+		fmt.Fprintf(stdout, "Or paste the full redirect URL or authorization code here: ")
+	})
+	if err != nil && daemonRecv.FlowID() == "" {
+		return "", false, nil
+	}
+	return code, true, err
+}
+
+func authorizeOAuth2CodeWithLocalCallback(ctx context.Context, cfg *oauth2.Config, input *authInput, cred tooldef.PackageCredential, verifier string, opts []oauth2.AuthCodeOption, stdout io.Writer) (string, error) {
+	callbackRecv, err := oauth2flow.NewCallbackReceiver()
+	if err != nil {
+		return "", fmt.Errorf("starting callback server: %w", err)
+	}
+	defer callbackRecv.Close()
+
+	manualRecv := oauth2flow.NewManualReceiver(input, callbackRecv.RedirectURI())
+	receiver := oauth2flow.NewRaceReceiver(callbackRecv.RedirectURI(), callbackRecv, manualRecv)
+	defer receiver.Close()
+
+	return oauth2flow.AuthorizeCode(ctx, cfg, receiver, verifier, opts, func(authorizationURL string) {
+		printOAuthAuthorizationSummary(stdout, cred)
+		fmt.Fprintf(stdout, "Opening browser to authorize...\n")
+		fmt.Fprintf(stdout, "If the browser does not open, visit:\n%s\n", authorizationURL)
+		fmt.Fprintf(stdout, "\nOr paste the full redirect URL or authorization code here: ")
+		_ = openBrowser(authorizationURL)
+	})
+}
+
+func printOAuthAuthorizationSummary(stdout io.Writer, cred tooldef.PackageCredential) {
+	fmt.Fprintf(stdout, "Authorizing %s (oauth2)\n", cred.Name)
+	if cred.Provider != nil && cred.Provider.Name != "" {
+		fmt.Fprintf(stdout, "  Provider: %s\n", cred.Provider.Name)
+	}
+	if len(cred.Scopes) > 0 {
+		fmt.Fprintf(stdout, "  Scopes:\n")
+		for _, s := range cred.Scopes {
+			fmt.Fprintf(stdout, "    - %s\n", s)
+		}
+	}
+	fmt.Fprintln(stdout)
+}
+
+func oauthAuthorizationLabel(pkg tooldef.Package, cred tooldef.PackageCredential, account string) string {
+	packageName := strings.TrimSpace(pkg.Name)
+	if packageName == "" {
+		packageName = strings.TrimSpace(string(pkg.Module))
+	}
+	if packageName == "" {
+		packageName = "package"
+	}
+	label := fmt.Sprintf("Authorize %s for %s (%s)", cred.Name, packageName, account)
+	if cred.Provider != nil && strings.TrimSpace(cred.Provider.Name) != "" {
+		label += fmt.Sprintf(" via %s", strings.TrimSpace(cred.Provider.Name))
+	}
+	return label
 }
 
 func authAPIKey(ctx context.Context, repo *credentialrepo.Repository, input *authInput, pkg tooldef.Package, cred tooldef.PackageCredential, account string, stdout io.Writer) error {
@@ -607,6 +697,9 @@ func (i *authInput) dispatch() {
 		if pending != nil && len(backlog) > 0 {
 			res := backlog[0]
 			backlog = backlog[1:]
+			if res.err == nil && i.shouldIgnore(res.line) {
+				continue
+			}
 			pending.resp <- res
 			pending = nil
 			continue

@@ -196,6 +196,13 @@ templ ApprovalConsolePage(page daemonIndexPageData, state approvalConsoleState) 
 				.backup-codes p { margin: 0 0 .75rem; color: var(--muted); font-size: 13px; line-height: 1.4; }
 				.backup-codes pre { background: var(--bg-card); border-color: var(--border); }
 				.intent { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem 1.25rem 0; overflow: hidden; transition: border var(--transition-normal); position: relative; }
+				.oauth-flow { background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: var(--radius); margin: 1.5rem 0; padding: 1.25rem; overflow: hidden; }
+				.oauth-flow-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: center; }
+				.oauth-flow-eyebrow { margin: 0 0 .25rem; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-family: var(--font-mono); }
+				.oauth-flow-title { margin: 0; color: var(--text); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+				.oauth-flow-meta { margin-top: .45rem; color: var(--muted); font-size: 13px; }
+				.oauth-flow-link { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: var(--radius-sm); padding: 0.5rem 0.8rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+				.oauth-flow-link:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 				.intent-head { display: block; margin-bottom: 1rem; }
 				.intent-primary { display: flex; align-items: center; gap: .65rem; }
 				.intent-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 0; color: var(--text); letter-spacing: -0.01em; }
@@ -446,15 +453,37 @@ templ SecretPanel(page daemonIndexPageData) {
 
 templ ApprovalMain(state approvalConsoleState) {
 	<section id="approval-main">
-		if state.Summary.ActiveClients == 0 {
-			<div class="empty"><h2>No active Toolbox sessions</h2><p>Start a codemode session to review tool approvals here.</p></div>
-		} else if len(state.Sessions) == 0 {
-			<div class="empty"><h2>Awaiting Approvals</h2><p>Tool use approvals will display here when required.</p></div>
-		} else {
+		if len(state.OAuthFlows) > 0 {
+			for _, flow := range state.OAuthFlows {
+				@OAuthFlowCard(flow)
+			}
+		}
+		if len(state.Sessions) > 0 {
 			for _, session := range state.Sessions {
 				@ApprovalSession(session)
 			}
+		} else if len(state.OAuthFlows) == 0 {
+			if state.Summary.ActiveClients == 0 {
+				<div class="empty"><h2>No active Toolbox sessions</h2><p>Start a codemode session to review tool approvals here.</p></div>
+			} else {
+				<div class="empty"><h2>Awaiting Approvals</h2><p>Tool use approvals will display here when required.</p></div>
+			}
 		}
+	</section>
+}
+
+templ OAuthFlowCard(flow approvalConsoleOAuthFlow) {
+	<section class="oauth-flow" id={ "oauth-flow-" + flow.FlowID }>
+		<div class="oauth-flow-head">
+			<div>
+				<p class="oauth-flow-eyebrow">Authorization needed</p>
+				<h2 class="oauth-flow-title">{ firstNonEmpty(flow.Label, "Continue authorization") }</h2>
+				if context := oauthFlowContext(flow); context != "" {
+					<div class="oauth-flow-meta">{ context }</div>
+				}
+			</div>
+			<a class="oauth-flow-link" href={ flow.AuthorizationURL } target="_blank" rel="noopener noreferrer">Continue authorization</a>
+		</div>
 	</section>
 }
 

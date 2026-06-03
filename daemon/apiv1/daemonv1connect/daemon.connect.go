@@ -25,6 +25,8 @@ const (
 	SessionServiceName = "toolbox.daemon.v1.SessionService"
 	// SecretStoreServiceName is the fully-qualified name of the SecretStoreService service.
 	SecretStoreServiceName = "toolbox.daemon.v1.SecretStoreService"
+	// OAuthServiceName is the fully-qualified name of the OAuthService service.
+	OAuthServiceName = "toolbox.daemon.v1.OAuthService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -72,6 +74,15 @@ const (
 	SecretStoreServiceDeleteProcedure = "/toolbox.daemon.v1.SecretStoreService/Delete"
 	// SecretStoreServiceListProcedure is the fully-qualified name of the SecretStoreService's List RPC.
 	SecretStoreServiceListProcedure = "/toolbox.daemon.v1.SecretStoreService/List"
+	// OAuthServiceRedirectURIProcedure is the fully-qualified name of the OAuthService's RedirectURI
+	// RPC.
+	OAuthServiceRedirectURIProcedure = "/toolbox.daemon.v1.OAuthService/RedirectURI"
+	// OAuthServiceBeginProcedure is the fully-qualified name of the OAuthService's Begin RPC.
+	OAuthServiceBeginProcedure = "/toolbox.daemon.v1.OAuthService/Begin"
+	// OAuthServiceWaitProcedure is the fully-qualified name of the OAuthService's Wait RPC.
+	OAuthServiceWaitProcedure = "/toolbox.daemon.v1.OAuthService/Wait"
+	// OAuthServiceCancelProcedure is the fully-qualified name of the OAuthService's Cancel RPC.
+	OAuthServiceCancelProcedure = "/toolbox.daemon.v1.OAuthService/Cancel"
 )
 
 // SessionServiceClient is a client for the toolbox.daemon.v1.SessionService service.
@@ -525,4 +536,152 @@ func (UnimplementedSecretStoreServiceHandler) Delete(context.Context, *connect.R
 
 func (UnimplementedSecretStoreServiceHandler) List(context.Context, *connect.Request[apiv1.SecretListRequest]) (*connect.Response[apiv1.SecretListResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.SecretStoreService.List is not implemented"))
+}
+
+// OAuthServiceClient is a client for the toolbox.daemon.v1.OAuthService service.
+type OAuthServiceClient interface {
+	RedirectURI(context.Context, *connect.Request[apiv1.OAuthRedirectURIRequest]) (*connect.Response[apiv1.OAuthRedirectURIResponse], error)
+	Begin(context.Context, *connect.Request[apiv1.OAuthBeginRequest]) (*connect.Response[apiv1.OAuthBeginResponse], error)
+	Wait(context.Context, *connect.Request[apiv1.OAuthWaitRequest]) (*connect.Response[apiv1.OAuthWaitResponse], error)
+	Cancel(context.Context, *connect.Request[apiv1.OAuthCancelRequest]) (*connect.Response[apiv1.OAuthCancelResponse], error)
+}
+
+// NewOAuthServiceClient constructs a client for the toolbox.daemon.v1.OAuthService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewOAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) OAuthServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	oAuthServiceMethods := apiv1.File_daemon_apiv1_daemon_proto.Services().ByName("OAuthService").Methods()
+	return &oAuthServiceClient{
+		redirectURI: connect.NewClient[apiv1.OAuthRedirectURIRequest, apiv1.OAuthRedirectURIResponse](
+			httpClient,
+			baseURL+OAuthServiceRedirectURIProcedure,
+			connect.WithSchema(oAuthServiceMethods.ByName("RedirectURI")),
+			connect.WithClientOptions(opts...),
+		),
+		begin: connect.NewClient[apiv1.OAuthBeginRequest, apiv1.OAuthBeginResponse](
+			httpClient,
+			baseURL+OAuthServiceBeginProcedure,
+			connect.WithSchema(oAuthServiceMethods.ByName("Begin")),
+			connect.WithClientOptions(opts...),
+		),
+		wait: connect.NewClient[apiv1.OAuthWaitRequest, apiv1.OAuthWaitResponse](
+			httpClient,
+			baseURL+OAuthServiceWaitProcedure,
+			connect.WithSchema(oAuthServiceMethods.ByName("Wait")),
+			connect.WithClientOptions(opts...),
+		),
+		cancel: connect.NewClient[apiv1.OAuthCancelRequest, apiv1.OAuthCancelResponse](
+			httpClient,
+			baseURL+OAuthServiceCancelProcedure,
+			connect.WithSchema(oAuthServiceMethods.ByName("Cancel")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// oAuthServiceClient implements OAuthServiceClient.
+type oAuthServiceClient struct {
+	redirectURI *connect.Client[apiv1.OAuthRedirectURIRequest, apiv1.OAuthRedirectURIResponse]
+	begin       *connect.Client[apiv1.OAuthBeginRequest, apiv1.OAuthBeginResponse]
+	wait        *connect.Client[apiv1.OAuthWaitRequest, apiv1.OAuthWaitResponse]
+	cancel      *connect.Client[apiv1.OAuthCancelRequest, apiv1.OAuthCancelResponse]
+}
+
+// RedirectURI calls toolbox.daemon.v1.OAuthService.RedirectURI.
+func (c *oAuthServiceClient) RedirectURI(ctx context.Context, req *connect.Request[apiv1.OAuthRedirectURIRequest]) (*connect.Response[apiv1.OAuthRedirectURIResponse], error) {
+	return c.redirectURI.CallUnary(ctx, req)
+}
+
+// Begin calls toolbox.daemon.v1.OAuthService.Begin.
+func (c *oAuthServiceClient) Begin(ctx context.Context, req *connect.Request[apiv1.OAuthBeginRequest]) (*connect.Response[apiv1.OAuthBeginResponse], error) {
+	return c.begin.CallUnary(ctx, req)
+}
+
+// Wait calls toolbox.daemon.v1.OAuthService.Wait.
+func (c *oAuthServiceClient) Wait(ctx context.Context, req *connect.Request[apiv1.OAuthWaitRequest]) (*connect.Response[apiv1.OAuthWaitResponse], error) {
+	return c.wait.CallUnary(ctx, req)
+}
+
+// Cancel calls toolbox.daemon.v1.OAuthService.Cancel.
+func (c *oAuthServiceClient) Cancel(ctx context.Context, req *connect.Request[apiv1.OAuthCancelRequest]) (*connect.Response[apiv1.OAuthCancelResponse], error) {
+	return c.cancel.CallUnary(ctx, req)
+}
+
+// OAuthServiceHandler is an implementation of the toolbox.daemon.v1.OAuthService service.
+type OAuthServiceHandler interface {
+	RedirectURI(context.Context, *connect.Request[apiv1.OAuthRedirectURIRequest]) (*connect.Response[apiv1.OAuthRedirectURIResponse], error)
+	Begin(context.Context, *connect.Request[apiv1.OAuthBeginRequest]) (*connect.Response[apiv1.OAuthBeginResponse], error)
+	Wait(context.Context, *connect.Request[apiv1.OAuthWaitRequest]) (*connect.Response[apiv1.OAuthWaitResponse], error)
+	Cancel(context.Context, *connect.Request[apiv1.OAuthCancelRequest]) (*connect.Response[apiv1.OAuthCancelResponse], error)
+}
+
+// NewOAuthServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewOAuthServiceHandler(svc OAuthServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	oAuthServiceMethods := apiv1.File_daemon_apiv1_daemon_proto.Services().ByName("OAuthService").Methods()
+	oAuthServiceRedirectURIHandler := connect.NewUnaryHandler(
+		OAuthServiceRedirectURIProcedure,
+		svc.RedirectURI,
+		connect.WithSchema(oAuthServiceMethods.ByName("RedirectURI")),
+		connect.WithHandlerOptions(opts...),
+	)
+	oAuthServiceBeginHandler := connect.NewUnaryHandler(
+		OAuthServiceBeginProcedure,
+		svc.Begin,
+		connect.WithSchema(oAuthServiceMethods.ByName("Begin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	oAuthServiceWaitHandler := connect.NewUnaryHandler(
+		OAuthServiceWaitProcedure,
+		svc.Wait,
+		connect.WithSchema(oAuthServiceMethods.ByName("Wait")),
+		connect.WithHandlerOptions(opts...),
+	)
+	oAuthServiceCancelHandler := connect.NewUnaryHandler(
+		OAuthServiceCancelProcedure,
+		svc.Cancel,
+		connect.WithSchema(oAuthServiceMethods.ByName("Cancel")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/toolbox.daemon.v1.OAuthService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case OAuthServiceRedirectURIProcedure:
+			oAuthServiceRedirectURIHandler.ServeHTTP(w, r)
+		case OAuthServiceBeginProcedure:
+			oAuthServiceBeginHandler.ServeHTTP(w, r)
+		case OAuthServiceWaitProcedure:
+			oAuthServiceWaitHandler.ServeHTTP(w, r)
+		case OAuthServiceCancelProcedure:
+			oAuthServiceCancelHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedOAuthServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedOAuthServiceHandler struct{}
+
+func (UnimplementedOAuthServiceHandler) RedirectURI(context.Context, *connect.Request[apiv1.OAuthRedirectURIRequest]) (*connect.Response[apiv1.OAuthRedirectURIResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.OAuthService.RedirectURI is not implemented"))
+}
+
+func (UnimplementedOAuthServiceHandler) Begin(context.Context, *connect.Request[apiv1.OAuthBeginRequest]) (*connect.Response[apiv1.OAuthBeginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.OAuthService.Begin is not implemented"))
+}
+
+func (UnimplementedOAuthServiceHandler) Wait(context.Context, *connect.Request[apiv1.OAuthWaitRequest]) (*connect.Response[apiv1.OAuthWaitResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.OAuthService.Wait is not implemented"))
+}
+
+func (UnimplementedOAuthServiceHandler) Cancel(context.Context, *connect.Request[apiv1.OAuthCancelRequest]) (*connect.Response[apiv1.OAuthCancelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("toolbox.daemon.v1.OAuthService.Cancel is not implemented"))
 }

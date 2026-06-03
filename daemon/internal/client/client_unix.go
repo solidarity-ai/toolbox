@@ -81,14 +81,19 @@ func (c *Client) Close() error {
 	c.httpClient = nil
 	c.sessionService = nil
 	c.secretStoreService = nil
+	c.oauthService = nil
 	return nil
 }
 
 func (c *Client) reconnectLocked() error {
+	if c.httpClient != nil {
+		c.httpClient.CloseIdleConnections()
+	}
 	replacement := newClient(c.socketPath)
 	c.httpClient = replacement.httpClient
 	c.sessionService = replacement.sessionService
 	c.secretStoreService = replacement.secretStoreService
+	c.oauthService = replacement.oauthService
 	return nil
 }
 
@@ -148,6 +153,7 @@ func newClient(socketPath string) *Client {
 		httpClient:         httpClient,
 		sessionService:     daemonv1connect.NewSessionServiceClient(httpClient, sessionServiceBaseURL),
 		secretStoreService: daemonv1connect.NewSecretStoreServiceClient(httpClient, sessionServiceBaseURL),
+		oauthService:       daemonv1connect.NewOAuthServiceClient(httpClient, sessionServiceBaseURL),
 	}
 }
 

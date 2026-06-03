@@ -23,6 +23,7 @@ type Client struct {
 	httpClient         *http.Client
 	sessionService     daemonv1connect.SessionServiceClient
 	secretStoreService daemonv1connect.SecretStoreServiceClient
+	oauthService       daemonv1connect.OAuthServiceClient
 }
 
 type PingResult struct {

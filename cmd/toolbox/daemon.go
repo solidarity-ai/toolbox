@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"net"
@@ -240,6 +241,18 @@ type daemonHTTPSecretStoreRecoveryControl interface {
 	SecretStoreRecoveryUnlocked(context.Context) (bool, error)
 }
 
+type daemonHTTPOAuthControl interface {
+	SetOAuthWebserverAddress(string)
+}
+
+type daemonHTTPOAuthCallbackControl interface {
+	CompleteOAuthFlow(state string, result daemon.OAuthCallbackResult) error
+}
+
+type daemonHTTPOAuthPendingControl interface {
+	PendingOAuthFlows() []daemon.OAuthFlowSnapshot
+}
+
 type secretStoreUnlockRequest struct {
 	UnlockKey string `json:"unlock_key"`
 	Setup     bool   `json:"setup"`
@@ -289,6 +302,7 @@ type approvalConsoleState struct {
 	ServerTime  string                     `json:"server_time"`
 	SecretStore approvalConsoleSecretStore `json:"secret_store"`
 	Summary     approvalConsoleSummary     `json:"summary"`
+	OAuthFlows  []approvalConsoleOAuthFlow `json:"oauth_flows,omitempty"`
 	Clients     []approvalConsoleClient    `json:"clients,omitempty"`
 	Sessions    []approvalConsoleSession   `json:"sessions"`
 }
@@ -302,7 +316,16 @@ type approvalConsoleSecretStore struct {
 type approvalConsoleSummary struct {
 	ActiveClients    int `json:"active_clients"`
 	PendingApprovals int `json:"pending_approvals"`
+	PendingOAuth     int `json:"pending_oauth"`
 	QueuedDecisions  int `json:"queued_decisions"`
+}
+
+type approvalConsoleOAuthFlow struct {
+	FlowID           string `json:"flow_id"`
+	AuthorizationURL string `json:"authorization_url"`
+	Label            string `json:"label"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	ExpiresAt        string `json:"expires_at,omitempty"`
 }
 
 type approvalConsoleClient struct {
@@ -360,24 +383,47 @@ func approvalConsoleStateForHTTP(control daemonHTTPControl) approvalConsoleState
 	if control == nil {
 		return state
 	}
+	secretStoreUnlocked := false
+	setupStatusKnown := true
 	if locked, err := control.SecretStoreLocked(context.Background()); err == nil {
 		if locked {
 			state.SecretStore.Status = "locked"
 		} else {
 			state.SecretStore.Status = "unlocked"
+			secretStoreUnlocked = true
 		}
 	}
 	if setupControl, ok := control.(daemonHTTPSecretStoreSetupControl); ok {
+		setupStatusKnown = false
 		if setupRequired, err := setupControl.SecretStoreSetupRequired(context.Background()); err == nil {
+			setupStatusKnown = true
 			state.SecretStore.SetupRequired = setupRequired
 			if setupRequired {
 				state.SecretStore.Status = "locked"
+				secretStoreUnlocked = false
 			}
 		}
 	}
 	if recoveryControl, ok := control.(daemonHTTPSecretStoreRecoveryControl); ok {
 		if recoveryUnlocked, err := recoveryControl.SecretStoreRecoveryUnlocked(context.Background()); err == nil {
 			state.SecretStore.RecoveryUnlocked = recoveryUnlocked
+		}
+	}
+	if secretStoreUnlocked && setupStatusKnown && state.SecretStore.Status == "unlocked" && !state.SecretStore.SetupRequired {
+		if oauthControl, ok := control.(daemonHTTPOAuthPendingControl); ok {
+			for _, flow := range oauthControl.PendingOAuthFlows() {
+				if strings.TrimSpace(flow.AuthorizationURL) == "" {
+					continue
+				}
+				state.OAuthFlows = append(state.OAuthFlows, approvalConsoleOAuthFlow{
+					FlowID:           firstNonEmpty(flow.FlowID, flow.State),
+					AuthorizationURL: flow.AuthorizationURL,
+					Label:            firstNonEmpty(flow.Label, "Continue authorization"),
+					CreatedAt:        formatHTTPTime(flow.CreatedAt),
+					ExpiresAt:        formatHTTPTime(flow.ExpiresAt),
+				})
+			}
+			state.Summary.PendingOAuth = len(state.OAuthFlows)
 		}
 	}
 	clients := control.Clients()
@@ -751,6 +797,17 @@ func displayTime(raw string) string {
 	return raw
 }
 
+func oauthFlowContext(flow approvalConsoleOAuthFlow) string {
+	var parts []string
+	if created := strings.TrimSpace(flow.CreatedAt); created != "" {
+		parts = append(parts, "Created "+displayTime(created))
+	}
+	if expires := strings.TrimSpace(flow.ExpiresAt); expires != "" {
+		parts = append(parts, "Expires "+displayTime(expires))
+	}
+	return strings.Join(parts, " · ")
+}
+
 func titleCase(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -776,9 +833,96 @@ func listenDaemonDebugListener() (net.Listener, error) {
 	return listener, nil
 }
 
+type daemonOAuthCallbackPageField struct {
+	Label string
+	Value string
+}
+
+func handleDaemonOAuthCallback(w http.ResponseWriter, r *http.Request, control daemonHTTPControl) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeDaemonOAuthCallbackPage(w, http.StatusMethodNotAllowed, "Authorization callback unavailable", "Authorization callback unavailable", "This page only accepts OAuth redirect callbacks from your browser.", nil)
+		return
+	}
+
+	query := r.URL.Query()
+	state := strings.TrimSpace(query.Get("state"))
+	if state == "" {
+		writeDaemonOAuthCallbackPage(w, http.StatusBadRequest, "Authorization callback missing state", "Authorization callback missing state", "This OAuth callback did not include a state value. Please return to Toolbox and start authorization again.", nil)
+		return
+	}
+	code := strings.TrimSpace(query.Get("code"))
+	providerError := strings.TrimSpace(query.Get("error"))
+	if code == "" && providerError == "" {
+		writeDaemonOAuthCallbackPage(w, http.StatusBadRequest, "Authorization callback incomplete", "Authorization callback incomplete", "This OAuth callback did not include an authorization code or a provider error. Please return to Toolbox and try again.", nil)
+		return
+	}
+	if code != "" && providerError != "" {
+		writeDaemonOAuthCallbackPage(w, http.StatusBadRequest, "Authorization callback ambiguous", "Authorization callback ambiguous", "This OAuth callback included both an authorization code and a provider error, so Toolbox did not use it. Please return to Toolbox and try again.", nil)
+		return
+	}
+
+	callbackControl, ok := control.(daemonHTTPOAuthCallbackControl)
+	if !ok || callbackControl == nil {
+		writeDaemonOAuthCallbackPage(w, http.StatusServiceUnavailable, "Authorization callback unavailable", "Authorization callback unavailable", "The Toolbox daemon is not ready to accept OAuth callbacks. Please return to Toolbox and try again.", nil)
+		return
+	}
+
+	result := daemon.OAuthCallbackResult{
+		Code:             code,
+		State:            state,
+		Error:            providerError,
+		ErrorDescription: strings.TrimSpace(query.Get("error_description")),
+		ErrorURI:         strings.TrimSpace(query.Get("error_uri")),
+	}
+	if err := callbackControl.CompleteOAuthFlow(state, result); err != nil {
+		writeDaemonOAuthCallbackPage(w, http.StatusGone, "Authorization no longer pending", "Authorization no longer pending", "This authorization request is not pending. It may have expired, already completed, or not been started through Toolbox. Please return to Toolbox and try again.", nil)
+		return
+	}
+
+	if providerError != "" {
+		fields := []daemonOAuthCallbackPageField{{Label: "Provider error", Value: providerError}}
+		if result.ErrorDescription != "" {
+			fields = append(fields, daemonOAuthCallbackPageField{Label: "Description", Value: result.ErrorDescription})
+		}
+		if result.ErrorURI != "" {
+			fields = append(fields, daemonOAuthCallbackPageField{Label: "More information", Value: result.ErrorURI})
+		}
+		writeDaemonOAuthCallbackPage(w, http.StatusOK, "Authorization not completed", "Authorization not completed", "The provider did not complete authorization. You can close this tab and return to Toolbox.", fields)
+		return
+	}
+
+	writeDaemonOAuthCallbackPage(w, http.StatusOK, "Authorization received", "Authorization received", "Toolbox received the authorization response. You can close this tab and return to Toolbox.", nil)
+}
+
+func writeDaemonOAuthCallbackPage(w http.ResponseWriter, status int, title, heading, message string, fields []daemonOAuthCallbackPageField) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>%s</title><style>body{font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;line-height:1.5;margin:3rem auto;max-width:42rem;padding:0 1rem;color:#111827}main{border:1px solid #e5e7eb;border-radius:12px;padding:1.5rem;box-shadow:0 1px 2px rgba(0,0,0,.04)}h1{font-size:1.5rem;margin:0 0 .75rem}p{margin:.5rem 0;color:#374151}dl{margin:1rem 0 0}dt{font-weight:600;color:#111827}dd{margin:0 0 .75rem;color:#374151;overflow-wrap:anywhere}</style></head><body><main><h1>%s</h1><p>%s</p>",
+		html.EscapeString(title),
+		html.EscapeString(heading),
+		html.EscapeString(message),
+	)
+	if len(fields) > 0 {
+		_, _ = io.WriteString(w, "<dl>")
+		for _, field := range fields {
+			if strings.TrimSpace(field.Value) == "" {
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "<dt>%s</dt><dd>%s</dd>", html.EscapeString(field.Label), html.EscapeString(field.Value))
+		}
+		_, _ = io.WriteString(w, "</dl>")
+	}
+	_, _ = io.WriteString(w, "</main></body></html>\n")
+}
+
 func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown func(), control daemonHTTPControl) (func() error, string, error) {
 	if listener == nil {
 		return nil, "", errors.New("daemon debug listener is nil")
+	}
+	addr := listener.Addr().String()
+	if oauthControl, ok := control.(daemonHTTPOAuthControl); ok {
+		oauthControl.SetOAuthWebserverAddress(addr)
 	}
 
 	mux := http.NewServeMux()
@@ -790,6 +934,9 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		_, _ = w.Write(datastarJS)
+	})
+	mux.HandleFunc("/oauth2/callback", func(w http.ResponseWriter, r *http.Request) {
+		handleDaemonOAuthCallback(w, r, control)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" && r.URL.Path != "/approval-console" {
@@ -1269,7 +1416,7 @@ func serveDaemonDebugServer(listener net.Listener, stderr io.Writer, shutdown fu
 		}
 	}()
 
-	return closeServer, listener.Addr().String(), nil
+	return closeServer, addr, nil
 }
 
 func isJSONRequest(r *http.Request) bool {

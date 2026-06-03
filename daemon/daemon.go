@@ -17,6 +17,10 @@ var ErrUnsupportedPlatform = daemonclient.ErrUnsupportedPlatform
 
 type Client = daemonclient.Client
 type PingResult = daemonclient.PingResult
+type OAuthRedirectURLs = daemonclient.OAuthRedirectURLs
+type OAuthBeginOptions = daemonclient.OAuthBeginOptions
+type OAuthFlow = daemonclient.OAuthFlow
+type OAuthWaitResult = daemonclient.OAuthCallbackResult
 type SessionRegistration = daemonclient.SessionRegistration
 type SessionDelegate = daemonclient.SessionDelegate
 
@@ -25,15 +29,19 @@ type ClientSnapshot = daemonserver.ClientSnapshot
 type PendingApprovalSnapshot = daemonserver.PendingApprovalSnapshot
 type QueuedApprovalDecision = daemonserver.QueuedApprovalDecision
 type ApprovalDecision = daemonserver.ApprovalDecision
+type OAuthCallbackResult = daemonserver.OAuthCallbackResult
+type OAuthFlowSnapshot = daemonserver.OAuthFlowSnapshot
 type Registry = daemonserver.Registry
 type Server = daemonserver.Server
 type SessionService = daemonserver.SessionService
+type OAuthService = daemonserver.OAuthService
 type SecretStore = daemonclient.SecretStore
 type SecretStoreService = daemonserver.SecretStoreService
 
 const (
 	ApprovalActionApprove = daemonserver.ApprovalActionApprove
 	ApprovalActionReject  = daemonserver.ApprovalActionReject
+	OAuthHostEnv          = daemonserver.OAuthHostEnv
 )
 
 func IsUnsupportedPlatform(err error) bool {
@@ -102,6 +110,10 @@ func NewSessionService(registry *Registry) *SessionService {
 
 func NewSecretStoreService(store secrets.ManagedSecretStore) *SecretStoreService {
 	return daemonserver.NewSecretStoreService(store)
+}
+
+func NewOAuthService() *OAuthService {
+	return daemonserver.NewOAuthService()
 }
 
 func NewServer(listener net.Listener) *Server {

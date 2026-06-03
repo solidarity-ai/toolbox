@@ -1682,6 +1682,406 @@ func (*SecretRewrapAfterRecoveryResponse) Descriptor() ([]byte, []int) {
 	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{30}
 }
 
+type OAuthRedirectURIRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthRedirectURIRequest) Reset() {
+	*x = OAuthRedirectURIRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthRedirectURIRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthRedirectURIRequest) ProtoMessage() {}
+
+func (x *OAuthRedirectURIRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthRedirectURIRequest.ProtoReflect.Descriptor instead.
+func (*OAuthRedirectURIRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{31}
+}
+
+type OAuthRedirectURIResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RedirectUri   string                 `protobuf:"bytes,1,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	DaemonUrl     string                 `protobuf:"bytes,2,opt,name=daemon_url,json=daemonUrl,proto3" json:"daemon_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthRedirectURIResponse) Reset() {
+	*x = OAuthRedirectURIResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthRedirectURIResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthRedirectURIResponse) ProtoMessage() {}
+
+func (x *OAuthRedirectURIResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthRedirectURIResponse.ProtoReflect.Descriptor instead.
+func (*OAuthRedirectURIResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *OAuthRedirectURIResponse) GetRedirectUri() string {
+	if x != nil {
+		return x.RedirectUri
+	}
+	return ""
+}
+
+func (x *OAuthRedirectURIResponse) GetDaemonUrl() string {
+	if x != nil {
+		return x.DaemonUrl
+	}
+	return ""
+}
+
+type OAuthBeginRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	State            string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	AuthorizationUrl string                 `protobuf:"bytes,2,opt,name=authorization_url,json=authorizationUrl,proto3" json:"authorization_url,omitempty"`
+	Label            string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *OAuthBeginRequest) Reset() {
+	*x = OAuthBeginRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthBeginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthBeginRequest) ProtoMessage() {}
+
+func (x *OAuthBeginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthBeginRequest.ProtoReflect.Descriptor instead.
+func (*OAuthBeginRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *OAuthBeginRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *OAuthBeginRequest) GetAuthorizationUrl() string {
+	if x != nil {
+		return x.AuthorizationUrl
+	}
+	return ""
+}
+
+func (x *OAuthBeginRequest) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+type OAuthBeginResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FlowId        string                 `protobuf:"bytes,1,opt,name=flow_id,json=flowId,proto3" json:"flow_id,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthBeginResponse) Reset() {
+	*x = OAuthBeginResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthBeginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthBeginResponse) ProtoMessage() {}
+
+func (x *OAuthBeginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthBeginResponse.ProtoReflect.Descriptor instead.
+func (*OAuthBeginResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *OAuthBeginResponse) GetFlowId() string {
+	if x != nil {
+		return x.FlowId
+	}
+	return ""
+}
+
+func (x *OAuthBeginResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+type OAuthWaitRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FlowId        string                 `protobuf:"bytes,1,opt,name=flow_id,json=flowId,proto3" json:"flow_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthWaitRequest) Reset() {
+	*x = OAuthWaitRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthWaitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthWaitRequest) ProtoMessage() {}
+
+func (x *OAuthWaitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthWaitRequest.ProtoReflect.Descriptor instead.
+func (*OAuthWaitRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *OAuthWaitRequest) GetFlowId() string {
+	if x != nil {
+		return x.FlowId
+	}
+	return ""
+}
+
+type OAuthWaitResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Code             string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	State            string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Error            string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	ErrorDescription string                 `protobuf:"bytes,4,opt,name=error_description,json=errorDescription,proto3" json:"error_description,omitempty"`
+	ErrorUri         string                 `protobuf:"bytes,5,opt,name=error_uri,json=errorUri,proto3" json:"error_uri,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *OAuthWaitResponse) Reset() {
+	*x = OAuthWaitResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthWaitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthWaitResponse) ProtoMessage() {}
+
+func (x *OAuthWaitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthWaitResponse.ProtoReflect.Descriptor instead.
+func (*OAuthWaitResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *OAuthWaitResponse) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *OAuthWaitResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *OAuthWaitResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *OAuthWaitResponse) GetErrorDescription() string {
+	if x != nil {
+		return x.ErrorDescription
+	}
+	return ""
+}
+
+func (x *OAuthWaitResponse) GetErrorUri() string {
+	if x != nil {
+		return x.ErrorUri
+	}
+	return ""
+}
+
+type OAuthCancelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FlowId        string                 `protobuf:"bytes,1,opt,name=flow_id,json=flowId,proto3" json:"flow_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthCancelRequest) Reset() {
+	*x = OAuthCancelRequest{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthCancelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthCancelRequest) ProtoMessage() {}
+
+func (x *OAuthCancelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthCancelRequest.ProtoReflect.Descriptor instead.
+func (*OAuthCancelRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *OAuthCancelRequest) GetFlowId() string {
+	if x != nil {
+		return x.FlowId
+	}
+	return ""
+}
+
+type OAuthCancelResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OAuthCancelResponse) Reset() {
+	*x = OAuthCancelResponse{}
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthCancelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthCancelResponse) ProtoMessage() {}
+
+func (x *OAuthCancelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_apiv1_daemon_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthCancelResponse.ProtoReflect.Descriptor instead.
+func (*OAuthCancelResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_apiv1_daemon_proto_rawDescGZIP(), []int{38}
+}
+
 var File_daemon_apiv1_daemon_proto protoreflect.FileDescriptor
 
 const file_daemon_apiv1_daemon_proto_rawDesc = "" +
@@ -1805,7 +2205,31 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	" SecretRewrapAfterRecoveryRequest\x12\x1d\n" +
 	"\n" +
 	"unlock_key\x18\x01 \x01(\tR\tunlockKey\"#\n" +
-	"!SecretRewrapAfterRecoveryResponse2\xab\x01\n" +
+	"!SecretRewrapAfterRecoveryResponse\"\x19\n" +
+	"\x17OAuthRedirectURIRequest\"\\\n" +
+	"\x18OAuthRedirectURIResponse\x12!\n" +
+	"\fredirect_uri\x18\x01 \x01(\tR\vredirectUri\x12\x1d\n" +
+	"\n" +
+	"daemon_url\x18\x02 \x01(\tR\tdaemonUrl\"l\n" +
+	"\x11OAuthBeginRequest\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12+\n" +
+	"\x11authorization_url\x18\x02 \x01(\tR\x10authorizationUrl\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\"h\n" +
+	"\x12OAuthBeginResponse\x12\x17\n" +
+	"\aflow_id\x18\x01 \x01(\tR\x06flowId\x129\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"+\n" +
+	"\x10OAuthWaitRequest\x12\x17\n" +
+	"\aflow_id\x18\x01 \x01(\tR\x06flowId\"\x9d\x01\n" +
+	"\x11OAuthWaitResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12+\n" +
+	"\x11error_description\x18\x04 \x01(\tR\x10errorDescription\x12\x1b\n" +
+	"\terror_uri\x18\x05 \x01(\tR\berrorUri\"-\n" +
+	"\x12OAuthCancelRequest\x12\x17\n" +
+	"\aflow_id\x18\x01 \x01(\tR\x06flowId\"\x15\n" +
+	"\x13OAuthCancelResponse2\xab\x01\n" +
 	"\x0eSessionService\x12G\n" +
 	"\x04Ping\x12\x1e.toolbox.daemon.v1.PingRequest\x1a\x1f.toolbox.daemon.v1.PingResponse\x12P\n" +
 	"\tSyncState\x12\x1f.toolbox.daemon.v1.SessionState\x1a\x1e.toolbox.daemon.v1.StateUpdate(\x010\x012\xb0\t\n" +
@@ -1821,7 +2245,12 @@ const file_daemon_apiv1_daemon_proto_rawDesc = "" +
 	"\x03Get\x12#.toolbox.daemon.v1.SecretGetRequest\x1a$.toolbox.daemon.v1.SecretGetResponse\x12P\n" +
 	"\x03Set\x12#.toolbox.daemon.v1.SecretSetRequest\x1a$.toolbox.daemon.v1.SecretSetResponse\x12Y\n" +
 	"\x06Delete\x12&.toolbox.daemon.v1.SecretDeleteRequest\x1a'.toolbox.daemon.v1.SecretDeleteResponse\x12S\n" +
-	"\x04List\x12$.toolbox.daemon.v1.SecretListRequest\x1a%.toolbox.daemon.v1.SecretListResponseB8Z6github.com/solidarity-ai/toolbox/daemon/apiv1;daemonv1b\x06proto3"
+	"\x04List\x12$.toolbox.daemon.v1.SecretListRequest\x1a%.toolbox.daemon.v1.SecretListResponse2\xf8\x02\n" +
+	"\fOAuthService\x12f\n" +
+	"\vRedirectURI\x12*.toolbox.daemon.v1.OAuthRedirectURIRequest\x1a+.toolbox.daemon.v1.OAuthRedirectURIResponse\x12T\n" +
+	"\x05Begin\x12$.toolbox.daemon.v1.OAuthBeginRequest\x1a%.toolbox.daemon.v1.OAuthBeginResponse\x12Q\n" +
+	"\x04Wait\x12#.toolbox.daemon.v1.OAuthWaitRequest\x1a$.toolbox.daemon.v1.OAuthWaitResponse\x12W\n" +
+	"\x06Cancel\x12%.toolbox.daemon.v1.OAuthCancelRequest\x1a&.toolbox.daemon.v1.OAuthCancelResponseB8Z6github.com/solidarity-ai/toolbox/daemon/apiv1;daemonv1b\x06proto3"
 
 var (
 	file_daemon_apiv1_daemon_proto_rawDescOnce sync.Once
@@ -1835,7 +2264,7 @@ func file_daemon_apiv1_daemon_proto_rawDescGZIP() []byte {
 	return file_daemon_apiv1_daemon_proto_rawDescData
 }
 
-var file_daemon_apiv1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_daemon_apiv1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_daemon_apiv1_daemon_proto_goTypes = []any{
 	(*PingRequest)(nil),                       // 0: toolbox.daemon.v1.PingRequest
 	(*PingResponse)(nil),                      // 1: toolbox.daemon.v1.PingResponse
@@ -1868,48 +2297,65 @@ var file_daemon_apiv1_daemon_proto_goTypes = []any{
 	(*SecretRecoveryUnlockedResponse)(nil),    // 28: toolbox.daemon.v1.SecretRecoveryUnlockedResponse
 	(*SecretRewrapAfterRecoveryRequest)(nil),  // 29: toolbox.daemon.v1.SecretRewrapAfterRecoveryRequest
 	(*SecretRewrapAfterRecoveryResponse)(nil), // 30: toolbox.daemon.v1.SecretRewrapAfterRecoveryResponse
-	(*timestamppb.Timestamp)(nil),             // 31: google.protobuf.Timestamp
+	(*OAuthRedirectURIRequest)(nil),           // 31: toolbox.daemon.v1.OAuthRedirectURIRequest
+	(*OAuthRedirectURIResponse)(nil),          // 32: toolbox.daemon.v1.OAuthRedirectURIResponse
+	(*OAuthBeginRequest)(nil),                 // 33: toolbox.daemon.v1.OAuthBeginRequest
+	(*OAuthBeginResponse)(nil),                // 34: toolbox.daemon.v1.OAuthBeginResponse
+	(*OAuthWaitRequest)(nil),                  // 35: toolbox.daemon.v1.OAuthWaitRequest
+	(*OAuthWaitResponse)(nil),                 // 36: toolbox.daemon.v1.OAuthWaitResponse
+	(*OAuthCancelRequest)(nil),                // 37: toolbox.daemon.v1.OAuthCancelRequest
+	(*OAuthCancelResponse)(nil),               // 38: toolbox.daemon.v1.OAuthCancelResponse
+	(*timestamppb.Timestamp)(nil),             // 39: google.protobuf.Timestamp
 }
 var file_daemon_apiv1_daemon_proto_depIdxs = []int32{
 	3,  // 0: toolbox.daemon.v1.SessionState.pending_approvals:type_name -> toolbox.daemon.v1.PendingApprovalSnapshot
-	31, // 1: toolbox.daemon.v1.ClientSnapshot.connected_at:type_name -> google.protobuf.Timestamp
-	31, // 2: toolbox.daemon.v1.ClientSnapshot.last_sync_at:type_name -> google.protobuf.Timestamp
+	39, // 1: toolbox.daemon.v1.ClientSnapshot.connected_at:type_name -> google.protobuf.Timestamp
+	39, // 2: toolbox.daemon.v1.ClientSnapshot.last_sync_at:type_name -> google.protobuf.Timestamp
 	3,  // 3: toolbox.daemon.v1.ClientSnapshot.pending_approvals:type_name -> toolbox.daemon.v1.PendingApprovalSnapshot
 	5,  // 4: toolbox.daemon.v1.StateUpdate.clients:type_name -> toolbox.daemon.v1.ClientSnapshot
 	4,  // 5: toolbox.daemon.v1.StateUpdate.approval_decisions:type_name -> toolbox.daemon.v1.ApprovalDecision
-	0,  // 6: toolbox.daemon.v1.SessionService.Ping:input_type -> toolbox.daemon.v1.PingRequest
-	2,  // 7: toolbox.daemon.v1.SessionService.SyncState:input_type -> toolbox.daemon.v1.SessionState
-	15, // 8: toolbox.daemon.v1.SecretStoreService.Unlock:input_type -> toolbox.daemon.v1.SecretUnlockRequest
-	17, // 9: toolbox.daemon.v1.SecretStoreService.Setup:input_type -> toolbox.daemon.v1.SecretSetupRequest
-	19, // 10: toolbox.daemon.v1.SecretStoreService.Lock:input_type -> toolbox.daemon.v1.SecretLockRequest
-	21, // 11: toolbox.daemon.v1.SecretStoreService.Initialized:input_type -> toolbox.daemon.v1.SecretInitializedRequest
-	23, // 12: toolbox.daemon.v1.SecretStoreService.BackupCodes:input_type -> toolbox.daemon.v1.SecretBackupCodesRequest
-	25, // 13: toolbox.daemon.v1.SecretStoreService.RecoveryCodes:input_type -> toolbox.daemon.v1.SecretRecoveryCodesRequest
-	27, // 14: toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked:input_type -> toolbox.daemon.v1.SecretRecoveryUnlockedRequest
-	29, // 15: toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery:input_type -> toolbox.daemon.v1.SecretRewrapAfterRecoveryRequest
-	7,  // 16: toolbox.daemon.v1.SecretStoreService.Get:input_type -> toolbox.daemon.v1.SecretGetRequest
-	9,  // 17: toolbox.daemon.v1.SecretStoreService.Set:input_type -> toolbox.daemon.v1.SecretSetRequest
-	11, // 18: toolbox.daemon.v1.SecretStoreService.Delete:input_type -> toolbox.daemon.v1.SecretDeleteRequest
-	13, // 19: toolbox.daemon.v1.SecretStoreService.List:input_type -> toolbox.daemon.v1.SecretListRequest
-	1,  // 20: toolbox.daemon.v1.SessionService.Ping:output_type -> toolbox.daemon.v1.PingResponse
-	6,  // 21: toolbox.daemon.v1.SessionService.SyncState:output_type -> toolbox.daemon.v1.StateUpdate
-	16, // 22: toolbox.daemon.v1.SecretStoreService.Unlock:output_type -> toolbox.daemon.v1.SecretUnlockResponse
-	18, // 23: toolbox.daemon.v1.SecretStoreService.Setup:output_type -> toolbox.daemon.v1.SecretSetupResponse
-	20, // 24: toolbox.daemon.v1.SecretStoreService.Lock:output_type -> toolbox.daemon.v1.SecretLockResponse
-	22, // 25: toolbox.daemon.v1.SecretStoreService.Initialized:output_type -> toolbox.daemon.v1.SecretInitializedResponse
-	24, // 26: toolbox.daemon.v1.SecretStoreService.BackupCodes:output_type -> toolbox.daemon.v1.SecretBackupCodesResponse
-	26, // 27: toolbox.daemon.v1.SecretStoreService.RecoveryCodes:output_type -> toolbox.daemon.v1.SecretRecoveryCodesResponse
-	28, // 28: toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked:output_type -> toolbox.daemon.v1.SecretRecoveryUnlockedResponse
-	30, // 29: toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery:output_type -> toolbox.daemon.v1.SecretRewrapAfterRecoveryResponse
-	8,  // 30: toolbox.daemon.v1.SecretStoreService.Get:output_type -> toolbox.daemon.v1.SecretGetResponse
-	10, // 31: toolbox.daemon.v1.SecretStoreService.Set:output_type -> toolbox.daemon.v1.SecretSetResponse
-	12, // 32: toolbox.daemon.v1.SecretStoreService.Delete:output_type -> toolbox.daemon.v1.SecretDeleteResponse
-	14, // 33: toolbox.daemon.v1.SecretStoreService.List:output_type -> toolbox.daemon.v1.SecretListResponse
-	20, // [20:34] is the sub-list for method output_type
-	6,  // [6:20] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	39, // 6: toolbox.daemon.v1.OAuthBeginResponse.expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 7: toolbox.daemon.v1.SessionService.Ping:input_type -> toolbox.daemon.v1.PingRequest
+	2,  // 8: toolbox.daemon.v1.SessionService.SyncState:input_type -> toolbox.daemon.v1.SessionState
+	15, // 9: toolbox.daemon.v1.SecretStoreService.Unlock:input_type -> toolbox.daemon.v1.SecretUnlockRequest
+	17, // 10: toolbox.daemon.v1.SecretStoreService.Setup:input_type -> toolbox.daemon.v1.SecretSetupRequest
+	19, // 11: toolbox.daemon.v1.SecretStoreService.Lock:input_type -> toolbox.daemon.v1.SecretLockRequest
+	21, // 12: toolbox.daemon.v1.SecretStoreService.Initialized:input_type -> toolbox.daemon.v1.SecretInitializedRequest
+	23, // 13: toolbox.daemon.v1.SecretStoreService.BackupCodes:input_type -> toolbox.daemon.v1.SecretBackupCodesRequest
+	25, // 14: toolbox.daemon.v1.SecretStoreService.RecoveryCodes:input_type -> toolbox.daemon.v1.SecretRecoveryCodesRequest
+	27, // 15: toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked:input_type -> toolbox.daemon.v1.SecretRecoveryUnlockedRequest
+	29, // 16: toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery:input_type -> toolbox.daemon.v1.SecretRewrapAfterRecoveryRequest
+	7,  // 17: toolbox.daemon.v1.SecretStoreService.Get:input_type -> toolbox.daemon.v1.SecretGetRequest
+	9,  // 18: toolbox.daemon.v1.SecretStoreService.Set:input_type -> toolbox.daemon.v1.SecretSetRequest
+	11, // 19: toolbox.daemon.v1.SecretStoreService.Delete:input_type -> toolbox.daemon.v1.SecretDeleteRequest
+	13, // 20: toolbox.daemon.v1.SecretStoreService.List:input_type -> toolbox.daemon.v1.SecretListRequest
+	31, // 21: toolbox.daemon.v1.OAuthService.RedirectURI:input_type -> toolbox.daemon.v1.OAuthRedirectURIRequest
+	33, // 22: toolbox.daemon.v1.OAuthService.Begin:input_type -> toolbox.daemon.v1.OAuthBeginRequest
+	35, // 23: toolbox.daemon.v1.OAuthService.Wait:input_type -> toolbox.daemon.v1.OAuthWaitRequest
+	37, // 24: toolbox.daemon.v1.OAuthService.Cancel:input_type -> toolbox.daemon.v1.OAuthCancelRequest
+	1,  // 25: toolbox.daemon.v1.SessionService.Ping:output_type -> toolbox.daemon.v1.PingResponse
+	6,  // 26: toolbox.daemon.v1.SessionService.SyncState:output_type -> toolbox.daemon.v1.StateUpdate
+	16, // 27: toolbox.daemon.v1.SecretStoreService.Unlock:output_type -> toolbox.daemon.v1.SecretUnlockResponse
+	18, // 28: toolbox.daemon.v1.SecretStoreService.Setup:output_type -> toolbox.daemon.v1.SecretSetupResponse
+	20, // 29: toolbox.daemon.v1.SecretStoreService.Lock:output_type -> toolbox.daemon.v1.SecretLockResponse
+	22, // 30: toolbox.daemon.v1.SecretStoreService.Initialized:output_type -> toolbox.daemon.v1.SecretInitializedResponse
+	24, // 31: toolbox.daemon.v1.SecretStoreService.BackupCodes:output_type -> toolbox.daemon.v1.SecretBackupCodesResponse
+	26, // 32: toolbox.daemon.v1.SecretStoreService.RecoveryCodes:output_type -> toolbox.daemon.v1.SecretRecoveryCodesResponse
+	28, // 33: toolbox.daemon.v1.SecretStoreService.RecoveryUnlocked:output_type -> toolbox.daemon.v1.SecretRecoveryUnlockedResponse
+	30, // 34: toolbox.daemon.v1.SecretStoreService.RewrapAfterRecovery:output_type -> toolbox.daemon.v1.SecretRewrapAfterRecoveryResponse
+	8,  // 35: toolbox.daemon.v1.SecretStoreService.Get:output_type -> toolbox.daemon.v1.SecretGetResponse
+	10, // 36: toolbox.daemon.v1.SecretStoreService.Set:output_type -> toolbox.daemon.v1.SecretSetResponse
+	12, // 37: toolbox.daemon.v1.SecretStoreService.Delete:output_type -> toolbox.daemon.v1.SecretDeleteResponse
+	14, // 38: toolbox.daemon.v1.SecretStoreService.List:output_type -> toolbox.daemon.v1.SecretListResponse
+	32, // 39: toolbox.daemon.v1.OAuthService.RedirectURI:output_type -> toolbox.daemon.v1.OAuthRedirectURIResponse
+	34, // 40: toolbox.daemon.v1.OAuthService.Begin:output_type -> toolbox.daemon.v1.OAuthBeginResponse
+	36, // 41: toolbox.daemon.v1.OAuthService.Wait:output_type -> toolbox.daemon.v1.OAuthWaitResponse
+	38, // 42: toolbox.daemon.v1.OAuthService.Cancel:output_type -> toolbox.daemon.v1.OAuthCancelResponse
+	25, // [25:43] is the sub-list for method output_type
+	7,  // [7:25] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_daemon_apiv1_daemon_proto_init() }
@@ -1923,9 +2369,9 @@ func file_daemon_apiv1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_apiv1_daemon_proto_rawDesc), len(file_daemon_apiv1_daemon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   39,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   3,
 		},
 		GoTypes:           file_daemon_apiv1_daemon_proto_goTypes,
 		DependencyIndexes: file_daemon_apiv1_daemon_proto_depIdxs,

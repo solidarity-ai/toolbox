@@ -72,3 +72,12 @@ type ClientSnapshot struct {
 	ConnectedAt      time.Time                 `json:"connected_at"`
 	LastSyncAt       time.Time                 `json:"last_sync_at"`
 }
+
+type OAuthFlowSnapshot struct {
+	FlowID           string    `json:"flow_id"`
+	State            string    `json:"state"`
+	AuthorizationURL string    `json:"authorization_url"`
+	Label            string    `json:"label,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}

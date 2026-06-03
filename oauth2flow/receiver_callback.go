@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 )
 
 // callbackResult carries the code and state from an OAuth callback.
@@ -84,5 +85,7 @@ func (r *CallbackReceiver) ReceiveCode(ctx context.Context, expectedState string
 
 // Close shuts down the HTTP server.
 func (r *CallbackReceiver) Close() error {
-	return r.server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return r.server.Shutdown(ctx)
 }

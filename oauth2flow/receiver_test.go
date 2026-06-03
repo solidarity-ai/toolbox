@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/solidarity-ai/toolbox/oauth2flow"
+	"golang.org/x/oauth2"
 )
 
 func TestCallbackReceiver_ReceivesCode(t *testing.T) {
@@ -40,6 +42,42 @@ func TestCallbackReceiver_ReceivesCode(t *testing.T) {
 	}
 	if code != "test-auth-code" {
 		t.Fatalf("code = %q, want %q", code, "test-auth-code")
+	}
+}
+
+func TestCallbackReceiver_CloseWaitsForInFlightCallback(t *testing.T) {
+	t.Parallel()
+
+	recv, err := oauth2flow.NewCallbackReceiver()
+	if err != nil {
+		t.Fatalf("NewCallbackReceiver: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		resp, err := http.Get(recv.RedirectURI() + "?code=close-waits-code")
+		if err != nil {
+			done <- err
+			return
+		}
+		resp.Body.Close()
+		done <- nil
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	code, err := recv.ReceiveCode(ctx, "")
+	if err != nil {
+		t.Fatalf("ReceiveCode: %v", err)
+	}
+	if code != "close-waits-code" {
+		t.Fatalf("code = %q, want close-waits-code", code)
+	}
+	if err := recv.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("in-flight callback request failed: %v", err)
 	}
 }
 
@@ -228,6 +266,95 @@ func (m *mockReceiver) ReceiveCode(ctx context.Context, _ string) (string, error
 	}
 }
 func (m *mockReceiver) Close() error { return nil }
+
+type mockStartingReceiver struct {
+	mockReceiver
+	starts []mockReceiverStart
+	err    error
+}
+
+type mockReceiverStart struct {
+	state string
+	url   string
+}
+
+func (m *mockStartingReceiver) StartAuthorization(_ context.Context, state string, authorizationURL string) error {
+	m.starts = append(m.starts, mockReceiverStart{state: state, url: authorizationURL})
+	return m.err
+}
+
+func TestAuthorizeCodeStartsAuthorizationBeforeCallbackAndReceive(t *testing.T) {
+	t.Parallel()
+
+	receiver := &mockStartingReceiver{mockReceiver: mockReceiver{
+		uri:  "http://localhost/callback",
+		code: "test-code",
+	}}
+	cfg := &oauth2.Config{
+		ClientID:    "client-id",
+		RedirectURL: "will-be-replaced",
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://provider.example.test/authorize",
+			TokenURL: "https://provider.example.test/token",
+		},
+		Scopes: []string{"scope-a"},
+	}
+
+	var callbackURL string
+	code, err := oauth2flow.AuthorizeCode(context.Background(), cfg, receiver, "", nil, func(authorizationURL string) {
+		if len(receiver.starts) != 1 {
+			t.Fatalf("onAuthURL ran before StartAuthorization: starts=%#v", receiver.starts)
+		}
+		callbackURL = authorizationURL
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeCode(): %v", err)
+	}
+	if code != "test-code" {
+		t.Fatalf("code = %q, want test-code", code)
+	}
+	if len(receiver.starts) != 1 {
+		t.Fatalf("starts = %#v, want one StartAuthorization call", receiver.starts)
+	}
+	start := receiver.starts[0]
+	if start.state == "" {
+		t.Fatal("StartAuthorization state is empty")
+	}
+	if start.url == "" || start.url != callbackURL {
+		t.Fatalf("StartAuthorization URL = %q, onAuthURL URL = %q", start.url, callbackURL)
+	}
+	parsed, err := url.Parse(start.url)
+	if err != nil {
+		t.Fatalf("parse authorization URL: %v", err)
+	}
+	if got := parsed.Query().Get("state"); got != start.state {
+		t.Fatalf("authorization URL state = %q, StartAuthorization state = %q", got, start.state)
+	}
+	if got := parsed.Query().Get("redirect_uri"); got != "http://localhost/callback" {
+		t.Fatalf("authorization URL redirect_uri = %q, want receiver redirect URI", got)
+	}
+}
+
+func TestRaceReceiverStartAuthorizationForwardsToStartingChildren(t *testing.T) {
+	t.Parallel()
+
+	first := &mockStartingReceiver{}
+	manual := &mockReceiver{}
+	second := &mockStartingReceiver{}
+	race := oauth2flow.NewRaceReceiver("http://localhost/callback", first, manual, second)
+
+	if err := race.StartAuthorization(context.Background(), "state-123", "https://provider.example.test/auth?state=state-123"); err != nil {
+		t.Fatalf("StartAuthorization(): %v", err)
+	}
+	for name, receiver := range map[string]*mockStartingReceiver{"first": first, "second": second} {
+		if len(receiver.starts) != 1 {
+			t.Fatalf("%s starts = %#v, want one", name, receiver.starts)
+		}
+		if receiver.starts[0].state != "state-123" || receiver.starts[0].url != "https://provider.example.test/auth?state=state-123" {
+			t.Fatalf("%s start = %#v, want forwarded state/url", name, receiver.starts[0])
+		}
+	}
+}
 
 func TestRaceReceiver_FirstWins(t *testing.T) {
 	t.Parallel()

@@ -124,6 +124,16 @@ type providerAuthorizationError struct {
 	uri         string
 }
 
+// NewProviderAuthorizationError returns the same authorization error type used
+// when a receiver observes an OAuth provider error callback.
+func NewProviderAuthorizationError(code, description, uri string) error {
+	return &providerAuthorizationError{
+		code:        code,
+		description: description,
+		uri:         uri,
+	}
+}
+
 func (e *providerAuthorizationError) Error() string {
 	msg := fmt.Sprintf("oauth2flow: provider returned error %s", e.code)
 	if e.description != "" {
@@ -146,11 +156,7 @@ func parseAuthorizationResponseValues(values url.Values, expectedState string) (
 		return "", true, fmt.Errorf("oauth2flow: state mismatch (possible CSRF)")
 	}
 	if errorCode != "" {
-		return "", true, &providerAuthorizationError{
-			code:        errorCode,
-			description: values.Get("error_description"),
-			uri:         values.Get("error_uri"),
-		}
+		return "", true, NewProviderAuthorizationError(errorCode, values.Get("error_description"), values.Get("error_uri"))
 	}
 	return code, true, nil
 }

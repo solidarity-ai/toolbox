@@ -22,6 +22,21 @@ func NewRaceReceiver(redirectURI string, receivers ...CodeReceiver) *RaceReceive
 // RedirectURI returns the shared redirect URI.
 func (r *RaceReceiver) RedirectURI() string { return r.redirectURI }
 
+// StartAuthorization forwards the final state-bound authorization URL to child
+// receivers that need to register before ReceiveCode starts.
+func (r *RaceReceiver) StartAuthorization(ctx context.Context, state string, authorizationURL string) error {
+	for _, recv := range r.receivers {
+		starter, ok := recv.(AuthorizationStarter)
+		if !ok {
+			continue
+		}
+		if err := starter.StartAuthorization(ctx, state, authorizationURL); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ReceiveCode launches all receivers concurrently and returns the first
 // successful code. If all receivers fail, returns the last error.
 func (r *RaceReceiver) ReceiveCode(ctx context.Context, expectedState string) (string, error) {

@@ -257,7 +257,7 @@ func runAuthOAuth2Login(cmd authOAuth2LoginCmd, opts secretStoreOptions, stdin i
 		}
 	}
 	fmt.Fprintf(stdout, "Authenticating OAuth2 credential in %s\n", resolved.Context)
-	if err := authOAuth2(ctx, repo, newAuthInput(stdin), resolved.Loaded.Package, cred, account, stdout, stderr); err != nil {
+	if err := authOAuth2(ctx, repo, newAuthInput(stdin), resolved.Loaded.Package, cred, account, stdout, stderr, authRunOptions{PreferDaemonOAuth: !opts.NoDaemon}); err != nil {
 		return classifySecretStoreError(err)
 	}
 	return nil

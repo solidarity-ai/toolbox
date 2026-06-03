@@ -157,6 +157,42 @@ message SecretRewrapAfterRecoveryRequest {
 
 message SecretRewrapAfterRecoveryResponse {}
 
+message OAuthRedirectURIRequest {}
+
+message OAuthRedirectURIResponse {
+  string redirect_uri = 1;
+  string daemon_url = 2;
+}
+
+message OAuthBeginRequest {
+  string state = 1;
+  string authorization_url = 2;
+  string label = 3;
+}
+
+message OAuthBeginResponse {
+  string flow_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message OAuthWaitRequest {
+  string flow_id = 1;
+}
+
+message OAuthWaitResponse {
+  string code = 1;
+  string state = 2;
+  string error = 3;
+  string error_description = 4;
+  string error_uri = 5;
+}
+
+message OAuthCancelRequest {
+  string flow_id = 1;
+}
+
+message OAuthCancelResponse {}
+
 service SessionService {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc SyncState(stream SessionState) returns (stream StateUpdate);
@@ -175,4 +211,11 @@ service SecretStoreService {
   rpc Set(SecretSetRequest) returns (SecretSetResponse);
   rpc Delete(SecretDeleteRequest) returns (SecretDeleteResponse);
   rpc List(SecretListRequest) returns (SecretListResponse);
+}
+
+service OAuthService {
+  rpc RedirectURI(OAuthRedirectURIRequest) returns (OAuthRedirectURIResponse);
+  rpc Begin(OAuthBeginRequest) returns (OAuthBeginResponse);
+  rpc Wait(OAuthWaitRequest) returns (OAuthWaitResponse);
+  rpc Cancel(OAuthCancelRequest) returns (OAuthCancelResponse);
 }

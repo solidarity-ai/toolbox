@@ -32,8 +32,13 @@ type stubDaemonHTTPControl struct {
 	recoveryUnlocked  bool
 	recoveryUnlockKey string
 	recoveryGenerated int
-	snapshots         []daemon.ClientSnapshot
-	decisions         []daemon.ApprovalDecision
+	oauthWebserverAddr string
+	oauthCompleteErr   error
+	oauthCallbacks     []daemon.OAuthCallbackResult
+	oauthCallbackState []string
+	oauthFlows         []daemon.OAuthFlowSnapshot
+	snapshots          []daemon.ClientSnapshot
+	decisions          []daemon.ApprovalDecision
 }
 
 type stubBrowserLauncher struct {
@@ -56,6 +61,26 @@ func (s *stubDaemonHTTPControl) Clients() []daemon.ClientSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]daemon.ClientSnapshot(nil), s.snapshots...)
+}
+
+func (s *stubDaemonHTTPControl) SetOAuthWebserverAddress(addr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.oauthWebserverAddr = addr
+}
+
+func (s *stubDaemonHTTPControl) CompleteOAuthFlow(state string, result daemon.OAuthCallbackResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.oauthCallbackState = append(s.oauthCallbackState, state)
+	s.oauthCallbacks = append(s.oauthCallbacks, result)
+	return s.oauthCompleteErr
+}
+
+func (s *stubDaemonHTTPControl) PendingOAuthFlows() []daemon.OAuthFlowSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]daemon.OAuthFlowSnapshot(nil), s.oauthFlows...)
 }
 
 func (s *stubDaemonHTTPControl) UnlockSecretStore(_ context.Context, unlockKey string) error {
@@ -142,6 +167,72 @@ func (s *stubDaemonHTTPControl) ApplyApprovals(_ context.Context, decisions []da
 		}
 	}
 	return nil
+}
+
+func startTestDaemonServer(t *testing.T) (*daemon.Server, func()) {
+	t.Helper()
+
+	socketPath, err := daemon.SocketPath()
+	if err != nil {
+		t.Fatalf("SocketPath(): %v", err)
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix daemon socket: %v", err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatalf("chmod daemon socket: %v", err)
+	}
+	udsServer := daemon.NewServer(listener)
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- udsServer.Serve()
+	}()
+
+	var closeOnce sync.Once
+	closeServer := func() {
+		t.Helper()
+		closeOnce.Do(func() {
+			if err := udsServer.Close(); err != nil {
+				t.Fatalf("daemon Close(): %v", err)
+			}
+			select {
+			case err := <-serveErrCh:
+				if err != nil {
+					t.Fatalf("daemon Serve(): %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for daemon server shutdown")
+			}
+			_ = os.Remove(socketPath)
+		})
+	}
+	return udsServer, closeServer
+}
+
+func getDaemonHTTP(t *testing.T, rawURL string) (*http.Response, string) {
+	t.Helper()
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		t.Fatalf("GET %s: %v", rawURL, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(%s): %v", rawURL, err)
+	}
+	return resp, string(body)
+}
+
+func testOAuthFlowSnapshot(id, label, authURL string) daemon.OAuthFlowSnapshot {
+	return daemon.OAuthFlowSnapshot{
+		FlowID:           id,
+		State:            "state-" + id,
+		AuthorizationURL: authURL,
+		Label:            label,
+		CreatedAt:        time.Date(2026, 5, 27, 9, 10, 11, 0, time.UTC),
+		ExpiresAt:        time.Date(2026, 5, 27, 9, 15, 11, 0, time.UTC),
+	}
 }
 
 func TestMaybeAutoOpenDaemonBrowserLocked(t *testing.T) {
@@ -306,6 +397,415 @@ func TestStartDaemonDebugServerServesPingAndEcho(t *testing.T) {
 	}
 }
 
+func TestStartDaemonDebugServerRegistersOAuthWebserverAddress(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	control.mu.Lock()
+	got := control.oauthWebserverAddr
+	control.mu.Unlock()
+	if got != addr {
+		t.Fatalf("registered OAuth webserver address = %q, want actual debug server addr %q", got, addr)
+	}
+	if strings.HasSuffix(got, ":0") {
+		t.Fatalf("registered OAuth webserver address = %q, want actual listener port not bind placeholder", got)
+	}
+}
+
+func TestDaemonDebugServerAdvertisesOAuthURLsThroughConnect(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	socketPath, err := daemon.SocketPath()
+	if err != nil {
+		t.Fatalf("SocketPath(): %v", err)
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix daemon socket: %v", err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatalf("chmod daemon socket: %v", err)
+	}
+	udsServer := daemon.NewServer(listener)
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- udsServer.Serve()
+	}()
+	defer func() {
+		if err := udsServer.Close(); err != nil {
+			t.Fatalf("daemon Close(): %v", err)
+		}
+		select {
+		case err := <-serveErrCh:
+			if err != nil {
+				t.Fatalf("daemon Serve(): %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for daemon server shutdown")
+		}
+		_ = os.Remove(socketPath)
+	}()
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+	urls, err := client.OAuthRedirectURI(context.Background())
+	if err != nil {
+		t.Fatalf("OAuthRedirectURI(): %v", err)
+	}
+	wantRedirect := "http://" + strings.Replace(addr, "127.0.0.1:", "localhost:", 1) + "/oauth2/callback"
+	wantDaemon := "http://" + strings.Replace(addr, "127.0.0.1:", "localhost:", 1) + "/"
+	if urls.RedirectURI != wantRedirect {
+		t.Fatalf("RedirectURI = %q, want %q", urls.RedirectURI, wantRedirect)
+	}
+	if urls.DaemonURL != wantDaemon {
+		t.Fatalf("DaemonURL = %q, want %q", urls.DaemonURL, wantDaemon)
+	}
+	if strings.Contains(urls.RedirectURI, "127.0.0.1:0") || strings.Contains(urls.RedirectURI, "127.0.0.1:") {
+		t.Fatalf("RedirectURI = %q, want localhost with actual listener port, not bind address", urls.RedirectURI)
+	}
+}
+
+func TestDaemonOAuthCallbackCompletesFlowThroughHTTPAndConnect(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	flow, err := client.OAuthBegin(ctx, daemon.OAuthBeginOptions{
+		State:            "state-http-connect-success",
+		AuthorizationURL: "https://provider.example.test/authorize",
+		Label:            "Authorize test credential",
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(): %v", err)
+	}
+
+	waitCh := make(chan struct {
+		result daemon.OAuthWaitResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := client.OAuthWait(ctx, flow.FlowID)
+		waitCh <- struct {
+			result daemon.OAuthWaitResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	resp, body := getDaemonHTTP(t, "http://"+addr+"/oauth2/callback?code=abc123&state=state-http-connect-success")
+	if got := resp.StatusCode; got != http.StatusOK {
+		t.Fatalf("callback status = %d, want %d; body=%q", got, http.StatusOK, body)
+	}
+	if !strings.Contains(body, "Authorization received") || !strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("success callback did not return friendly HTML: content-type=%q body=%q", resp.Header.Get("Content-Type"), body)
+	}
+	if strings.Contains(body, "abc123") {
+		t.Fatalf("success callback page leaked authorization code: %q", body)
+	}
+
+	select {
+	case got := <-waitCh:
+		if got.err != nil {
+			t.Fatalf("OAuthWait(): %v", got.err)
+		}
+		if got.result.Code != "abc123" || got.result.State != "state-http-connect-success" {
+			t.Fatalf("OAuthWait() = %#v, want code/state", got.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OAuthWait result")
+	}
+
+	closeUDS()
+}
+
+func TestDaemonOAuthCallbackProviderErrorCompletesFlowThroughHTTPAndConnect(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	flow, err := client.OAuthBegin(ctx, daemon.OAuthBeginOptions{
+		State:            "state-http-connect-provider-error",
+		AuthorizationURL: "https://provider.example.test/authorize",
+		Label:            "Authorize test credential",
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(): %v", err)
+	}
+
+	waitCh := make(chan struct {
+		result daemon.OAuthWaitResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := client.OAuthWait(ctx, flow.FlowID)
+		waitCh <- struct {
+			result daemon.OAuthWaitResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	callbackURL := "http://" + addr + "/oauth2/callback?state=state-http-connect-provider-error&error=access_denied&error_description=User+denied+authorization&error_uri=https%3A%2F%2Fprovider.example.test%2Fhelp"
+	resp, body := getDaemonHTTP(t, callbackURL)
+	if got := resp.StatusCode; got != http.StatusOK {
+		t.Fatalf("provider error callback status = %d, want %d; body=%q", got, http.StatusOK, body)
+	}
+	if !strings.Contains(body, "Authorization not completed") || !strings.Contains(body, "access_denied") || !strings.Contains(body, "User denied authorization") {
+		t.Fatalf("provider error callback missing friendly error details: %q", body)
+	}
+
+	select {
+	case got := <-waitCh:
+		if got.err != nil {
+			t.Fatalf("OAuthWait(): %v", got.err)
+		}
+		if got.result.State != "state-http-connect-provider-error" ||
+			got.result.Error != "access_denied" ||
+			got.result.ErrorDescription != "User denied authorization" ||
+			got.result.ErrorURI != "https://provider.example.test/help" {
+			t.Fatalf("OAuthWait() = %#v, want structured provider error", got.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OAuthWait provider error result")
+	}
+
+	closeUDS()
+}
+
+func TestDaemonOAuthCallbackUnknownStateDoesNotCreateFlow(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	resp, body := getDaemonHTTP(t, "http://"+addr+"/oauth2/callback?code=abc&state=never-registered")
+	if got := resp.StatusCode; got < 400 {
+		t.Fatalf("unknown callback status = %d, want non-2xx; body=%q", got, body)
+	}
+	if !strings.Contains(body, "Authorization no longer pending") {
+		t.Fatalf("unknown callback did not return friendly pending-state error: %q", body)
+	}
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := client.OAuthBegin(ctx, daemon.OAuthBeginOptions{
+		State:            "never-registered",
+		AuthorizationURL: "https://provider.example.test/authorize",
+	}); err != nil {
+		t.Fatalf("OAuthBegin() after unknown callback = %v, want callback not to create or reserve state", err)
+	}
+
+	closeUDS()
+}
+
+func TestDaemonOAuthCallbackRejectsInvalidOrUnknownCallbacks(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantBody   string
+		wantCalls  int
+		completeErr error
+	}{
+		{name: "missing state", path: "/oauth2/callback?code=abc", wantStatus: http.StatusBadRequest, wantBody: "missing state"},
+		{name: "missing code and error", path: "/oauth2/callback?state=known", wantStatus: http.StatusBadRequest, wantBody: "incomplete"},
+		{name: "unknown state", path: "/oauth2/callback?code=abc&state=unknown", wantStatus: http.StatusGone, wantBody: "no longer pending", wantCalls: 1, completeErr: errors.New("OAuth flow was not found")},
+		{name: "expired state", path: "/oauth2/callback?code=abc&state=expired", wantStatus: http.StatusGone, wantBody: "no longer pending", wantCalls: 1, completeErr: errors.New("OAuth flow expired")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			control.mu.Lock()
+			control.oauthCallbacks = nil
+			control.oauthCallbackState = nil
+			control.oauthCompleteErr = tt.completeErr
+			control.mu.Unlock()
+
+			resp, body := getDaemonHTTP(t, "http://"+addr+tt.path)
+			if got := resp.StatusCode; got != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%q", got, tt.wantStatus, body)
+			}
+			if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+				t.Fatalf("Content-Type = %q, want HTML", resp.Header.Get("Content-Type"))
+			}
+			if !strings.Contains(strings.ToLower(body), strings.ToLower(tt.wantBody)) {
+				t.Fatalf("body = %q, want to contain %q", body, tt.wantBody)
+			}
+
+			control.mu.Lock()
+			gotCalls := len(control.oauthCallbacks)
+			control.mu.Unlock()
+			if gotCalls != tt.wantCalls {
+				t.Fatalf("CompleteOAuthFlow calls = %d, want %d", gotCalls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestDaemonOAuthCallbackRepeatedCallbackDoesNotOverwriteResult(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	flow, err := client.OAuthBegin(ctx, daemon.OAuthBeginOptions{
+		State:            "state-repeat",
+		AuthorizationURL: "https://provider.example.test/authorize",
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(): %v", err)
+	}
+
+	firstResp, firstBody := getDaemonHTTP(t, "http://"+addr+"/oauth2/callback?code=first&state=state-repeat")
+	if got := firstResp.StatusCode; got != http.StatusOK {
+		t.Fatalf("first callback status = %d, want %d; body=%q", got, http.StatusOK, firstBody)
+	}
+	secondResp, secondBody := getDaemonHTTP(t, "http://"+addr+"/oauth2/callback?code=second&state=state-repeat")
+	if got := secondResp.StatusCode; got < 400 {
+		t.Fatalf("second callback status = %d, want non-2xx; body=%q", got, secondBody)
+	}
+
+	result, err := client.OAuthWait(ctx, flow.FlowID)
+	if err != nil {
+		t.Fatalf("OAuthWait(): %v", err)
+	}
+	if result.Code != "first" || result.State != "state-repeat" {
+		t.Fatalf("OAuthWait() = %#v, want original first callback result", result)
+	}
+
+	closeUDS()
+}
+
 func TestStartDaemonDebugServerServesApprovalSnapshotAndApproveEndpoint(t *testing.T) {
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
@@ -454,6 +954,200 @@ func TestApprovalConsoleEventsUseDatastarPatches(t *testing.T) {
 	}
 	if !strings.Contains(payload, "event: datastar-patch-elements") {
 		t.Fatalf("events missing Datastar element patch: %q", payload)
+	}
+}
+
+func TestApprovalConsoleShowsPendingOAuthFlowsWhenUnlocked(t *testing.T) {
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	control := &stubDaemonHTTPControl{
+		locked: false,
+		oauthFlows: []daemon.OAuthFlowSnapshot{
+			testOAuthFlowSnapshot("flow-one", "Authorize Calendar for workspace (alice@example.com)", "https://provider.example.test/oauth?state=one"),
+		},
+	}
+	closeServer, addr, err := startDaemonDebugServer(io.Discard, nil, control)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeServer(); err != nil {
+			t.Fatalf("closeServer(): %v", err)
+		}
+	}()
+
+	for _, path := range []string{"/", "/index.html", "/approval-console"} {
+		resp, body := getDaemonHTTP(t, "http://"+addr+path)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200; body=%q", path, resp.StatusCode, body)
+		}
+		if !strings.Contains(body, "Authorize Calendar for workspace") ||
+			!strings.Contains(body, "https://provider.example.test/oauth?state=one") ||
+			!strings.Contains(body, "Authorization needed") ||
+			!strings.Contains(body, `target="_blank"`) ||
+			!strings.Contains(body, `rel="noopener noreferrer"`) ||
+			!strings.Contains(body, "Created ") ||
+			!strings.Contains(body, "Expires ") {
+			t.Fatalf("GET %s missing pending OAuth card details: %q", path, body)
+		}
+	}
+}
+
+func TestApprovalConsoleShowsRealDaemonPendingOAuthFlow(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	const unlockKey = "test-secret-key"
+	const label = "Authorize Calendar for workspace (real@example.com)"
+	const authorizationURL = "https://provider.example.test/oauth?state=real-daemon"
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+	if _, err := udsServer.SetupSecretStore(context.Background(), unlockKey); err != nil {
+		t.Fatalf("SetupSecretStore(): %v", err)
+	}
+
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	client, err := daemon.EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Fatalf("client Close(): %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	flow, err := client.OAuthBegin(ctx, daemon.OAuthBeginOptions{
+		State:            "state-real-daemon-page",
+		AuthorizationURL: authorizationURL,
+		Label:            label,
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(): %v", err)
+	}
+
+	for _, path := range []string{"/", "/index.html", "/approval-console"} {
+		resp, body := getDaemonHTTP(t, "http://"+addr+path)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200; body=%q", path, resp.StatusCode, body)
+		}
+		if !strings.Contains(body, label) || !strings.Contains(body, authorizationURL) || !strings.Contains(body, "Authorization needed") {
+			t.Fatalf("GET %s missing real daemon pending OAuth card: %q", path, body)
+		}
+	}
+
+	if err := udsServer.LockSecretStore(context.Background()); err != nil {
+		t.Fatalf("LockSecretStore(): %v", err)
+	}
+	_, body := getDaemonHTTP(t, "http://"+addr+"/approval-console")
+	if strings.Contains(body, label) || strings.Contains(body, authorizationURL) {
+		t.Fatalf("locked approval console leaked real daemon OAuth flow: %q", body)
+	}
+
+	if err := udsServer.UnlockSecretStore(context.Background(), unlockKey); err != nil {
+		t.Fatalf("UnlockSecretStore(): %v", err)
+	}
+	_, body = getDaemonHTTP(t, "http://"+addr+"/approval-console")
+	if !strings.Contains(body, label) || !strings.Contains(body, authorizationURL) {
+		t.Fatalf("unlocked approval console did not restore real daemon OAuth flow: %q", body)
+	}
+
+	if err := client.OAuthCancel(ctx, flow.FlowID); err != nil {
+		t.Fatalf("OAuthCancel(): %v", err)
+	}
+	_, body = getDaemonHTTP(t, "http://"+addr+"/approval-console")
+	if strings.Contains(body, label) || strings.Contains(body, authorizationURL) {
+		t.Fatalf("approval console still contained canceled real daemon OAuth flow: %q", body)
+	}
+	if got := udsServer.PendingOAuthFlows(); len(got) != 0 {
+		t.Fatalf("PendingOAuthFlows() after cancel = %#v, want none", got)
+	}
+}
+
+func TestApprovalConsoleHidesPendingOAuthFlowsWhenSecretStoreNotUnlocked(t *testing.T) {
+	flow := testOAuthFlowSnapshot("flow-hidden", "Authorize Hidden Credential", "https://provider.example.test/oauth?state=hidden")
+	tests := []struct {
+		name    string
+		control *stubDaemonHTTPControl
+	}{
+		{name: "locked", control: &stubDaemonHTTPControl{locked: true, oauthFlows: []daemon.OAuthFlowSnapshot{flow}}},
+		{name: "setup-required", control: &stubDaemonHTTPControl{locked: true, setupRequired: true, oauthFlows: []daemon.OAuthFlowSnapshot{flow}}},
+		{name: "unavailable", control: &stubDaemonHTTPControl{locked: false, statusErr: errors.New("secret store unavailable"), oauthFlows: []daemon.OAuthFlowSnapshot{flow}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := approvalConsoleStateForHTTP(tt.control)
+			if len(state.OAuthFlows) != 0 || state.Summary.PendingOAuth != 0 {
+				t.Fatalf("OAuthFlows = %#v, Summary = %#v; want no visible OAuth flows", state.OAuthFlows, state.Summary)
+			}
+			html := componentHTML(ApprovalConsolePage(approvalConsolePageDataFromState(state), state))
+			if strings.Contains(html, "Authorize Hidden Credential") || strings.Contains(html, "https://provider.example.test/oauth?state=hidden") {
+				t.Fatalf("locked/setup/unavailable page leaked OAuth flow: %q", html)
+			}
+		})
+	}
+}
+
+func TestApprovalConsoleShowsMultiplePendingOAuthFlows(t *testing.T) {
+	state := approvalConsoleStateForHTTP(&stubDaemonHTTPControl{
+		locked: false,
+		oauthFlows: []daemon.OAuthFlowSnapshot{
+			testOAuthFlowSnapshot("flow-a", "Authorize Alpha Credential", "https://provider.example.test/oauth?state=alpha"),
+			testOAuthFlowSnapshot("flow-b", "Authorize Beta Credential", "https://provider.example.test/oauth?state=beta"),
+		},
+	})
+	if len(state.OAuthFlows) != 2 || state.Summary.PendingOAuth != 2 {
+		t.Fatalf("OAuthFlows = %#v, Summary = %#v; want two visible OAuth flows", state.OAuthFlows, state.Summary)
+	}
+	html := componentHTML(ApprovalMain(state))
+	for _, want := range []string{
+		"Authorize Alpha Credential",
+		"https://provider.example.test/oauth?state=alpha",
+		"Authorize Beta Credential",
+		"https://provider.example.test/oauth?state=beta",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("ApprovalMain missing %q: %q", want, html)
+		}
+	}
+}
+
+func TestApprovalConsolePatchesRemoveCanceledOAuthFlow(t *testing.T) {
+	withFlow := approvalConsoleStateForHTTP(&stubDaemonHTTPControl{
+		locked:     false,
+		oauthFlows: []daemon.OAuthFlowSnapshot{testOAuthFlowSnapshot("flow-cancel", "Authorize Canceled Credential", "https://provider.example.test/oauth?state=cancel")},
+	})
+	withoutFlow := approvalConsoleStateForHTTP(&stubDaemonHTTPControl{locked: false})
+
+	var previousOut bytes.Buffer
+	previous := writeApprovalConsolePatches(&previousOut, nil, withFlow)
+	if !strings.Contains(previousOut.String(), "Authorize Canceled Credential") {
+		t.Fatalf("initial patches missing OAuth flow: %q", previousOut.String())
+	}
+
+	var out bytes.Buffer
+	writeApprovalConsolePatches(&out, &previous, withoutFlow)
+	if strings.Contains(out.String(), "Authorize Canceled Credential") || strings.Contains(out.String(), "https://provider.example.test/oauth?state=cancel") {
+		t.Fatalf("removal patch still contains canceled OAuth flow: %q", out.String())
+	}
+	if !strings.Contains(out.String(), `selector #approval-main`) || !strings.Contains(out.String(), "No active Toolbox sessions") {
+		t.Fatalf("removal patch did not replace approval main after canceled OAuth flow: %q", out.String())
 	}
 }
 

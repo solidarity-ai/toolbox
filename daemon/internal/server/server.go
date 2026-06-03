@@ -17,6 +17,7 @@ type Server struct {
 	registry       *Registry
 	sessionService *SessionService
 	secretService  *SecretStoreService
+	oauthService   *OAuthService
 }
 
 func NewServer(listener net.Listener) *Server {
@@ -35,10 +36,13 @@ func NewServerWithRegistryAndSecretStore(listener net.Listener, registry *Regist
 	notifier := newStateNotifier()
 	sessionService := newSessionService(registry, secretEpoch, notifier)
 	secretService := newSecretStoreService(store, secretEpoch, notifier)
+	oauthService := NewOAuthService()
 	mux := http.NewServeMux()
 	path, handler := sessionService.Handler()
 	mux.Handle(path, handler)
 	path, handler = secretService.Handler()
+	mux.Handle(path, handler)
+	path, handler = oauthService.Handler()
 	mux.Handle(path, handler)
 	httpServer := &http.Server{Handler: mux}
 	protocols := new(http.Protocols)
@@ -51,6 +55,7 @@ func NewServerWithRegistryAndSecretStore(listener net.Listener, registry *Regist
 		registry:       registry,
 		sessionService: sessionService,
 		secretService:  secretService,
+		oauthService:   oauthService,
 	}
 }
 
@@ -62,7 +67,31 @@ func (s *Server) Serve() error {
 	return err
 }
 
+func (s *Server) SetOAuthWebserverAddress(addr string) {
+	if s == nil || s.oauthService == nil {
+		return
+	}
+	s.oauthService.SetWebserverAddress(addr)
+}
+
+func (s *Server) CompleteOAuthFlow(state string, result OAuthCallbackResult) error {
+	if s == nil || s.oauthService == nil {
+		return newOAuthFlowError(oauthFlowErrorUnavailable, "daemon OAuth service is unavailable")
+	}
+	return s.oauthService.CompleteOAuthFlow(state, result)
+}
+
+func (s *Server) PendingOAuthFlows() []OAuthFlowSnapshot {
+	if s == nil || s.oauthService == nil {
+		return nil
+	}
+	return s.oauthService.PendingOAuthFlows()
+}
+
 func (s *Server) Close() error {
+	if s != nil && s.oauthService != nil {
+		s.oauthService.Close()
+	}
 	err := s.http.Close()
 	if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
 		return nil

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	connect "connectrpc.com/connect"
 	daemonprocessctl "github.com/solidarity-ai/toolbox/daemon/internal/processctl"
 	daemonpaths "github.com/solidarity-ai/toolbox/daemon/internal/processctl/paths"
 	"github.com/solidarity-ai/toolbox/secrets"
@@ -59,6 +60,193 @@ func TestClientPing(t *testing.T) {
 	}
 	if resp.PID != os.Getpid() {
 		t.Fatalf("pid = %d, want %d", resp.PID, os.Getpid())
+	}
+}
+
+func TestOAuthServiceReachableThroughVerifiedDaemonClient(t *testing.T) {
+	_, _ = startTrackedServer(t)
+
+	client, err := EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	urls, err := client.OAuthRedirectURI(context.Background())
+	if err == nil {
+		t.Fatalf("OAuthRedirectURI() = %#v, want unavailable before daemon webserver address is registered", urls)
+	}
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		t.Fatalf("OAuthRedirectURI() error = %T %[1]v, want connect error", err)
+	}
+	if connectErr.Code() != connect.CodeUnavailable {
+		t.Fatalf("OAuthRedirectURI() code = %v, want %v", connectErr.Code(), connect.CodeUnavailable)
+	}
+	if got := connectErr.Message(); !strings.Contains(got, "daemon OAuth webserver is unavailable") {
+		t.Fatalf("OAuthRedirectURI() message = %q, want webserver unavailable message", got)
+	}
+}
+
+func TestOAuthRedirectURIUsesRegisteredDaemonWebserverAddress(t *testing.T) {
+	_, srv := startTrackedServer(t)
+	srv.SetOAuthWebserverAddress("127.0.0.1:45678")
+
+	client, err := EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	urls, err := client.OAuthRedirectURI(context.Background())
+	if err != nil {
+		t.Fatalf("OAuthRedirectURI(): %v", err)
+	}
+	if urls.RedirectURI != "http://localhost:45678/oauth2/callback" {
+		t.Fatalf("RedirectURI = %q, want localhost actual port callback", urls.RedirectURI)
+	}
+	if urls.DaemonURL != "http://localhost:45678/" {
+		t.Fatalf("DaemonURL = %q, want localhost actual port UI", urls.DaemonURL)
+	}
+}
+
+func TestOAuthRedirectURIPreservesToolboxHostBasePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		host        string
+		redirectURI string
+		daemonURL   string
+	}{
+		{
+			name:        "base path",
+			host:        " https://example.test/base/ ",
+			redirectURI: "https://example.test/base/oauth2/callback",
+			daemonURL:   "https://example.test/base/",
+		},
+		{
+			name:        "escaped base path and empty query",
+			host:        "https://example.test/a%20b?",
+			redirectURI: "https://example.test/a%20b/oauth2/callback",
+			daemonURL:   "https://example.test/a%20b/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(OAuthHostEnv, tt.host)
+			_, srv := startTrackedServer(t)
+			srv.SetOAuthWebserverAddress("127.0.0.1:45678")
+
+			client, err := EnsureConnection()
+			if err != nil {
+				t.Fatalf("EnsureConnection(): %v", err)
+			}
+			t.Cleanup(func() {
+				_ = client.Close()
+			})
+
+			urls, err := client.OAuthRedirectURI(context.Background())
+			if err != nil {
+				t.Fatalf("OAuthRedirectURI(): %v", err)
+			}
+			if urls.RedirectURI != tt.redirectURI {
+				t.Fatalf("RedirectURI = %q, want %q", urls.RedirectURI, tt.redirectURI)
+			}
+			if urls.DaemonURL != tt.daemonURL {
+				t.Fatalf("DaemonURL = %q, want %q", urls.DaemonURL, tt.daemonURL)
+			}
+		})
+	}
+}
+
+func TestOAuthRedirectURIRejectsInvalidToolboxHost(t *testing.T) {
+	t.Setenv(OAuthHostEnv, "not-a-url")
+	_, srv := startTrackedServer(t)
+	srv.SetOAuthWebserverAddress("127.0.0.1:45678")
+
+	client, err := EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	_, err = client.OAuthRedirectURI(context.Background())
+	if err == nil {
+		t.Fatal("OAuthRedirectURI() succeeded with invalid TOOLBOX_HOST, want error")
+	}
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		t.Fatalf("OAuthRedirectURI() error = %T %[1]v, want connect error", err)
+	}
+	if connectErr.Code() != connect.CodeUnavailable {
+		t.Fatalf("OAuthRedirectURI() code = %v, want %v", connectErr.Code(), connect.CodeUnavailable)
+	}
+	if got := connectErr.Message(); !strings.Contains(got, "TOOLBOX_HOST") {
+		t.Fatalf("OAuthRedirectURI() message = %q, want TOOLBOX_HOST validation message", got)
+	}
+}
+
+func TestPendingOAuthFlowsReturnsOnlyPendingSnapshots(t *testing.T) {
+	_, srv := startTrackedServer(t)
+
+	client, err := EnsureConnection()
+	if err != nil {
+		t.Fatalf("EnsureConnection(): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	ctx := context.Background()
+	first, err := client.OAuthBegin(ctx, OAuthBeginOptions{
+		State:            "state-pending-first",
+		AuthorizationURL: "https://provider.example.test/authorize?flow=first",
+		Label:            "Authorize first credential",
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(first): %v", err)
+	}
+	second, err := client.OAuthBegin(ctx, OAuthBeginOptions{
+		State:            "state-pending-second",
+		AuthorizationURL: "https://provider.example.test/authorize?flow=second",
+		Label:            "Authorize second credential",
+	})
+	if err != nil {
+		t.Fatalf("OAuthBegin(second): %v", err)
+	}
+
+	pending := srv.PendingOAuthFlows()
+	if len(pending) != 2 {
+		t.Fatalf("PendingOAuthFlows() len = %d, want 2: %#v", len(pending), pending)
+	}
+	if pending[0].FlowID != first.FlowID || pending[0].State != "state-pending-first" ||
+		pending[0].AuthorizationURL != "https://provider.example.test/authorize?flow=first" ||
+		pending[0].Label != "Authorize first credential" ||
+		pending[0].CreatedAt.IsZero() || pending[0].ExpiresAt.IsZero() {
+		t.Fatalf("first pending snapshot = %#v, want flow/state/url/label/timestamps", pending[0])
+	}
+	if pending[1].FlowID != second.FlowID || pending[1].State != "state-pending-second" {
+		t.Fatalf("second pending snapshot = %#v, want second flow", pending[1])
+	}
+
+	if err := client.OAuthCancel(ctx, first.FlowID); err != nil {
+		t.Fatalf("OAuthCancel(first): %v", err)
+	}
+	pending = srv.PendingOAuthFlows()
+	if len(pending) != 1 || pending[0].FlowID != second.FlowID {
+		t.Fatalf("PendingOAuthFlows() after cancel = %#v, want only second flow", pending)
+	}
+
+	if err := srv.CompleteOAuthFlow("state-pending-second", OAuthCallbackResult{Code: "abc"}); err != nil {
+		t.Fatalf("CompleteOAuthFlow(second): %v", err)
+	}
+	if pending = srv.PendingOAuthFlows(); len(pending) != 0 {
+		t.Fatalf("PendingOAuthFlows() after completion = %#v, want none", pending)
 	}
 }
 

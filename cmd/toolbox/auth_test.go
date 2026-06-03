@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,9 +18,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/credpath"
+	"github.com/solidarity-ai/toolbox/daemon"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -40,6 +44,98 @@ func newTestCredentialRepo(t *testing.T) (*credentialrepo.Repository, secrets.Se
 	t.Helper()
 	store := newTestSecretStore(t)
 	return credentialrepo.New(store), store
+}
+
+func withTestOAuthOpenBrowser(t *testing.T, fn func(string) error) {
+	t.Helper()
+	original := openBrowser
+	openBrowser = fn
+	t.Cleanup(func() { openBrowser = original })
+}
+
+func withTestDaemonOAuthConnector(t *testing.T, fn func(context.Context) (daemonOAuthClientCloser, error)) {
+	t.Helper()
+	original := connectDaemonOAuth
+	connectDaemonOAuth = fn
+	t.Cleanup(func() { connectDaemonOAuth = original })
+}
+
+type stubDaemonOAuthClientCloser struct {
+	*stubDaemonOAuthClient
+	closed int
+}
+
+func (s *stubDaemonOAuthClientCloser) Close() error {
+	s.closed++
+	return nil
+}
+
+func newOAuth2TestPackage(module, name, authURL, tokenURL string) packaging.LoadedPackage {
+	return packaging.LoadedPackage{
+		Package: tooldef.Package{
+			Module:  testModule(module),
+			Name:    name,
+			Runtime: tooldef.RuntimeTypeScriptSandbox,
+			Credentials: []tooldef.PackageCredential{{
+				Name: "test_oauth",
+				Type: "oauth2",
+				Provider: &tooldef.OAuth2ProviderConfig{
+					AuthURL:  authURL,
+					TokenURL: tokenURL,
+				},
+				Scopes: []string{"read", "write"},
+				Inject: tooldef.PackageInject{
+					Hosts:  []string{"api.example.com"},
+					Method: "bearer_header",
+				},
+			}},
+		},
+	}
+}
+
+func seedOAuth2ClientSecrets(t *testing.T, store secrets.SecretStore, module, credential string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.Set(ctx, credpath.OAuth2ClientID(testModuleString(module), credential), []byte("test-client-id")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, credpath.OAuth2ClientSecret(testModuleString(module), credential), []byte("test-client-secret")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newOAuth2TokenServer(t *testing.T, codeCh chan<- string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if codeCh != nil {
+			codeCh <- r.FormValue("code")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-at",
+			"refresh_token": "test-rt",
+			"expires_in":    3600,
+		})
+	}))
+}
+
+func requireRefreshToken(t *testing.T, store secrets.SecretStore, module, credential, account, want string) {
+	t.Helper()
+	rt, err := store.Get(context.Background(), credpath.OAuth2RefreshToken(testModuleString(module), credential, account))
+	if err != nil {
+		t.Fatalf("refresh_token not stored: %v", err)
+	}
+	if string(rt) != want {
+		t.Fatalf("stored refresh_token = %q, want %q", string(rt), want)
+	}
 }
 
 func TestRunAuthAPIKeyEndToEnd(t *testing.T) {
@@ -703,19 +799,19 @@ func TestRunAuthOAuth2EndToEnd(t *testing.T) {
 	var capturedAuthURL string
 	callbackDone := make(chan struct{})
 
-	openBrowser = func(authURL string) {
+	openBrowser = func(authURL string) error {
 		capturedAuthURL = authURL
 
 		// Parse the auth URL to extract the redirect_uri (which contains the callback port).
 		parsed, err := url.Parse(authURL)
 		if err != nil {
 			t.Errorf("failed to parse auth URL: %v", err)
-			return
+			return nil
 		}
 		redirectURI := parsed.Query().Get("redirect_uri")
 		if redirectURI == "" {
 			t.Errorf("auth URL missing redirect_uri parameter")
-			return
+			return nil
 		}
 
 		// Extract state from the auth URL to include in the callback (CSRF protection).
@@ -732,6 +828,7 @@ func TestRunAuthOAuth2EndToEnd(t *testing.T) {
 			}
 			resp.Body.Close()
 		}()
+		return nil
 	}
 
 	// Run the auth flow. No stdin input needed since client_id/secret are pre-seeded
@@ -887,11 +984,11 @@ func TestRunAuthOAuth2PublicClientAllowsBlankSecret(t *testing.T) {
 	defer func() { openBrowser = originalOpenBrowser }()
 
 	callbackDone := make(chan struct{})
-	openBrowser = func(authURL string) {
+	openBrowser = func(authURL string) error {
 		parsed, err := url.Parse(authURL)
 		if err != nil {
 			t.Errorf("failed to parse auth URL: %v", err)
-			return
+			return nil
 		}
 		redirectURI := parsed.Query().Get("redirect_uri")
 		state := parsed.Query().Get("state")
@@ -906,6 +1003,7 @@ func TestRunAuthOAuth2PublicClientAllowsBlankSecret(t *testing.T) {
 			}
 			resp.Body.Close()
 		}()
+		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -1057,12 +1155,12 @@ func TestRunAuthOAuth2WithoutPKCEDisablesChallengeAndVerifier(t *testing.T) {
 	defer func() { openBrowser = originalOpenBrowser }()
 
 	callbackDone := make(chan struct{})
-	openBrowser = func(authURL string) {
+	openBrowser = func(authURL string) error {
 		capturedAuthURL = authURL
 		parsed, err := url.Parse(authURL)
 		if err != nil {
 			t.Errorf("failed to parse auth URL: %v", err)
-			return
+			return nil
 		}
 		redirectURI := parsed.Query().Get("redirect_uri")
 		state := parsed.Query().Get("state")
@@ -1077,6 +1175,7 @@ func TestRunAuthOAuth2WithoutPKCEDisablesChallengeAndVerifier(t *testing.T) {
 			}
 			resp.Body.Close()
 		}()
+		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -1176,12 +1275,12 @@ func TestRunAuthOAuth2ManualPasteHeadless(t *testing.T) {
 	defer reader.Close()
 
 	var openedAuthURL string
-	openBrowser = func(authURL string) {
+	openBrowser = func(authURL string) error {
 		openedAuthURL = authURL
 		parsed, err := url.Parse(authURL)
 		if err != nil {
 			t.Errorf("failed to parse auth URL: %v", err)
-			return
+			return nil
 		}
 		redirectURI := parsed.Query().Get("redirect_uri")
 		state := parsed.Query().Get("state")
@@ -1193,6 +1292,7 @@ func TestRunAuthOAuth2ManualPasteHeadless(t *testing.T) {
 			}
 			_ = writer.Close()
 		}()
+		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -1302,11 +1402,11 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 	originalOpenBrowser := openBrowser
 	defer func() { openBrowser = originalOpenBrowser }()
 
-	openBrowser = func(authURL string) {
+	openBrowser = func(authURL string) error {
 		parsed, err := url.Parse(authURL)
 		if err != nil {
 			t.Errorf("failed to parse auth URL: %v", err)
-			return
+			return nil
 		}
 		redirectURI := parsed.Query().Get("redirect_uri")
 		state := parsed.Query().Get("state")
@@ -1328,6 +1428,7 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 			}
 			_ = writer.Close()
 		}()
+		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -1357,6 +1458,565 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 	mu.Unlock()
 	if gotGrantCount != 1 {
 		t.Fatalf("grant count = %d, want 1", gotGrantCount)
+	}
+}
+
+func TestRunAuthOAuth2PrefersDaemonWhenAvailable(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
+	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_MAX_WORK_FACTOR", "10")
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-auth", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-auth", "oauth-daemon-auth", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+	const unlockKey = "test-secret-key"
+	if _, err := udsServer.SetupSecretStore(context.Background(), unlockKey); err != nil {
+		t.Fatalf("SetupSecretStore(): %v", err)
+	}
+	closeDebug, addr, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+	_, debugPort, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q): %v", addr, err)
+	}
+	daemonPageURL := "http://localhost:" + debugPort + "/"
+
+	withTestOAuthOpenBrowser(t, func(openedURL string) error {
+		if openedURL != daemonPageURL {
+			t.Errorf("openBrowser() URL = %q, want daemon page", openedURL)
+		}
+		return nil
+	})
+
+	done := make(chan error, 1)
+	var stdout, stderr bytes.Buffer
+	go func() {
+		done <- runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	}()
+
+	var flow daemon.OAuthFlowSnapshot
+	deadline := time.After(3 * time.Second)
+	for {
+		flows := udsServer.PendingOAuthFlows()
+		if len(flows) == 1 {
+			flow = flows[0]
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("runAuthWithRepoWithOptions returned before daemon flow was pending: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		case <-deadline:
+			t.Fatalf("timed out waiting for daemon OAuth flow; stdout=%s stderr=%s", stdout.String(), stderr.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if !strings.Contains(flow.AuthorizationURL, authServer.URL+"/authorize") || !strings.Contains(flow.AuthorizationURL, "redirect_uri=http%3A%2F%2Flocalhost%3A") {
+		t.Fatalf("daemon flow authorization URL = %q, want provider URL with daemon redirect", flow.AuthorizationURL)
+	}
+	if !strings.Contains(flow.Label, "Authorize test_oauth for oauth-daemon-auth (default)") {
+		t.Fatalf("daemon flow label = %q, want credential/package/account label", flow.Label)
+	}
+
+	resp, body := getDaemonHTTP(t, "http://"+addr+"/approval-console")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approval console status = %d, body=%q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, flow.Label) || !strings.Contains(body, html.EscapeString(flow.AuthorizationURL)) {
+		t.Fatalf("approval console missing pending OAuth flow: %q", body)
+	}
+
+	callbackURL := "http://" + addr + "/oauth2/callback?code=daemon-auth-code&state=" + url.QueryEscape(flow.State)
+	resp, body = getDaemonHTTP(t, callbackURL)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("callback status = %d, body=%q", resp.StatusCode, body)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for auth flow completion; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	requireRefreshToken(t, store, "oauth-daemon-auth", "test_oauth", "default", "test-rt")
+	select {
+	case code := <-codeCh:
+		if code != "daemon-auth-code" {
+			t.Fatalf("token exchange code = %q, want daemon-auth-code", code)
+		}
+	default:
+		t.Fatal("token endpoint did not receive authorization code")
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"Authorization is waiting in the Toolbox daemon.",
+		daemonPageURL,
+		"Or visit directly:",
+		"Or paste the full redirect URL or authorization code here:",
+		"Credentials stored",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunAuthOAuth2FallsBackWhenDaemonUnavailable(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-unavailable", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-unavailable", "oauth-daemon-unavailable", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return nil, errors.New("daemon unavailable")
+	})
+
+	callbackDone := make(chan struct{})
+	withTestOAuthOpenBrowser(t, func(authURL string) error {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return nil
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+		if !strings.HasPrefix(redirectURI, "http://127.0.0.1:") {
+			t.Errorf("fallback redirect_uri = %q, want local callback", redirectURI)
+		}
+		go func() {
+			defer close(callbackDone)
+			resp, err := http.Get(fmt.Sprintf("%s?code=local-fallback-code&state=%s", redirectURI, state))
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+		return nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	<-callbackDone
+	requireRefreshToken(t, store, "oauth-daemon-unavailable", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "local-fallback-code" {
+		t.Fatalf("token exchange code = %q, want local-fallback-code", got)
+	}
+	if strings.Contains(stdout.String(), "Authorization is waiting in the Toolbox daemon.") {
+		t.Fatalf("fallback stdout unexpectedly used daemon instructions: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Opening browser to authorize") {
+		t.Fatalf("fallback stdout missing local browser instructions: %s", stdout.String())
+	}
+}
+
+func TestRunAuthOAuth2FallsBackWhenDaemonRedirectInvalid(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-invalid", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-invalid", "oauth-daemon-invalid", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	stub := &stubDaemonOAuthClientCloser{stubDaemonOAuthClient: &stubDaemonOAuthClient{
+		redirects: daemon.OAuthRedirectURLs{RedirectURI: "urn:ietf:wg:oauth:2.0:oob", DaemonURL: "http://localhost:7777/"},
+	}}
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return stub, nil
+	})
+
+	callbackDone := make(chan struct{})
+	withTestOAuthOpenBrowser(t, func(authURL string) error {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return nil
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+		go func() {
+			defer close(callbackDone)
+			resp, err := http.Get(fmt.Sprintf("%s?code=invalid-redirect-fallback-code&state=%s", redirectURI, state))
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+		return nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	<-callbackDone
+	requireRefreshToken(t, store, "oauth-daemon-invalid", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "invalid-redirect-fallback-code" {
+		t.Fatalf("token exchange code = %q, want invalid-redirect-fallback-code", got)
+	}
+	if stub.closed != 1 {
+		t.Fatalf("daemon client close count = %d, want 1", stub.closed)
+	}
+}
+
+func TestRunAuthOAuth2FallsBackWhenDaemonRedirectURIErrors(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-redirect-error", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-redirect-error", "oauth-daemon-redirect-error", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	stub := &stubDaemonOAuthClientCloser{stubDaemonOAuthClient: &stubDaemonOAuthClient{
+		redirectErr: errors.New("redirect service unavailable"),
+	}}
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return stub, nil
+	})
+
+	callbackDone := make(chan struct{})
+	withTestOAuthOpenBrowser(t, func(authURL string) error {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return nil
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+		if !strings.HasPrefix(redirectURI, "http://127.0.0.1:") {
+			t.Errorf("fallback redirect_uri = %q, want local callback", redirectURI)
+		}
+		go func() {
+			defer close(callbackDone)
+			resp, err := http.Get(fmt.Sprintf("%s?code=redirect-error-fallback-code&state=%s", redirectURI, state))
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+		return nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	<-callbackDone
+	requireRefreshToken(t, store, "oauth-daemon-redirect-error", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "redirect-error-fallback-code" {
+		t.Fatalf("token exchange code = %q, want redirect-error-fallback-code", got)
+	}
+	if stub.closed != 1 {
+		t.Fatalf("daemon client close count = %d, want 1", stub.closed)
+	}
+	if strings.Contains(stdout.String(), "Authorization is waiting in the Toolbox daemon.") {
+		t.Fatalf("fallback stdout unexpectedly used daemon instructions: %s", stdout.String())
+	}
+}
+
+func TestRunAuthOAuth2FallsBackWhenDaemonBeginFails(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-begin-fails", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-begin-fails", "oauth-daemon-begin-fails", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	stub := &stubDaemonOAuthClientCloser{stubDaemonOAuthClient: &stubDaemonOAuthClient{
+		redirects: daemon.OAuthRedirectURLs{
+			RedirectURI: "http://localhost:7777/oauth2/callback",
+			DaemonURL:   "http://localhost:7777/",
+		},
+		beginErr: errors.New("daemon begin failed"),
+	}}
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return stub, nil
+	})
+
+	callbackDone := make(chan struct{})
+	withTestOAuthOpenBrowser(t, func(authURL string) error {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return nil
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+		if !strings.HasPrefix(redirectURI, "http://127.0.0.1:") {
+			t.Errorf("fallback redirect_uri = %q, want local callback", redirectURI)
+		}
+		go func() {
+			defer close(callbackDone)
+			resp, err := http.Get(fmt.Sprintf("%s?code=begin-failure-fallback-code&state=%s", redirectURI, state))
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+		return nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	<-callbackDone
+	requireRefreshToken(t, store, "oauth-daemon-begin-fails", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "begin-failure-fallback-code" {
+		t.Fatalf("token exchange code = %q, want begin-failure-fallback-code", got)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.begins) != 1 {
+		t.Fatalf("daemon begin count = %d, want 1", len(stub.begins))
+	}
+	if len(stub.cancels) != 0 {
+		t.Fatalf("daemon cancels = %#v, want none because no flow_id was created", stub.cancels)
+	}
+	if strings.Contains(stdout.String(), "Authorization is waiting in the Toolbox daemon.") {
+		t.Fatalf("fallback stdout unexpectedly used daemon instructions: %s", stdout.String())
+	}
+}
+
+func TestRunAuthOAuth2FallsBackWhenDaemonBeginReturnsEmptyFlowID(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-empty-flow", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-empty-flow", "oauth-daemon-empty-flow", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	stub := &stubDaemonOAuthClientCloser{stubDaemonOAuthClient: &stubDaemonOAuthClient{
+		redirects: daemon.OAuthRedirectURLs{
+			RedirectURI: "http://localhost:7777/oauth2/callback",
+			DaemonURL:   "http://localhost:7777/",
+		},
+		emptyFlowID: true,
+	}}
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return stub, nil
+	})
+
+	callbackDone := make(chan struct{})
+	withTestOAuthOpenBrowser(t, func(authURL string) error {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("failed to parse auth URL: %v", err)
+			return nil
+		}
+		redirectURI := parsed.Query().Get("redirect_uri")
+		state := parsed.Query().Get("state")
+		if !strings.HasPrefix(redirectURI, "http://127.0.0.1:") {
+			t.Errorf("fallback redirect_uri = %q, want local callback", redirectURI)
+		}
+		go func() {
+			defer close(callbackDone)
+			resp, err := http.Get(fmt.Sprintf("%s?code=empty-flow-fallback-code&state=%s", redirectURI, state))
+			if err != nil {
+				t.Errorf("callback request failed: %v", err)
+				return
+			}
+			resp.Body.Close()
+		}()
+		return nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	<-callbackDone
+	requireRefreshToken(t, store, "oauth-daemon-empty-flow", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "empty-flow-fallback-code" {
+		t.Fatalf("token exchange code = %q, want empty-flow-fallback-code", got)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.begins) != 1 {
+		t.Fatalf("daemon begin count = %d, want 1", len(stub.begins))
+	}
+	if len(stub.cancels) != 0 {
+		t.Fatalf("daemon cancels = %#v, want none because no flow_id was created", stub.cancels)
+	}
+}
+
+func TestRunAuthOAuth2ManualPasteCancelsDaemonFlow(t *testing.T) {
+	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
+
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-manual", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-manual", "oauth-daemon-manual", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	udsServer, closeUDS := startTestDaemonServer(t)
+	defer closeUDS()
+	closeDebug, _, err := startDaemonDebugServer(io.Discard, nil, udsServer)
+	if err != nil {
+		t.Fatalf("startDaemonDebugServer(): %v", err)
+	}
+	defer func() {
+		if err := closeDebug(); err != nil {
+			t.Fatalf("close debug server: %v", err)
+		}
+	}()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	withTestOAuthOpenBrowser(t, func(string) error { return nil })
+
+	done := make(chan error, 1)
+	var stdout, stderr bytes.Buffer
+	go func() {
+		done <- runAuthWithRepoWithOptions(loaded, repo, reader, &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	}()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		if len(udsServer.PendingOAuthFlows()) == 1 {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("runAuthWithRepoWithOptions returned before daemon flow was pending: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		case <-deadline:
+			t.Fatalf("timed out waiting for pending daemon flow; stdout=%s stderr=%s", stdout.String(), stderr.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if _, err := io.WriteString(writer, "manual-wins-code\n"); err != nil {
+		t.Fatalf("write manual code: %v", err)
+	}
+	_ = writer.Close()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for manual auth completion; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	requireRefreshToken(t, store, "oauth-daemon-manual", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "manual-wins-code" {
+		t.Fatalf("token exchange code = %q, want manual-wins-code", got)
+	}
+	if flows := udsServer.PendingOAuthFlows(); len(flows) != 0 {
+		t.Fatalf("PendingOAuthFlows() after manual win = %#v, want none", flows)
+	}
+}
+
+func TestRunAuthOAuth2DaemonBrowserOpenFailureNonFatal(t *testing.T) {
+	codeCh := make(chan string, 1)
+	tokenServer := newOAuth2TokenServer(t, codeCh)
+	defer tokenServer.Close()
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	repo, store := newTestCredentialRepo(t)
+	seedOAuth2ClientSecrets(t, store, "oauth-daemon-browser-fail", "test_oauth")
+	loaded := newOAuth2TestPackage("oauth-daemon-browser-fail", "oauth-daemon-browser-fail", authServer.URL+"/authorize", tokenServer.URL+"/token")
+
+	stub := &stubDaemonOAuthClientCloser{stubDaemonOAuthClient: &stubDaemonOAuthClient{
+		redirects: daemon.OAuthRedirectURLs{
+			RedirectURI: "http://localhost:7777/oauth2/callback",
+			DaemonURL:   "http://localhost:7777/",
+		},
+		waitResult: daemon.OAuthWaitResult{Code: "browser-fail-code"},
+	}}
+	withTestDaemonOAuthConnector(t, func(context.Context) (daemonOAuthClientCloser, error) {
+		return stub, nil
+	})
+	withTestOAuthOpenBrowser(t, func(string) error {
+		return errors.New("browser unavailable")
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runAuthWithRepoWithOptions(loaded, repo, strings.NewReader(""), &stdout, &stderr, "", "", authRunOptions{PreferDaemonOAuth: true})
+	if err != nil {
+		t.Fatalf("runAuthWithRepoWithOptions() error: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	requireRefreshToken(t, store, "oauth-daemon-browser-fail", "test_oauth", "default", "test-rt")
+	if got := <-codeCh; got != "browser-fail-code" {
+		t.Fatalf("token exchange code = %q, want browser-fail-code", got)
+	}
+	if !strings.Contains(stdout.String(), "http://localhost:7777/") || !strings.Contains(stdout.String(), "Or visit directly:") {
+		t.Fatalf("stdout missing daemon/direct fallback instructions: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "browser unavailable") {
+		t.Fatalf("stderr = %q, want non-fatal browser error", stderr.String())
 	}
 }
 

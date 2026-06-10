@@ -11,9 +11,11 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437 // indirect
+	github.com/microsoft/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 )
+
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7

@@ -31,6 +31,13 @@
 11. For optional tool inputs, prefer `foo?: T` over `foo: T | undefined`.
     JSON transports preserve omission, not `undefined`. If you need an explicit
     empty value that survives JSON, use `null`.
+12. Prefer native types over JSON stand-ins. `Date`, `Map`, `Set`, `RegExp`,
+    `bigint`, `ArrayBuffer`, and typed arrays round-trip as real objects in
+    codemode — write `when: Date`, not `when: string` holding RFC3339.
+    Native types make the tool codemode-only (hidden from direct MCP/SDK
+    JSON invocation), but direct JSON invocation is deprecated, so do not
+    design contracts around it. `Error`, `DataView`, `WeakMap`, `WeakSet`,
+    `Promise`, `Symbol`, and function types are not supported at all.
 
 ## Examples
 

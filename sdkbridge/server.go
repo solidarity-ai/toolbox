@@ -626,11 +626,19 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 	if tool, ok := prepared.Tool(params.ToolName); !ok || !tool.JSONCallable() {
 		return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 	}
-	result, err := invoke.RunContext(ctx, prepared, params.ToolName, params.Params)
+	args, err := invoke.EncodeInvokeArgs(params.Params)
 	if err != nil {
 		return ToolInvokeResult{}, err
 	}
-	return ToolInvokeResult{Content: result}, nil
+	result, err := invoke.RunContext(ctx, prepared, params.ToolName, args)
+	if err != nil {
+		return ToolInvokeResult{}, err
+	}
+	content, err := invoke.DecodeWireString(result)
+	if err != nil {
+		return ToolInvokeResult{}, err
+	}
+	return ToolInvokeResult{Content: content}, nil
 }
 
 func (b *Bridge) search(ctx context.Context, params ToolsetSearchParams) (ToolsetSearchResult, error) {

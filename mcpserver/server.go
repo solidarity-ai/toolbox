@@ -94,12 +94,20 @@ func newMCPTool(at toolset.AgentTool) mcp.Tool {
 
 func handleToolCall(prepared toolset.PreparedToolset, toolName string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ran, err := invoke.RunContext(ctx, prepared, toolName, argumentMap(request.Params.Arguments))
+		args, err := invoke.EncodeInvokeArgs(argumentMap(request.Params.Arguments))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		ran, err := invoke.RunContext(ctx, prepared, toolName, args)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		text, err := invoke.DecodeWireString(ran)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return mcp.NewToolResultText(ran), nil
+		return mcp.NewToolResultText(text), nil
 	}
 }
 

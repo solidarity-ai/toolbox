@@ -865,6 +865,9 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 					if line == "" || seen[line] {
 						continue
 					}
+					if isNativeGlobalDeclaration(line) {
+						continue
+					}
 					// Try to enhance the declaration with property descriptions.
 					enhanced := enhanceDeclWithDescriptions(line, defTypes)
 					if !seen[enhanced] {
@@ -878,6 +881,24 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 	}
 	sort.Strings(lines)
 	return lines
+}
+
+func isNativeGlobalDeclaration(line string) bool {
+	line = strings.TrimSpace(line)
+	var name string
+	switch {
+	case strings.HasPrefix(line, "interface "):
+		rest := line[len("interface "):]
+		if idx := strings.IndexAny(rest, " {"); idx >= 0 {
+			name = rest[:idx]
+		}
+	case strings.HasPrefix(line, "type "):
+		rest := line[len("type "):]
+		if idx := strings.Index(rest, " = "); idx >= 0 {
+			name = rest[:idx]
+		}
+	}
+	return name != "" && toolbox.IsNativeGlobalTypeName(name)
 }
 
 // enhanceDeclWithDescriptions takes a declaration line like

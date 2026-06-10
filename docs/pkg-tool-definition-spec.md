@@ -178,6 +178,36 @@ Toolbox uses two validation modes for `toolbox.pkg.json`:
 
 The validation target is the compiled package form, not the raw source file. In source mode, packaging compiles `toolbox.pkg.json` plus tool-source metadata into a normalized package model in memory, then validates that compiled model against the dev or publishable schema. Built packages ship the compiled form directly as `toolbox.pkg.compiled.json`.
 
+### Parameter & Return Value Types
+
+Tool contracts are TypeScript types and support two tiers:
+
+- **Native (preferred)**: `Date`, `Map`, `Set`, `RegExp`, `bigint`,
+  `ArrayBuffer`, and the typed arrays (`Uint8Array`, `Uint8ClampedArray`,
+  `Int8Array`, `Int16Array`, `Uint16Array`, `Int32Array`, `Uint32Array`,
+  `Float32Array`, `Float64Array`, `BigInt64Array`, `BigUint64Array`), in
+  addition to everything in the JSON tier. These cross the host boundary via
+  the wire format and arrive as real objects in both directions:
+  `input.when instanceof Date` holds inside the tool, and a returned `Map`
+  is a real `Map` in the calling cell. Prefer the natural native type
+  (`when: Date`, not `when: string` holding RFC3339) — codemode is the
+  primary invocation surface and preserves it end-to-end.
+- **JSON-compatible**: `string`, `number`, `boolean`, `null`, plain objects,
+  arrays, and tuples of these. Tools whose params and return type stay within
+  this tier are additionally JSON-callable: they can be invoked directly over
+  JSON transports (MCP tool calls, SDK bridge direct invoke). **Direct
+  MCP/JSON invocation is deprecated** and will be removed; do not constrain a
+  contract to this tier for its benefit. Using a native type anywhere in the
+  contract (including nested fields) makes the tool codemode-only — it is
+  omitted from direct JSON tool listings and rejected by direct invocation
+  (`PreparedTool.JSONCallable()` reports false and `JSONCallWhyNot()` names
+  the offending path, e.g. `params.when: uses Date`).
+
+Not representable in tool contracts (no wire model): `Error`, `DataView`,
+`WeakMap`, `WeakSet`, `Promise`, `Symbol`, and function types. `any`,
+`unknown`, and open object types (`Record<string, unknown>`-style index
+signatures without a concrete value type) also make a tool non-JSON-callable.
+
 ### Filename Convention
 
 The filename defines the tool's resource path:

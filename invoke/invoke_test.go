@@ -147,7 +147,7 @@ func TestRunContextExecutesBuiltInTools(t *testing.T) {
 		},
 	}})
 
-	got, err := invoke.RunContext(context.Background(), prepared, "builtin.echo", map[string]any{"value": "ok"})
+	got, err := runInvokeContextString(t, context.Background(), prepared, "builtin.echo", map[string]any{"value": "ok"})
 	if err != nil {
 		t.Fatalf("RunContext() error: %v", err)
 	}

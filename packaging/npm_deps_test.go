@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mackross/repljs/jswire"
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/packaging"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	"github.com/solidarity-ai/toolbox/testutil/tooltest"
 	"github.com/solidarity-ai/toolbox/toolset"
 )
 
@@ -65,7 +67,7 @@ func TestNpmDepsDistMode(t *testing.T) {
 
 	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
-	_, err = invoke.Run(prepared, "githubIssues.get", map[string]any{
+	_, err = tooltest.RunInvokeString(t, invoke.Run, prepared, "githubIssues.get", map[string]any{
 		"owner":  "octocat",
 		"repo":   "hello-world",
 		"number": 1,
@@ -197,14 +199,22 @@ func TestNpmDepsE2E(t *testing.T) {
 	prepared := toolset.NewPreparedToolset(assembler.LoadedTools(loaded))
 
 	// Fetch octocat/Hello-World#1 — a well-known public issue that won't be deleted.
-	result, err := invoke.Run(prepared, "githubIssues.get", map[string]any{
+	resultRaw, err := invoke.Run(prepared, "githubIssues.get", tooltest.InvokeArgs(t, map[string]any{
 		"owner":  "octocat",
 		"repo":   "Hello-World",
 		"number": 1,
 		"token":  token,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("invoke.Run: %v", err)
+	}
+	resultValue, err := jswire.Decode(resultRaw)
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	resultJSON, err := json.Marshal(resultValue)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
 	}
 
 	var issue struct {
@@ -213,8 +223,8 @@ func TestNpmDepsE2E(t *testing.T) {
 		State  string   `json:"state"`
 		Labels []string `json:"labels"`
 	}
-	if err := json.Unmarshal([]byte(result), &issue); err != nil {
-		t.Fatalf("unmarshal result: %v\nraw: %s", err, result)
+	if err := json.Unmarshal(resultJSON, &issue); err != nil {
+		t.Fatalf("unmarshal result: %v\nraw: %s", err, resultJSON)
 	}
 
 	if issue.Number != 1 {

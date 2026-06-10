@@ -33,18 +33,18 @@ func TestCacheKeyStableAcrossEquivalentPreparedPackages(t *testing.T) {
 		t.Fatalf("CacheKey mismatch:\nfirst:  %q\nsecond: %q", got, want)
 	}
 
-	if got, err := exec.RunContext(context.Background(), first, "calc.add", map[string]any{"a": 2, "b": 3}); err != nil {
+	if gotWire, err := exec.RunContext(context.Background(), first, "calc.add", tooltest.WireArgs(t, map[string]any{"a": 2, "b": 3})); err != nil {
 		t.Fatalf("RunContext(first): %v", err)
-	} else if got != "5" {
+	} else if got := tooltest.WireString(t, gotWire); got != "5" {
 		t.Fatalf("RunContext(first) = %q, want %q", got, "5")
 	}
 	if got := checkSessionCountForTest(exec); got != 1 {
 		t.Fatalf("checkSessions after first run = %d, want 1", got)
 	}
 
-	if got, err := exec.RunContext(context.Background(), second, "calc.add", map[string]any{"a": 4, "b": 5}); err != nil {
+	if gotWire, err := exec.RunContext(context.Background(), second, "calc.add", tooltest.WireArgs(t, map[string]any{"a": 4, "b": 5})); err != nil {
 		t.Fatalf("RunContext(second): %v", err)
-	} else if got != "9" {
+	} else if got := tooltest.WireString(t, gotWire); got != "9" {
 		t.Fatalf("RunContext(second) = %q, want %q", got, "9")
 	}
 	if got := checkSessionCountForTest(exec); got != 1 {
@@ -60,10 +60,11 @@ func TestCancelableContextPopulatesCheckSessionCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	got, err := exec.RunContext(ctx, prepared, "calc.add", map[string]any{"a": 2, "b": 3})
+	gotWire, err := exec.RunContext(ctx, prepared, "calc.add", tooltest.WireArgs(t, map[string]any{"a": 2, "b": 3}))
 	if err != nil {
 		t.Fatalf("RunContext(cancelable): %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != "5" {
 		t.Fatalf("RunContext(cancelable) = %q, want %q", got, "5")
 	}
@@ -112,17 +113,18 @@ func TestTimedOutRuntimeKeepsCheckSessionCache(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	if _, err := exec.RunContext(ctx, prepared, "calc.wait", map[string]any{}); err == nil {
+	if _, err := exec.RunContext(ctx, prepared, "calc.wait", tooltest.WireArgs(t, map[string]any{})); err == nil {
 		t.Fatal("RunContext(timeout) error = nil, want timeout")
 	}
 	if got := checkSessionCountForTest(exec); got != 1 {
 		t.Fatalf("checkSessions after timed out run = %d, want 1", got)
 	}
 
-	got, err := exec.RunContext(context.Background(), prepared, "calc.add", map[string]any{"a": 2, "b": 3})
+	gotWire, err := exec.RunContext(context.Background(), prepared, "calc.add", tooltest.WireArgs(t, map[string]any{"a": 2, "b": 3}))
 	if err != nil {
 		t.Fatalf("RunContext(reuse after timeout): %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != "5" {
 		t.Fatalf("RunContext(reuse after timeout) = %q, want %q", got, "5")
 	}

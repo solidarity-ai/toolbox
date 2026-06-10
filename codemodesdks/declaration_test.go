@@ -332,6 +332,48 @@ export {};
 `)
 }
 
+func TestDeclarationSource_PreservesNativeMapAndSetTypes(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/native-values", "nativeValues", map[string]string{
+		"tools/use-native.ts": `type NativeInput = {
+  map: Map<string, number>;
+  set: Set<string>;
+};
+
+type NativeOutput = {
+  returnedMap: Map<string, number>;
+  returnedSet: Set<string>;
+};
+
+export default async function tool(input: NativeInput): Promise<NativeOutput> {
+  return {
+    returnedMap: new Map([["answer", input.map.get("answer") ?? 0]]),
+    returnedSet: new Set(input.set),
+  };
+}
+`,
+	})
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	got := codemodesdks.DeclarationSource(prepared)
+	if !strings.Contains(got, "returnedMap: Map<string, number>") {
+		t.Fatalf("expected returnedMap to preserve Map type:\n%s", got)
+	}
+	if !strings.Contains(got, "returnedSet: Set<string>") {
+		t.Fatalf("expected returnedSet to preserve Set type:\n%s", got)
+	}
+
+	typecheckDeclarations(t, got, `const got = await nativeValues.useNative({
+  map: new Map<string, number>([["answer", 42]]),
+  set: new Set<string>(["ok"]),
+});
+const answer = got.returnedMap.get("answer");
+const hasOK = got.returnedSet.has("ok");
+void answer;
+void hasOK;
+export {};
+`)
+}
+
 func writePackage(t testing.TB, dir, module, name string, files map[string]string) string {
 	t.Helper()
 

@@ -28,7 +28,7 @@ func TestRunWithHiddenParamBinding(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// Agent only provides b=5; a=10 is injected from context
-	result, err := invoke.Run(prepared, "calc.add", map[string]any{"b": 5})
+	result, err := runInvokeString(t, prepared, "calc.add", map[string]any{"b": 5})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRunWithHiddenParamBindingOverridesAgentValue(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// Agent tries to pass a=999 for a hidden param — binding should override it
-	result, err := invoke.Run(prepared, "calc.add", map[string]any{"a": 999, "b": 5})
+	result, err := runInvokeString(t, prepared, "calc.add", map[string]any{"a": 999, "b": 5})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRunWithCheckExpressionBlocksCall(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("calc"), cfg)
 
 	// a=50 exceeds max_value=10, should be blocked
-	_, err := invoke.Run(prepared, "calc.add", map[string]any{"a": 50, "b": 5})
+	_, err := invoke.Run(prepared, "calc.add", invokeArgs(t, map[string]any{"a": 50, "b": 5}))
 	if err == nil {
 		t.Fatal("expected check failure error")
 	}

@@ -11,9 +11,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/dop251/goja"
+	"github.com/mackross/repljs/jswire"
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/fetch"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
@@ -120,34 +123,53 @@ func (e *Executor) Close() error {
 
 // Run selects a visible tool by name, evaluates any bindings to produce the
 // full param set (including hidden params), and dispatches execution.
-func Run(prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
+func Run(prepared toolset.PreparedToolset, toolName string, args jswire.Value) (jswire.Value, error) {
 	return defaultExecutor.RunContext(context.Background(), prepared, toolName, args)
 }
 
 // RunContext is like Run but allows callers to propagate cancellation and
 // deadlines into builtin tool handlers.
-func RunContext(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
+func RunContext(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args jswire.Value) (jswire.Value, error) {
 	return defaultExecutor.RunContext(ctx, prepared, toolName, args)
 }
 
 // Run selects a visible tool by name, evaluates any bindings to produce the
 // full param set (including hidden params), and dispatches execution.
-func (e *Executor) Run(prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
+func (e *Executor) Run(prepared toolset.PreparedToolset, toolName string, args jswire.Value) (jswire.Value, error) {
 	return e.RunContext(context.Background(), prepared, toolName, args)
 }
 
 // RunContext is like Run but allows callers to propagate cancellation and
 // deadlines into builtin tool handlers.
-func (e *Executor) RunContext(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args map[string]any) (string, error) {
+func (e *Executor) RunContext(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args jswire.Value) (jswire.Value, error) {
 	return e.runPreparedCall(ctx, prepared, toolName, args, nil)
 }
 
-func (e *Executor) runPreparedCall(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args map[string]any, memFS *vfs.MemFS) (string, error) {
-	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, args)
+func (e *Executor) runPreparedCall(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args jswire.Value, memFS *vfs.MemFS) (jswire.Value, error) {
+	params, err := decodeWireObject(args)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return e.executeTool(ctx, tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
+	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, params)
+	if err != nil {
+		return nil, err
+	}
+	if tool.TS != nil {
+		patchedArgs := args
+		if patch := changedTopLevelFields(params, fullParams); len(patch) > 0 {
+			patchedArgs, err = patchedArgs.MergeObject(patch)
+			if err != nil {
+				return nil, fmt.Errorf("patch tool args: %w", err)
+			}
+		}
+		fetchFn := makeFetch(ctx, injector, allowlist, tool.MaxFetchResponseBytes(), prepared.FetchTransport())
+		return e.runTSTool(ctx, tool, patchedArgs, fetchFn)
+	}
+	result, err := e.executeTool(ctx, tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
+	if err != nil {
+		return nil, err
+	}
+	return jswire.Encode(result)
 }
 
 // executeTool runs one already-selected tool with fully prepared params.
@@ -164,7 +186,15 @@ func (e *Executor) executeTool(ctx context.Context, tool toolset.PreparedTool, f
 		return e.runTSWasmTool(ctx, tool, fullParams, fetchFn)
 	}
 	if tool.TS != nil {
-		return e.runTSTool(ctx, tool, fullParams, fetchFn)
+		argsWire, err := jswire.Encode(jswire.ObjectType(fullParams))
+		if err != nil {
+			return "", err
+		}
+		result, err := e.runTSTool(ctx, tool, argsWire, fetchFn)
+		if err != nil {
+			return "", err
+		}
+		return DecodeWireString(result)
 	}
 	return "", fmt.Errorf("tool %s has no executable", tool.Name)
 }
@@ -190,6 +220,66 @@ func prepareToolExecution(prepared toolset.PreparedToolset, toolName string, arg
 	return tool, fullParams, injector, allowlist, nil
 }
 
+func decodeWireObject(raw jswire.Value) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	value, err := jswire.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	if value == nil {
+		return map[string]any{}, nil
+	}
+	params, ok := value.(jswire.ObjectType)
+	if !ok {
+		return nil, fmt.Errorf("tool args must be an object")
+	}
+	return map[string]any(params), nil
+}
+
+func changedTopLevelFields(agentParams, fullParams map[string]any) jswire.ObjectType {
+	patch := jswire.ObjectType{}
+	for key, next := range fullParams {
+		if current, ok := agentParams[key]; !ok || !reflect.DeepEqual(current, next) {
+			patch[key] = next
+		}
+	}
+	return patch
+}
+
+// gojaRuntimes pools goja runtimes for wire decoding on the per-invocation
+// hot path. goja.Runtime is not safe for concurrent use, so runtimes must be
+// taken from and returned to the pool rather than shared.
+var gojaRuntimes = sync.Pool{
+	New: func() any { return goja.New() },
+}
+
+// DecodeWireString decodes a wire value into its JavaScript string form
+// (ToString semantics).
+func DecodeWireString(raw jswire.Value) (string, error) {
+	vm := gojaRuntimes.Get().(*goja.Runtime)
+	defer gojaRuntimes.Put(vm)
+	value, err := jswire.DecodeGoja(vm, raw)
+	if err != nil {
+		return "", err
+	}
+	return value.String(), nil
+}
+
+// EncodeInvokeArgs encodes JSON-shaped tool arguments into a wire value
+// suitable for Run/RunContext. Nil args encode as a nil value.
+func EncodeInvokeArgs(args map[string]any) (jswire.Value, error) {
+	if args == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	return jswire.FromAnonJSObj(raw)
+}
+
 func findTool(prepared toolset.PreparedToolset, toolName string) (toolset.PreparedTool, error) {
 	if tool, ok := prepared.Tool(toolName); ok {
 		return tool, nil
@@ -197,15 +287,15 @@ func findTool(prepared toolset.PreparedToolset, toolName string) (toolset.Prepar
 	return toolset.PreparedTool{}, fmt.Errorf("unknown tool: %s", toolName)
 }
 
-func (e *Executor) runTSTool(ctx context.Context, tool toolset.PreparedTool, args map[string]any, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (string, error) {
-	return e.runWithCheckSession(tool.CacheKey(), func(session **toolbox.CheckSession) (string, error) {
+func (e *Executor) runTSTool(ctx context.Context, tool toolset.PreparedTool, args jswire.Value, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (jswire.Value, error) {
+	return e.runWithCheckSession(tool.CacheKey(), func(session **toolbox.CheckSession) (jswire.Value, error) {
 		return quickts.RunWithHostContext(ctx, *tool.TS, args, quickts.Host{
 			Fetch: fetchFn,
 		}, session, tool.Sig)
 	})
 }
 
-func (e *Executor) runWithCheckSession(key string, run func(session **toolbox.CheckSession) (string, error)) (string, error) {
+func (e *Executor) runWithCheckSession(key string, run func(session **toolbox.CheckSession) (jswire.Value, error)) (jswire.Value, error) {
 	if e == nil || strings.TrimSpace(key) == "" {
 		var session *toolbox.CheckSession
 		return run(&session)
@@ -235,7 +325,7 @@ func (e *Executor) entryLocked(key string) *checkSessionEntry {
 	return entry
 }
 
-func (e *checkSessionEntry) run(run func(session **toolbox.CheckSession) (string, error)) (string, error) {
+func (e *checkSessionEntry) run(run func(session **toolbox.CheckSession) (jswire.Value, error)) (jswire.Value, error) {
 	if e == nil {
 		var session *toolbox.CheckSession
 		return run(&session)
@@ -325,7 +415,11 @@ func RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[stri
 // This allows callers to pre-populate files before execution and inspect
 // files written by the WASM guest afterwards.
 func (e *Executor) RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[string]any, memFS *vfs.MemFS) (string, error) {
-	return e.runPreparedCall(context.Background(), prepared, toolName, args, memFS)
+	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, args)
+	if err != nil {
+		return "", err
+	}
+	return e.executeTool(context.Background(), tool, fullParams, memFS, injector, allowlist, prepared.FetchTransport())
 }
 
 func (e *Executor) runTSWasmTool(ctx context.Context, tool toolset.PreparedTool, args map[string]any, fetchFn func(string, string, string, string) (quickts.FetchResult, error)) (string, error) {
@@ -339,8 +433,12 @@ func (e *Executor) runTSWasmToolWithVFS(ctx context.Context, tool toolset.Prepar
 	}
 	defer cleanup()
 
-	return e.runWithCheckSession(tool.CacheKey(), func(session **toolbox.CheckSession) (string, error) {
-		return quickts.RunWithHostContext(ctx, tool.TSWasm.TSToolDef, args, quickts.Host{
+	result, err := e.runWithCheckSession(tool.CacheKey(), func(session **toolbox.CheckSession) (jswire.Value, error) {
+		argsWire, err := jswire.Encode(jswire.ObjectType(args))
+		if err != nil {
+			return nil, err
+		}
+		return quickts.RunWithHostContext(ctx, tool.TSWasm.TSToolDef, argsWire, quickts.Host{
 			ReadFile: func(path string) (string, error) {
 				data, err := memFS.ReadAll(path)
 				if err != nil {
@@ -387,6 +485,10 @@ func (e *Executor) runTSWasmToolWithVFS(ctx context.Context, tool toolset.Prepar
 			},
 		}, session, tool.Sig)
 	})
+	if err != nil {
+		return "", err
+	}
+	return DecodeWireString(result)
 }
 
 // startVFSServer creates a UDS, starts the VFS server goroutine, and returns

@@ -827,17 +827,9 @@ func executeApprovedToolCall(ctx context.Context, sessionID repl.SessionID, cell
 	if !ok {
 		return fail(fmt.Sprintf("tool %s unavailable for approved execution", call.ToolName))
 	}
-	args, err := decodeRuntimeArgs(call.Params)
-	if err != nil {
-		return fail(fmt.Sprintf("tool %s args: %v", call.ToolName, err))
-	}
-	raw, err := runPreparedTool(ctx, executor, prepared, call.ToolName, args)
+	result, err := runPreparedTool(ctx, executor, prepared, call.ToolName, call.Params)
 	if err != nil {
 		return fail(err.Error())
-	}
-	result, err := encodeRuntimeResult(currentReturnType(tool), raw)
-	if err != nil {
-		return fail(fmt.Sprintf("tool %s result: %v", call.ToolName, err))
 	}
 	if err := st.AppendFact(ctx, model.EffectCompleted{
 		Session: sessionID,

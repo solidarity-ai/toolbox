@@ -7,12 +7,16 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing/fstest"
 	"time"
 
+	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/fastschema/qjs"
+	"github.com/mackross/repljs/jswire"
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/fsoverlay"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -65,22 +69,22 @@ type Host struct {
 }
 
 // Run is the minimal TS-tool runtime seam.
-func Run(def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSignature) (string, error) {
+func Run(def tooldef.TSToolDef, args jswire.Value, sig *toolbox.FuncSignature) (jswire.Value, error) {
 	return RunContext(context.Background(), def, args, sig)
 }
 
 // RunContext is the minimal TS-tool runtime seam with cancellation.
-func RunContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, sig *toolbox.FuncSignature) (string, error) {
+func RunContext(ctx context.Context, def tooldef.TSToolDef, args jswire.Value, sig *toolbox.FuncSignature) (jswire.Value, error) {
 	return RunWithHostContext(ctx, def, args, Host{}, nil, sig)
 }
 
 // RunWithSession is like Run but accepts a session pointer for caching.
-func RunWithSession(def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+func RunWithSession(def tooldef.TSToolDef, args jswire.Value, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (jswire.Value, error) {
 	return RunWithSessionContext(context.Background(), def, args, session, sig)
 }
 
 // RunWithSessionContext is like RunContext but accepts a session pointer for caching.
-func RunWithSessionContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+func RunWithSessionContext(ctx context.Context, def tooldef.TSToolDef, args jswire.Value, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (jswire.Value, error) {
 	return RunWithHostContext(ctx, def, args, Host{}, session, sig)
 }
 
@@ -92,7 +96,15 @@ func RunApprovalPresentation(ctx context.Context, def tooldef.TSToolDef, args ma
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return RunModuleSourceWithHostContext(ctx, def, approvalPresentationRunnerSource(def.Entry, args, sig), Host{}, session)
+	result, err := RunModuleSourceWithHostContext(ctx, def, nil, approvalPresentationRunnerSource(def.Entry, args, sig), Host{}, session)
+	if err != nil {
+		return "", err
+	}
+	value, err := jswire.DecodeGoja(goja.New(), result)
+	if err != nil {
+		return "", err
+	}
+	return value.String(), nil
 }
 
 // RunWithHost is the same minimal runtime seam with optional host imports.
@@ -100,23 +112,23 @@ func RunApprovalPresentation(ctx context.Context, def tooldef.TSToolDef, args ma
 // checking. On first call the created session is written back through the pointer.
 // If sig is non-nil, args are spread as individual function params in order;
 // otherwise they are passed as a single object (legacy style).
-func RunWithHost(def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (string, error) {
+func RunWithHost(def tooldef.TSToolDef, args jswire.Value, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (jswire.Value, error) {
 	return RunWithHostContext(context.Background(), def, args, host, session, sig)
 }
 
 // RunWithHostContext is RunWithHost with cancellation support.
-func RunWithHostContext(ctx context.Context, def tooldef.TSToolDef, args map[string]any, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (result string, err error) {
-	return RunModuleSourceWithHostContext(ctx, def, runnerSource(def.Entry, args, sig), host, session)
+func RunWithHostContext(ctx context.Context, def tooldef.TSToolDef, args jswire.Value, host Host, session **toolbox.CheckSession, sig *toolbox.FuncSignature) (result jswire.Value, err error) {
+	return RunModuleSourceWithHostContext(ctx, def, args, runnerSource(def.Entry, args, sig), host, session)
 }
 
-func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, source string, host Host, session **toolbox.CheckSession) (result string, err error) {
+func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, args jswire.Value, source string, host Host, session **toolbox.CheckSession) (result jswire.Value, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if ctx.Err() != nil {
-				result = ""
+				result = nil
 				err = ctx.Err()
 				return
 			}
@@ -129,7 +141,7 @@ func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, 
 	}
 	files, err := withRunner(def.Files, source)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	checkCtx, cancelCheck := checkerContext(ctx, checkSession)
@@ -146,17 +158,17 @@ func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, 
 	if err != nil {
 		// TODO: Normalize checker/runtime errors into an LLM-friendly shape instead
 		// of returning raw compiler/library text.
-		return "", fmt.Errorf("typescript check failed: %w", err)
+		return nil, fmt.Errorf("typescript check failed: %w", err)
 	}
 	if len(diagnostics) > 0 {
 		// TODO: Normalize checker/runtime errors into an LLM-friendly shape instead
 		// of returning raw compiler/library text.
-		return "", fmt.Errorf("typescript check failed: %s", formatDiagnostics(diagnostics))
+		return nil, fmt.Errorf("typescript check failed: %s", formatDiagnostics(diagnostics))
 	}
 
 	code, err := emit(files, def.PackageRoot)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	rt, err := qjs.New(qjs.Option{
@@ -164,7 +176,7 @@ func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, 
 		CloseOnContextDone: true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("create qjs runtime: %w", err)
+		return nil, fmt.Errorf("create qjs runtime: %w", err)
 	}
 	defer func() {
 		if rt != nil {
@@ -173,15 +185,23 @@ func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, 
 	}()
 
 	if err := installHost(rt, host); err != nil {
-		return "", err
+		return nil, err
+	}
+	if len(args) > 0 {
+		argsValue, err := jswire.DecodeQuickJS(rt.Context(), args)
+		if err != nil {
+			return nil, fmt.Errorf("decode tool args: %w", err)
+		}
+		defer argsValue.Free()
+		rt.Context().Global().SetPropertyStr("__toolboxArgs", argsValue)
 	}
 
 	val, err := rt.Eval(runnerJSFile, qjs.Code(code), qjs.TypeModule())
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		}
-		return "", fmt.Errorf("run %s: %w", def.Entry, err)
+		return nil, fmt.Errorf("run %s: %w", def.Entry, err)
 	}
 	defer func() {
 		if val != nil {
@@ -189,7 +209,7 @@ func RunModuleSourceWithHostContext(ctx context.Context, def tooldef.TSToolDef, 
 		}
 	}()
 
-	return val.String(), nil
+	return jswire.EncodeQuickJS(val)
 }
 
 // PrepareCheckSession creates or refreshes a reusable TypeScript checker
@@ -418,40 +438,166 @@ func hostCompatDTS() string {
 `
 }
 
-func runnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
-	// __serialize: if the result is not a string, JSON.stringify it.
-	const serialize = `const __r = %s; export default typeof __r === "string" ? __r : JSON.stringify(__r);`
-
+func runnerSource(entry string, args jswire.Value, sig *toolbox.FuncSignature) string {
 	if sig == nil {
-		argsJSON, _ := json.Marshal(args)
-		call := fmt.Sprintf("await tool(%s, {})", argsJSON)
-		return fmt.Sprintf("import tool from \"./%s\";\n"+serialize+"\n", entry, call)
+		return fmt.Sprintf("import tool from \"./%s\";\nconst __r = await tool((globalThis as any).__toolboxArgs ?? {}, {}); export default __r;\n", entry)
 	}
 	params := sig.Params()
 	if len(params) == 0 {
-		return fmt.Sprintf("import tool from \"./%s\";\n"+serialize+"\n", entry, "await tool()")
+		return fmt.Sprintf("import tool from \"./%s\";\nconst __r = await tool(); export default __r;\n", entry)
 	}
-	// Multi-param style: inline each arg with a type assertion against the
-	// function's parameter types so the TS checker validates arg types.
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "import tool from \"./%s\";\n", entry)
+	fmt.Fprintf(&sb, "const __toolboxArgs = ((globalThis as any).__toolboxArgs ?? {}) as %s;\n", wireArgsObjectType(args, params))
 	sb.WriteString("const __r = await tool(")
 	for i, p := range params {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		val, ok := args[p.Name()]
-		if !ok {
-			sb.WriteString("undefined")
-		} else {
-			valJSON, _ := json.Marshal(val)
-			fmt.Fprintf(&sb, "(%s satisfies Parameters<typeof tool>[%d])", string(valJSON), i)
-		}
+		fmt.Fprintf(&sb, "(__toolboxArgs[%q] satisfies Parameters<typeof tool>[%d])", p.Name(), i)
 	}
 	sb.WriteString(");\n")
-	sb.WriteString(`export default typeof __r === "string" ? __r : JSON.stringify(__r);`)
+	sb.WriteString("export default __r;")
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+func wireArgsObjectType(raw jswire.Value, params []toolbox.FuncParam) string {
+	values := map[string]any{}
+	if len(raw) > 0 {
+		if decoded, err := jswire.Decode(raw); err == nil {
+			if obj, ok := decoded.(jswire.ObjectType); ok {
+				values = map[string]any(obj)
+			}
+		}
+	}
+
+	parts := make([]string, 0, len(params))
+	for _, p := range params {
+		tsType := "undefined"
+		if v, ok := values[p.Name()]; ok {
+			tsType = wireValueTypeScriptType(v)
+		}
+		optional := ""
+		if p.Optional() && tsType == "undefined" {
+			optional = "?"
+		}
+		parts = append(parts, fmt.Sprintf("%s%s: %s", strconv.Quote(p.Name()), optional, tsType))
+	}
+	if len(parts) == 0 {
+		return "{}"
+	}
+	return "{ " + strings.Join(parts, "; ") + " }"
+}
+
+func wireValueTypeScriptType(v any) string {
+	switch v := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case string:
+		return strconv.Quote(v)
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return "number"
+	case jswire.BigIntType:
+		return "bigint"
+	case jswire.DateType:
+		return "Date"
+	case jswire.RegExpType:
+		return "RegExp"
+	case jswire.ArrayBufferType:
+		return "ArrayBuffer"
+	case jswire.Uint8ArrayType:
+		return "Uint8Array"
+	case jswire.Uint8ClampedArrayType:
+		return "Uint8ClampedArray"
+	case jswire.Int8ArrayType:
+		return "Int8Array"
+	case jswire.Uint16ArrayType:
+		return "Uint16Array"
+	case jswire.Int16ArrayType:
+		return "Int16Array"
+	case jswire.Uint32ArrayType:
+		return "Uint32Array"
+	case jswire.Int32ArrayType:
+		return "Int32Array"
+	case jswire.BigUint64ArrayType:
+		return "BigUint64Array"
+	case jswire.BigInt64ArrayType:
+		return "BigInt64Array"
+	case jswire.Float32ArrayType:
+		return "Float32Array"
+	case jswire.Float64ArrayType:
+		return "Float64Array"
+	case jswire.ArrayType:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			items = append(items, wireValueTypeScriptType(item))
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	case jswire.ObjectType:
+		return wireObjectTypeScriptType(v)
+	case jswire.MapType:
+		if len(v) == 0 {
+			return "Map<any, any>"
+		}
+		keys := make([]string, 0, len(v))
+		values := make([]string, 0, len(v))
+		for _, entry := range v {
+			keys = append(keys, wireValueTypeScriptType(entry[0]))
+			values = append(values, wireValueTypeScriptType(entry[1]))
+		}
+		return "Map<" + unionTypeScriptTypes(keys) + ", " + unionTypeScriptTypes(values) + ">"
+	case jswire.SetType:
+		if len(v) == 0 {
+			return "Set<any>"
+		}
+		values := make([]string, 0, len(v))
+		for _, item := range v {
+			values = append(values, wireValueTypeScriptType(item))
+		}
+		return "Set<" + unionTypeScriptTypes(values) + ">"
+	default:
+		return "unknown"
+	}
+}
+
+func wireObjectTypeScriptType(obj jswire.ObjectType) string {
+	if len(obj) == 0 {
+		return "{}"
+	}
+	keys := make([]string, 0, len(obj))
+	for key := range obj {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s: %s", strconv.Quote(key), wireValueTypeScriptType(obj[key])))
+	}
+	return "{ " + strings.Join(parts, "; ") + " }"
+}
+
+func unionTypeScriptTypes(types []string) string {
+	if len(types) == 0 {
+		return "never"
+	}
+	seen := map[string]bool{}
+	unique := make([]string, 0, len(types))
+	for _, typ := range types {
+		if seen[typ] {
+			continue
+		}
+		seen[typ] = true
+		unique = append(unique, typ)
+	}
+	sort.Strings(unique)
+	return strings.Join(unique, " | ")
 }
 
 func approvalPresentationRunnerSource(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
@@ -614,7 +760,12 @@ func loaderForPath(file string) api.Loader {
 
 // RunnerSourceForTest exposes the generated runner source for narrow unit tests.
 func RunnerSourceForTest(entry string, args map[string]any, sig *toolbox.FuncSignature) string {
-	return runnerSource(entry, args, sig)
+	raw, _ := json.Marshal(args)
+	wire, err := jswire.FromAnonJSObj(raw)
+	if err != nil {
+		panic(err)
+	}
+	return runnerSource(entry, wire, sig)
 }
 
 // ApprovalPresentationRunnerSourceForTest exposes the generated approval
@@ -626,7 +777,7 @@ func ApprovalPresentationRunnerSourceForTest(entry string, args map[string]any, 
 // EmitBundle runs esbuild bundling on a tool definition and returns the bundled JS.
 // Exported for testing that npm deps are correctly inlined.
 func EmitBundle(def tooldef.TSToolDef) (string, error) {
-	files, err := withRunner(def.Files, runnerSource(def.Entry, map[string]any{}, nil))
+	files, err := withRunner(def.Files, runnerSource(def.Entry, nil, nil))
 	if err != nil {
 		return "", err
 	}

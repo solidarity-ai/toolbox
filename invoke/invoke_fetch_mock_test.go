@@ -32,7 +32,7 @@ func TestFetchMock_InterceptsViaToolsetConfig(t *testing.T) {
 			},
 		})
 
-	result, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	result, err := runInvokeString(t, prepared, "fetchTest.get", map[string]any{
 		"url": "https://example.com/ping",
 	})
 	if err != nil {
@@ -89,9 +89,9 @@ func TestFetchMock_CredentialsInjectedBeforeMock(t *testing.T) {
 			},
 		})
 
-	if _, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	if _, err := invoke.Run(prepared, "fetchTest.get", invokeArgs(t, map[string]any{
 		"url": "https://example.com/ping",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("invoke.Run: %v", err)
 	}
 
@@ -148,9 +148,9 @@ func TestFetchMock_CrossHostRedirectStripsSensitiveHeaders(t *testing.T) {
 			},
 		})
 
-	if _, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	if _, err := invoke.Run(prepared, "fetchTest.get", invokeArgs(t, map[string]any{
 		"url": "https://a.example.com/start",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("invoke.Run: %v", err)
 	}
 

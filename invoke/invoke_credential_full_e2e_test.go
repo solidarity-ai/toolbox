@@ -122,9 +122,9 @@ func TestFullE2E_MissingCredentialsErrorMessage(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	_, err = invoke.Run(prepared, "authTest.get", map[string]any{
+	_, err = invoke.Run(prepared, "authTest.get", invokeArgs(t, map[string]any{
 		"url": upstream.URL + "/api/data",
-	})
+	}))
 	if err == nil {
 		t.Fatal("expected error from missing credentials, got nil")
 	}

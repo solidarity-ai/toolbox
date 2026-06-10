@@ -199,7 +199,7 @@ func TestVCR_InvokeRun_RecordAndReplay(t *testing.T) {
 			})
 	}
 
-	result, err := invoke.Run(prepared, "fetchTest.get", map[string]any{"url": url})
+	result, err := tooltest.RunInvokeString(t, invoke.Run, prepared, "fetchTest.get", map[string]any{"url": url})
 	if err != nil {
 		t.Fatalf("invoke.Run: %v", err)
 	}

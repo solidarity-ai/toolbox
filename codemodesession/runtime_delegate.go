@@ -281,7 +281,7 @@ func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error
 
 func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, sessionID repl.SessionID, isCurrentRuntime func() bool) (goja.Value, error) {
 	staleMessage := fmt.Sprintf("tool %s came from a previous runtime and is no longer callable", binding.state.Name)
-	rawApproval := host.WrapSyncWithEffectID(pendingApprovalEffectName(binding.state.Name), repl.ReplayReadonly, func(_ context.Context, effectID repl.EffectID, params []byte) ([]byte, error) {
+	rawApproval := host.WrapSyncWithEffectID(pendingApprovalEffectName(binding.state.Name), repl.ReplayReadonly, func(_ context.Context, effectID repl.EffectID, params jswire.Value) (jswire.Value, error) {
 		toolCallID := string(effectID)
 		reviewedToolKey := approvalReviewedToolKey(binding.prepared(), binding.state.Name)
 		if binding.toolCalls != nil {
@@ -337,17 +337,12 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 		}
 
 		startGate := newToolCallStartGate()
-		rawInvoke := host.WrapAsyncWithEffectID(binding.state.Name, binding.replay(), func(ctx context.Context, _ repl.EffectID, params []byte) ([]byte, error) {
+		rawInvoke := host.WrapAsyncWithEffectID(binding.state.Name, binding.replay(), func(ctx context.Context, _ repl.EffectID, params jswire.Value) (jswire.Value, error) {
 			if err := startGate.Wait(ctx); err != nil {
 				return nil, err
 			}
-			args, err := decodeRuntimeArgs(params)
-			if err != nil {
-				return nil, fmt.Errorf("%s: decode args: %w", binding.state.Name, err)
-			}
 			prepared := binding.prepared()
-			tool, ok := prepared.Tool(binding.state.Name)
-			if !ok {
+			if _, ok := prepared.Tool(binding.state.Name); !ok {
 				return nil, fmt.Errorf("tool %s unavailable for live replay", binding.state.Name)
 			}
 			execCtx := ctx
@@ -356,11 +351,11 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 				execCtx, release = binding.toolCtx(ctx)
 			}
 			defer release()
-			result, err := runPreparedTool(execCtx, binding.executor, prepared, binding.state.Name, args)
+			result, err := runPreparedTool(execCtx, binding.executor, prepared, binding.state.Name, params)
 			if err != nil {
 				return nil, err
 			}
-			return encodeRuntimeResult(currentReturnType(tool), result)
+			return result, nil
 		})
 
 		promiseValue, effectID := rawInvoke(goja.FunctionCall{
@@ -525,7 +520,7 @@ func installToolCallInspector(rt *goja.Runtime, host repl.HostFuncBuilder, toolC
 	if rt == nil {
 		return nil
 	}
-	inspectByID := host.WrapSync("__tool_call_by_id", repl.ReplayReadonly, func(ctx context.Context, params []byte) ([]byte, error) {
+	inspectByID := host.WrapSync("__tool_call_by_id", repl.ReplayReadonly, func(ctx context.Context, params jswire.Value) (jswire.Value, error) {
 		toolCallID, err := decodeToolCallIDArg(params)
 		if err != nil {
 			return nil, err
@@ -733,6 +728,12 @@ func isToolCallContextCancellation(errText string) bool {
 		strings.Contains(errText, "context deadline exceeded")
 }
 
+// decodeRuntimeArgs intentionally decodes through goja rather than the
+// runtime-free jswire.Decode: args originate from a live REPL runtime and may
+// contain shared references, which jswire.Decode rejects, and goja's Export
+// yields plain Go values (map[string]any, []any, int64, time.Time) where
+// jswire.Decode yields typed-model values (ObjectType, ArrayType, float64,
+// DateType) — an observable difference for downstream type assertions.
 func decodeRuntimeArgs(params []byte) (map[string]any, error) {
 	value, err := jswire.DecodeGoja(goja.New(), params)
 	if err != nil {

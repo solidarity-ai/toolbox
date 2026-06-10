@@ -77,7 +77,7 @@ func TestE2E_UsesPreparedToolInjector(t *testing.T) {
 		},
 	})
 
-	result, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	result, err := runInvokeString(t, prepared, "fetchTest.get", map[string]any{
 		"url": upstream.URL + "/api/data",
 	})
 	if err != nil {
@@ -108,9 +108,9 @@ func TestE2E_FetchResponseTooLargeErrors(t *testing.T) {
 
 	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{newFetchLengthTool(t, nil)})
 
-	_, err := invoke.Run(prepared, "fetchSize.check", map[string]any{
+	_, err := invoke.Run(prepared, "fetchSize.check", invokeArgs(t, map[string]any{
 		"url": upstream.URL,
-	})
+	}))
 	if err == nil {
 		t.Fatal("expected oversized response error, got nil")
 	}
@@ -134,7 +134,7 @@ func TestE2E_FetchResponseToolOverride(t *testing.T) {
 
 	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{newFetchLengthTool(t, &limit)})
 
-	result, err := invoke.Run(prepared, "fetchSize.check", map[string]any{
+	result, err := runInvokeString(t, prepared, "fetchSize.check", map[string]any{
 		"url": upstream.URL,
 	})
 	if err != nil {
@@ -184,9 +184,9 @@ func TestE2E_DeniesNetworkWhenAllowedHostsOmitted(t *testing.T) {
 
 	prepared := tooltest.PrepareToolset(t, tooltest.DistPackageDecl("fetch-test"), toolset.Config{})
 
-	_, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	_, err := invoke.Run(prepared, "fetchTest.get", invokeArgs(t, map[string]any{
 		"url": upstream.URL + "/api/data",
-	})
+	}))
 	if err == nil {
 		t.Fatal("expected allowlist error, got nil")
 	}
@@ -212,9 +212,9 @@ func TestE2E_UsesPreparedToolAllowlist(t *testing.T) {
 		},
 	})
 
-	_, err := invoke.Run(prepared, "fetchTest.get", map[string]any{
+	_, err := invoke.Run(prepared, "fetchTest.get", invokeArgs(t, map[string]any{
 		"url": upstream.URL + "/api/data",
-	})
+	}))
 	if err == nil {
 		t.Fatal("expected allowlist error, got nil")
 	}

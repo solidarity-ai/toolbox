@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/mackross/repljs/jswire"
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/runtime/quickts"
 	"github.com/solidarity-ai/toolbox/testutil/tooltest"
@@ -16,15 +17,32 @@ import (
 
 func TestRunCalcAddStub(t *testing.T) {
 	tool := calcTool(t, "calc.add")
-	got, err := quickts.Run(*tool.TS, map[string]any{
+	gotWire, err := quickts.Run(*tool.TS, tooltest.WireArgs(t, map[string]any{
 		"a": 7,
 		"b": 4,
-	}, tool.Sig)
+	}), tool.Sig)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != "11" {
 		t.Fatalf("expected 11, got %q", got)
+	}
+}
+
+func TestRunRejectsWireArgTypeMismatch(t *testing.T) {
+	tool := calcTool(t, "calc.add")
+	args, err := jswire.FromAnonJSObj([]byte(`{"a":"6","b":3}`))
+	if err != nil {
+		t.Fatalf("FromAnonJSObj() error = %v", err)
+	}
+
+	_, err = quickts.Run(*tool.TS, args, tool.Sig)
+	if err == nil {
+		t.Fatal("expected typecheck error")
+	}
+	if !strings.Contains(err.Error(), "typescript check failed") {
+		t.Fatalf("error = %v, want typecheck failure", err)
 	}
 }
 
@@ -36,7 +54,7 @@ func TestRunnerSourceLegacy(t *testing.T) {
 	)
 
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"const __r = await tool({\"a\":7,\"b\":4}, {}); export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
+		"const __r = await tool((globalThis as any).__toolboxArgs ?? {}, {}); export default __r;\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}
@@ -59,13 +77,14 @@ func TestAsyncReturnTypeUnwrapsPromise(t *testing.T) {
 
 func TestRunCalcAsyncAddStub(t *testing.T) {
 	tool := calcTool(t, "calc.asyncAdd")
-	got, err := quickts.Run(*tool.TS, map[string]any{
+	gotWire, err := quickts.Run(*tool.TS, tooltest.WireArgs(t, map[string]any{
 		"a": 7,
 		"b": 4,
-	}, tool.Sig)
+	}), tool.Sig)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != "11" {
 		t.Fatalf("expected 11, got %q", got)
 	}
@@ -313,18 +332,19 @@ export default async function tool() {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	if _, err := quickts.RunContext(ctx, slow, map[string]any{}, nil); err == nil {
+	if _, err := quickts.RunContext(ctx, slow, tooltest.WireArgs(t, map[string]any{}), nil); err == nil {
 		t.Fatal("expected timed out quickts run to fail")
 	}
 
 	tool := calcTool(t, "calc.add")
-	got, err := quickts.RunContext(context.Background(), *tool.TS, map[string]any{
+	gotWire, err := quickts.RunContext(context.Background(), *tool.TS, tooltest.WireArgs(t, map[string]any{
 		"a": 2,
 		"b": 3,
-	}, tool.Sig)
+	}), tool.Sig)
 	if err != nil {
 		t.Fatalf("expected later quickts run to recover, got %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != "5" {
 		t.Fatalf("expected 5, got %q", got)
 	}
@@ -339,8 +359,9 @@ func TestRunnerSourceSpreadsParams(t *testing.T) {
 	)
 
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"const __r = await tool((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]));\n" +
-		"export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
+		"const __toolboxArgs = ((globalThis as any).__toolboxArgs ?? {}) as { \"a\": number; \"b\": number };\n" +
+		"const __r = await tool((__toolboxArgs[\"a\"] satisfies Parameters<typeof tool>[0]), (__toolboxArgs[\"b\"] satisfies Parameters<typeof tool>[1]));\n" +
+		"export default __r;\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}
@@ -377,15 +398,16 @@ func TestRunnerSourceExcludesAccountParams(t *testing.T) {
 
 	// Should still contain the original params.
 	want := "import tool from \"./tools/calc.add.ts\";\n" +
-		"const __r = await tool((7 satisfies Parameters<typeof tool>[0]), (4 satisfies Parameters<typeof tool>[1]));\n" +
-		"export default typeof __r === \"string\" ? __r : JSON.stringify(__r);\n"
+		"const __toolboxArgs = ((globalThis as any).__toolboxArgs ?? {}) as { \"a\": number; \"b\": number };\n" +
+		"const __r = await tool((__toolboxArgs[\"a\"] satisfies Parameters<typeof tool>[0]), (__toolboxArgs[\"b\"] satisfies Parameters<typeof tool>[1]));\n" +
+		"export default __r;\n"
 	if got != want {
 		t.Fatalf("unexpected runner source:\nwant:\n%s\ngot:\n%s", want, got)
 	}
 }
 
 func TestRunInstallsBrowserCompat(t *testing.T) {
-	got, err := quickts.RunWithHost(tooldef.TSToolDef{
+	gotWire, err := quickts.RunWithHost(tooldef.TSToolDef{
 		Entry: "tools/browser-compat.ts",
 		Files: fstest.MapFS{
 			"tools/browser-compat.ts": &fstest.MapFile{Data: []byte(`
@@ -402,7 +424,7 @@ export default function tool(_args?: any, _ctx?: any) {
 }
 `)},
 		},
-	}, map[string]any{}, quickts.Host{
+	}, tooltest.WireArgs(t, map[string]any{}), quickts.Host{
 		RandomBytes: func(n int) ([]byte, error) {
 			out := make([]byte, n)
 			for i := range out {
@@ -414,6 +436,7 @@ export default function tool(_args?: any, _ctx?: any) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+	got := tooltest.WireString(t, gotWire)
 	if got != `{"hasNavigatorUserAgent":true,"textRoundTrip":"A€😀","btoa":"TWFu","atob":"Ma","bytes":[0,1,2,3],"uuid":"00010203-0405-4607-8809-0a0b0c0d0e0f"}` {
 		t.Fatalf("unexpected browser compat result: %q", got)
 	}

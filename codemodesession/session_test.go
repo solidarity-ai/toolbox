@@ -151,6 +151,154 @@ func TestSubmitCanCallPreparedToolPackages(t *testing.T) {
 	assertContains(t, out, "=> 5")
 }
 
+func TestSubmitToolCallPreservesJSWireNativeValuesEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	dir := writeSessionPackage(t, t.TempDir(), "example.com/native-values", "nativeValues", map[string]string{
+		"tools/use-native.ts": `
+type NativeMapObject = { count: number; };
+type NativeMapValue = number | NativeMapObject;
+type ReturnedMapValue = number | string;
+
+type NativeInput = {
+  when: Date;
+  nested: {
+    when: Date;
+    map: Map<string, NativeMapValue>;
+    set: Set<string>;
+    big: bigint;
+    re: RegExp;
+    bytes: Uint8Array;
+    buffer: ArrayBuffer;
+  };
+};
+
+type NativeOutput = {
+  dateScore: number;
+  nestedDateScore: number;
+  mapScore: number;
+  setScore: number;
+  bigintScore: bigint;
+  regexpScore: number;
+  bytesScore: number;
+  bufferScore: number;
+  returnedWhen: Date;
+  returnedMap: Map<string, ReturnedMapValue>;
+  returnedSet: Set<string>;
+  returnedBig: bigint;
+  returnedRe: RegExp;
+  returnedBytes: Uint8Array;
+  returnedNested: {
+    when: Date;
+    map: Map<string, boolean>;
+    set: Set<bigint>;
+  };
+};
+
+export default async function tool(input: NativeInput): Promise<NativeOutput> {
+  if (!(input.when instanceof Date)) throw new Error("when must be Date");
+  if (!(input.nested.when instanceof Date)) throw new Error("nested.when must be Date");
+  if (!(input.nested.map instanceof Map)) throw new Error("nested.map must be Map");
+  if (!(input.nested.set instanceof Set)) throw new Error("nested.set must be Set");
+  if (typeof input.nested.big !== "bigint") throw new Error("nested.big must be bigint");
+  if (!(input.nested.re instanceof RegExp)) throw new Error("nested.re must be RegExp");
+  if (!(input.nested.bytes instanceof Uint8Array)) throw new Error("nested.bytes must be Uint8Array");
+  if (!(input.nested.buffer instanceof ArrayBuffer)) throw new Error("nested.buffer must be ArrayBuffer");
+
+  const alpha = input.nested.map.get("alpha");
+  const beta = input.nested.map.get("beta");
+  if (typeof alpha !== "number") throw new Error("bad alpha");
+  if (typeof beta !== "object" || beta === null) throw new Error("bad beta");
+
+  const dateScore = input.when.getUTCFullYear() + input.when.getUTCMonth() + input.when.getUTCDate();
+  const nestedDateScore = input.nested.when.getTime() - new Date("2021-02-03T04:05:06.000Z").getTime();
+  const mapScore = alpha + beta.count;
+  const setScore = input.nested.set.has("one") && input.nested.set.has("two") ? input.nested.set.size : -1000;
+  const bigintScore = input.nested.big + BigInt(7);
+  const regexpScore = input.nested.re.test("xxAAABxx") ? input.nested.re.source.length : -1000;
+  const bytesScore = input.nested.bytes[0] + input.nested.bytes[1] + input.nested.bytes[2];
+  const bufferView = new Uint8Array(input.nested.buffer);
+  const bufferScore = bufferView[0] + bufferView[1];
+
+  return {
+    dateScore,
+    nestedDateScore,
+    mapScore,
+    setScore,
+    bigintScore,
+    regexpScore,
+    bytesScore,
+    bufferScore,
+    returnedWhen: new Date("2022-05-06T07:08:09.123Z"),
+    returnedMap: new Map([["dateScore", dateScore], ["kind", "map"]]),
+    returnedSet: new Set(["a", "b", "c"]),
+    returnedBig: bigintScore * BigInt(2),
+    returnedRe: /toolbox-jswire/gi,
+    returnedBytes: new Uint8Array([9, 8, 7]),
+    returnedNested: {
+      when: new Date("2030-01-02T03:04:05.006Z"),
+      map: new Map([["nested", true]]),
+      set: new Set([BigInt(123)]),
+    },
+  };
+}
+`,
+	})
+
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{}),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	out := session.Submit(ctx, `const got: any = await nativeValues.useNative({
+  when: new Date("2021-02-03T04:05:06.789Z"),
+  nested: {
+    when: new Date("2021-02-03T04:05:06.789Z"),
+    map: new Map<string, number | { count: number }>([["alpha", 40], ["beta", { count: 2 }]]),
+    set: new Set(["one", "two"]),
+    big: BigInt("9007199254740993"),
+    re: /a+b/i,
+    bytes: new Uint8Array([1, 2, 3]),
+    buffer: new Uint8Array([4, 5]).buffer,
+  },
+});
+function assertNative(condition: boolean, message: string) {
+  if (!condition) throw new Error(message);
+}
+assertNative(got.dateScore === 2025, "bad dateScore");
+assertNative(got.nestedDateScore === 789, "bad nestedDateScore");
+assertNative(got.mapScore === 42, "bad mapScore");
+assertNative(got.setScore === 2, "bad setScore");
+assertNative(got.bigintScore === BigInt("9007199254741000"), "bad bigintScore");
+assertNative(got.regexpScore === 3, "bad regexpScore");
+assertNative(got.bytesScore === 6, "bad bytesScore");
+assertNative(got.bufferScore === 9, "bad bufferScore");
+assertNative(got.returnedWhen instanceof Date, "returnedWhen not Date");
+assertNative(got.returnedWhen.toISOString() === "2022-05-06T07:08:09.123Z", "bad returnedWhen");
+assertNative(got.returnedMap instanceof Map, "returnedMap not Map");
+assertNative(got.returnedMap.get("dateScore") === 2025, "bad returnedMap dateScore");
+assertNative(got.returnedMap.get("kind") === "map", "bad returnedMap kind");
+assertNative(got.returnedSet instanceof Set, "returnedSet not Set");
+assertNative(got.returnedSet.has("b"), "bad returnedSet");
+assertNative(got.returnedBig === BigInt("18014398509482000"), "bad returnedBig");
+assertNative(got.returnedRe instanceof RegExp, "returnedRe not RegExp");
+assertNative(got.returnedRe.source === "toolbox-jswire", "bad returnedRe source");
+assertNative(got.returnedRe.flags === "gi", "bad returnedRe flags");
+assertNative(got.returnedBytes instanceof Uint8Array, "returnedBytes not Uint8Array");
+assertNative(got.returnedBytes[0] === 9, "bad returnedBytes[0]");
+assertNative(got.returnedBytes[2] === 7, "bad returnedBytes[2]");
+assertNative(got.returnedNested.when instanceof Date, "returnedNested.when not Date");
+assertNative(got.returnedNested.when.toISOString() === "2030-01-02T03:04:05.006Z", "bad returnedNested.when");
+assertNative(got.returnedNested.map instanceof Map, "returnedNested.map not Map");
+assertNative(got.returnedNested.map.get("nested") === true, "bad returnedNested.map");
+assertNative(got.returnedNested.set instanceof Set, "returnedNested.set not Set");
+assertNative(got.returnedNested.set.has(BigInt(123)), "bad returnedNested.set");
+true`)
+	assertContains(t, out, "=> true")
+}
+
 func TestSubmitDoesNotExposeRuntimeHashToken(t *testing.T) {
 	ctx := context.Background()
 	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{

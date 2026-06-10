@@ -16,7 +16,7 @@ require (
 	github.com/klauspost/compress v1.18.5
 	github.com/mackross/repljs v0.0.0-20260426000108-684d87c9e2c8
 	github.com/mark3labs/mcp-go v0.45.0
-	github.com/microsoft/typescript-go v0.0.0-20260318224110-7abde1895437
+	github.com/microsoft/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
@@ -77,6 +77,8 @@ require (
 
 replace github.com/fastschema/qjs => github.com/mackross/qjs v0.0.7-0.20260409233706-931ab4cd91ce
 
-replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260414161116-99aced908a7c
+replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7
 
 tool github.com/a-h/templ/cmd/templ
+
+replace github.com/mackross/repljs => ../include-tools/repljs

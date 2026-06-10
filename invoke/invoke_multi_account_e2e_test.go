@@ -131,7 +131,7 @@ func TestMultiAccount_ExpiredRefreshToken_ErrorNoSecretLeak(t *testing.T) {
 
 	// "work" account should succeed.
 	t.Run("work_account_succeeds", func(t *testing.T) {
-		result, err := invoke.Run(prepared, "authTest.get", map[string]any{
+		result, err := runInvokeString(t, prepared, "authTest.get", map[string]any{
 			"url":                oauthURL + "/secured/users",
 			"test_oauth_account": "work",
 		})
@@ -145,10 +145,10 @@ func TestMultiAccount_ExpiredRefreshToken_ErrorNoSecretLeak(t *testing.T) {
 
 	// "personal" account should fail because token endpoint rejects RT-BROKEN.
 	t.Run("personal_account_fails", func(t *testing.T) {
-		_, err := invoke.Run(prepared, "authTest.get", map[string]any{
+		_, err := invoke.Run(prepared, "authTest.get", invokeArgs(t, map[string]any{
 			"url":                oauthURL + "/secured/users",
 			"test_oauth_account": "personal",
-		})
+		}))
 		if err == nil {
 			t.Fatal("expected error for personal account with broken refresh token")
 		}

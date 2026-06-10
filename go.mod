@@ -14,7 +14,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2
 	github.com/jinzhu/inflection v1.0.0
 	github.com/klauspost/compress v1.18.5
-	github.com/mackross/repljs v0.0.0-20260426000108-684d87c9e2c8
+	github.com/mackross/repljs v0.0.0-20260610142018-cdea690ec096
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
@@ -80,5 +80,3 @@ replace github.com/fastschema/qjs => github.com/mackross/qjs v0.0.7-0.2026040923
 replace github.com/microsoft/typescript-go => github.com/mackross/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7
 
 tool github.com/a-h/templ/cmd/templ
-
-replace github.com/mackross/repljs => ../include-tools/repljs

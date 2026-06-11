@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,22 @@ func TestSubmitOutputGoldens(t *testing.T) {
 		defer session.Close()
 
 		checkGolden(t, goldenPath("submit_typecheck_failure.txt"), session.Submit(ctx, `const value: number = "x"`))
+	})
+
+	t.Run("typecheck-failure-long-type", func(t *testing.T) {
+		ctx := context.Background()
+		session, err := codemodesession.OpenMemory(ctx, t.TempDir())
+		if err != nil {
+			t.Fatalf("OpenMemory() error: %v", err)
+		}
+		defer session.Close()
+
+		api := strings.Repeat("declare namespace pkg { function get(id: number): Promise<Item>; } ", 8)
+		out := session.Submit(ctx, `const meta = { api: "`+api+`" } as const; meta.tools`)
+		if !strings.Contains(out, api) {
+			t.Fatalf("Submit output truncates the offending type:\n%s", out)
+		}
+		checkGolden(t, goldenPath("submit_typecheck_failure_long_type.txt"), out)
 	})
 
 	t.Run("wrapped-object-literal-diagnostic", func(t *testing.T) {

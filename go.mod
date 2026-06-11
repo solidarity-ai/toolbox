@@ -14,7 +14,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2
 	github.com/jinzhu/inflection v1.0.0
 	github.com/klauspost/compress v1.18.5
-	github.com/mackross/repljs v0.0.0-20260610142018-cdea690ec096
+	github.com/mackross/repljs v0.0.0-20260611194744-6228af33e3fd
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/microsoft/typescript-go v0.0.0-20260610140359-3dcfcd62f5f7
 	github.com/vmihailenco/msgpack/v5 v5.4.1

@@ -1,0 +1,9 @@
+{
+  "module": "fixtures.local/nested-return-types",
+  "name": "nested-return-types",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    { "entry_ts": "tools/pets.get.ts" },
+    { "entry_ts": "tools/pets.list.ts" }
+  ]
+}

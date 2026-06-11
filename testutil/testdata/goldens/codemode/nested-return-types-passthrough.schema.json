@@ -1,0 +1,23 @@
+{
+  "pets.get": {
+    "description": "Fetch a single pet by name. The return type is a named interface with no\nproperty descriptions, used by only this tool, so the SDK inlines its body —\nwhich still references the nested `Mood` alias.",
+    "properties": {
+      "name": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "type": "object"
+  },
+  "pets.list": {
+    "description": "List pets. The inlined result body references the nested `PetSummary` type,\nwhich in turn references the `Mood` alias.",
+    "properties": {
+      "limit": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  }
+}

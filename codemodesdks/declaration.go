@@ -850,22 +850,30 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 	seen := map[string]bool{}
 	var lines []string
 	for _, tool := range tools {
-		var sources []*toolbox.TSType
+		type declSource struct {
+			src       *toolbox.TSType
+			skipAlias string
+		}
+		var sources []declSource
 		if pt := tool.ParamsType(); pt != nil {
-			sources = append(sources, pt)
+			sources = append(sources, declSource{src: pt})
 		}
-		if shouldEmitReturnDeclarations(tool, returnTypes) {
-			if rt := toolDeclarationReturnSource(tool); rt != nil {
-				sources = append(sources, rt)
-			}
+		if rt := toolDeclarationReturnSource(tool); rt != nil {
+			// When the top-level named return type is rendered inline (or as a
+			// renamed interface block), its alias must not be re-declared — but
+			// the nested definition types its body references still must be.
+			sources = append(sources, declSource{src: rt, skipAlias: suppressedReturnAliasName(tool, returnTypes)})
 		}
-		for _, src := range sources {
-			if decls := src.Declarations(); decls != "" {
+		for _, source := range sources {
+			if decls := source.src.Declarations(); decls != "" {
 				for _, line := range strings.Split(strings.TrimRight(decls, "\n"), "\n") {
 					if line == "" || seen[line] {
 						continue
 					}
 					if isNativeGlobalDeclaration(line) {
+						continue
+					}
+					if source.skipAlias != "" && declaredTypeName(line) == source.skipAlias {
 						continue
 					}
 					// Try to enhance the declaration with property descriptions.
@@ -884,21 +892,27 @@ func collectUniqueDeclarations(tools []toolset.AgentTool, returnTypes map[string
 }
 
 func isNativeGlobalDeclaration(line string) bool {
+	name := declaredTypeName(line)
+	return name != "" && toolbox.IsNativeGlobalTypeName(name)
+}
+
+// declaredTypeName extracts the declared name from a "type X = ..." or
+// "interface X ..." declaration line, or "" for anything else.
+func declaredTypeName(line string) string {
 	line = strings.TrimSpace(line)
-	var name string
 	switch {
 	case strings.HasPrefix(line, "interface "):
 		rest := line[len("interface "):]
 		if idx := strings.IndexAny(rest, " {"); idx >= 0 {
-			name = rest[:idx]
+			return rest[:idx]
 		}
 	case strings.HasPrefix(line, "type "):
 		rest := line[len("type "):]
 		if idx := strings.Index(rest, " = "); idx >= 0 {
-			name = rest[:idx]
+			return rest[:idx]
 		}
 	}
-	return name != "" && toolbox.IsNativeGlobalTypeName(name)
+	return ""
 }
 
 // enhanceDeclWithDescriptions takes a declaration line like
@@ -1020,16 +1034,23 @@ func findTool(tools []toolset.AgentTool, name string) *toolset.AgentTool {
 	return nil
 }
 
-func shouldEmitReturnDeclarations(tool toolset.AgentTool, returnTypes map[string]returnTypeInfo) bool {
+// suppressedReturnAliasName returns the name of a tool's top-level named
+// return type when its alias must not be emitted as a declaration: either its
+// body is inlined into the function signature, or it is re-rendered as an
+// interface block under a different name. Returns "" when the alias should be
+// emitted (the signature references it by name) or there is no named return.
+func suppressedReturnAliasName(tool toolset.AgentTool, returnTypes map[string]returnTypeInfo) string {
 	if tool.Sig == nil || tool.Sig.Return() == nil {
-		return false
+		return ""
 	}
 	shape, refName := sdkReturnShape(tool.Sig.Return())
-	if refName != "" && shape != nil && shape.IsObject() {
-		info, ok := returnTypes[tool.Name]
-		return ok && info.mode == "named" && info.typeName == refName
+	if refName == "" || shape == nil || !shape.IsObject() {
+		return ""
 	}
-	return true
+	if info, ok := returnTypes[tool.Name]; ok && info.mode == "named" && info.typeName == refName {
+		return ""
+	}
+	return refName
 }
 
 func toolDeclarationReturnSource(tool toolset.AgentTool) *toolbox.TSType {

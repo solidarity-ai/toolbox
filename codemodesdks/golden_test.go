@@ -71,6 +71,17 @@ func TestSharedTypesGoldens(t *testing.T) {
 	checkGolden(t, goldenPath("shared-types-passthrough.schema.json"), schemaGoldenSource(t, prepared))
 }
 
+// TestNestedReturnTypesGoldens covers single-use named return types whose
+// inlined bodies reference other named types (e.g. a `Mood` alias inside an
+// inlined `Pet`). Those nested declarations must still be emitted or the SDK
+// source fails to typecheck.
+func TestNestedReturnTypesGoldens(t *testing.T) {
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("nested-return-types"), toolset.Config{})
+
+	checkGolden(t, goldenPath("nested-return-types-passthrough.d.ts"), codemodesdks.DeclarationSource(prepared))
+	checkGolden(t, goldenPath("nested-return-types-passthrough.schema.json"), schemaGoldenSource(t, prepared))
+}
+
 func TestGithubIssuesGoldens(t *testing.T) {
 	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("github-issues"), toolset.Config{})
 

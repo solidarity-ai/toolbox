@@ -47,6 +47,7 @@ type FileBackend struct {
 	consumer             PreparedToolConsumer
 	allowedEffects       map[tooldef.Effect]bool
 	prepared             *PreparedBackend
+	bootstrapManagement  bool
 }
 
 func NewFileBackend(ctx context.Context, opts FileBackendOptions) (*FileBackend, error) {
@@ -66,6 +67,11 @@ func NewFileBackend(ctx context.Context, opts FileBackendOptions) (*FileBackend,
 		prepared:             NewPreparedBackend(toolset.PreparedToolset{}, nil),
 	}
 	backend.prepared.SetBuiltinBackend(backend)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		// Starting in file mode without a toolset file: keep management tools
+		// enabled for this whole run so the agent can bootstrap the file.
+		backend.bootstrapManagement = true
+	}
 	if _, err := backend.reload(ctx); err != nil {
 		return nil, err
 	}
@@ -187,7 +193,6 @@ func (b *FileBackend) Inspect(ctx context.Context, req toolpkgdiscovery.InspectR
 
 	b.mu.RLock()
 	resolver := b.resolver
-	toolsetPath := b.toolsetPath
 	b.mu.RUnlock()
 
 	if stat, err := os.Stat(target); err == nil && stat.IsDir() {
@@ -231,7 +236,7 @@ func (b *FileBackend) Inspect(ctx context.Context, req toolpkgdiscovery.InspectR
 		}, nil
 	}
 
-	ts, err := toolsetfile.Load(toolsetPath)
+	ts, _, err := b.loadToolsetFile()
 	if err != nil {
 		return toolpkgdiscovery.InspectResult{}, err
 	}
@@ -280,7 +285,7 @@ func (b *FileBackend) Install(ctx context.Context, req InstallRequest) (toolset.
 		return toolset.PreparedToolset{}, err
 	}
 
-	ts, err := toolsetfile.Load(b.toolsetPath)
+	ts, _, err := b.loadToolsetFile()
 	if err != nil {
 		return toolset.PreparedToolset{}, err
 	}
@@ -471,6 +476,24 @@ func (b *FileBackend) resolveInstallPackageLocked(ctx context.Context, spec stri
 	return module, tooldef.Version(versions[0]), nil
 }
 
+// loadToolsetFile loads the backend's toolset file. When the file does
+// not exist yet it returns an empty in-memory toolset (exists=false) instead
+// of failing, so a file-mode backend can serve builtins before first install.
+func (b *FileBackend) loadToolsetFile() (*toolsetfile.ToolsetFile, bool, error) {
+	ts, err := toolsetfile.Load(b.toolsetPath)
+	if err == nil {
+		return ts, true, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, false, err
+	}
+	ts, err = toolsetfile.Parse([]byte(`{"packages": {}, "tools": []}`))
+	if err != nil {
+		return nil, false, fmt.Errorf("init empty toolset for %q: %w", b.toolsetPath, err)
+	}
+	return ts, false, nil
+}
+
 func (b *FileBackend) reload(ctx context.Context) (toolset.PreparedToolset, error) {
 	b.mu.Lock()
 	var notify preparedToolNotification
@@ -486,7 +509,7 @@ func (b *FileBackend) reload(ctx context.Context) (toolset.PreparedToolset, erro
 }
 
 func (b *FileBackend) reloadLocked(ctx context.Context) (toolset.PreparedToolset, preparedToolNotification, error) {
-	ts, err := toolsetfile.Load(b.toolsetPath)
+	ts, _, err := b.loadToolsetFile()
 	if err != nil {
 		return toolset.PreparedToolset{}, preparedToolNotification{}, err
 	}
@@ -495,7 +518,14 @@ func (b *FileBackend) reloadLocked(ctx context.Context) (toolset.PreparedToolset
 		return toolset.PreparedToolset{}, preparedToolNotification{}, err
 	}
 
-	b.prepared.SetSnapshot(prepared, ts.AgentAllowsPackageDiscovery(), ts.AgentAllowsToolsetManagement())
+	management := ts.AgentAllowsToolsetManagement()
+	if b.bootstrapManagement && !ts.AgentToolsetManagementConfigured() {
+		// This run started without a toolset file, so management stays enabled
+		// until restart even after install creates the file. An explicit
+		// allow_toolset_management value in the file still wins.
+		management = true
+	}
+	b.prepared.SetSnapshot(prepared, ts.AgentAllowsPackageDiscovery(), management)
 	effective, err := b.preparedLocked(ctx)
 	if err != nil {
 		return toolset.PreparedToolset{}, preparedToolNotification{}, err

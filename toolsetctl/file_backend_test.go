@@ -261,3 +261,104 @@ func (c *reentrantPreparedToolConsumer) SetPreparedTools(toolset.PreparedToolset
 	}
 	_, c.err = c.backend.Prepared(context.Background())
 }
+
+func TestFileBackendMissingFileDefaultsManagementEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "toolbox.toolset.json")
+	consumer := &recordingPreparedToolConsumer{}
+
+	backend, err := toolsetctl.NewFileBackend(context.Background(), toolsetctl.FileBackendOptions{
+		ToolsetPath: path,
+		Consumer:    consumer,
+	})
+	if err != nil {
+		t.Fatalf("NewFileBackend() with missing file: %v", err)
+	}
+
+	if !backend.EnableToolsForPackageDiscovery() {
+		t.Fatal("EnableToolsForPackageDiscovery() = false, want true for missing file")
+	}
+	if !backend.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = false, want true for missing file")
+	}
+
+	prepared, err := backend.Prepared(context.Background())
+	if err != nil {
+		t.Fatalf("Prepared(): %v", err)
+	}
+	names := preparedToolNames(prepared.Tools())
+	for _, want := range []string{"toolbox.search", "toolbox.inspect", "toolbox.install", "toolbox.uninstall", "toolbox.auth"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("Prepared() tools = %v, want %s", names, want)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("toolset file should not be created by load alone, stat err = %v", err)
+	}
+}
+
+func TestFileBackendExistingFileKeepsManagementDefaultOff(t *testing.T) {
+	path := writeLocalToolsetFile(t, "calc", false)
+
+	backend, err := toolsetctl.NewFileBackend(context.Background(), toolsetctl.FileBackendOptions{
+		ToolsetPath: path,
+	})
+	if err != nil {
+		t.Fatalf("NewFileBackend(): %v", err)
+	}
+	if backend.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = true, want false when file disables it")
+	}
+}
+
+func TestFileBackendBootstrapManagementStaysOnUntilRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "toolbox.toolset.json")
+
+	backend, err := toolsetctl.NewFileBackend(context.Background(), toolsetctl.FileBackendOptions{
+		ToolsetPath: path,
+	})
+	if err != nil {
+		t.Fatalf("NewFileBackend() with missing file: %v", err)
+	}
+	if !backend.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = false, want true before first install")
+	}
+
+	// The file appearing mid-run (e.g. created by install) keeps the
+	// bootstrap window open for the rest of this backend's lifetime.
+	if err := os.WriteFile(path, []byte(`{"packages": {}, "tools": []}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	if _, err := backend.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload(): %v", err)
+	}
+	if !backend.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = false, want true until restart")
+	}
+
+	// An explicit allow_toolset_management value in the file still wins.
+	explicitOff := `{"packages": {}, "tools": [], "agent": {"unsafe": {"allow_toolset_management": false}}}`
+	if err := os.WriteFile(path, []byte(explicitOff), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	if _, err := backend.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload(): %v", err)
+	}
+	if backend.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = true, want false when file disables it")
+	}
+
+	// A restart over the now-existing file (with no explicit setting) ends
+	// the bootstrap window.
+	if err := os.WriteFile(path, []byte(`{"packages": {}, "tools": []}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+	restarted, err := toolsetctl.NewFileBackend(context.Background(), toolsetctl.FileBackendOptions{
+		ToolsetPath: path,
+	})
+	if err != nil {
+		t.Fatalf("NewFileBackend() after restart: %v", err)
+	}
+	if restarted.EnableToolsForToolsetManagement() {
+		t.Fatal("EnableToolsForToolsetManagement() = true after restart, want false")
+	}
+}

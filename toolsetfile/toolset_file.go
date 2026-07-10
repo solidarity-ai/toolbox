@@ -207,10 +207,16 @@ func (f *ToolsetFile) AgentAllowsPackageDiscovery() bool {
 // AgentAllowsToolsetManagement reports whether unsafe agent-facing toolset
 // mutation helpers should be exposed for this toolset. The default is false.
 func (f *ToolsetFile) AgentAllowsToolsetManagement() bool {
-	if f == nil || f.Agent == nil || f.Agent.Unsafe == nil || f.Agent.Unsafe.AllowToolsetManagement == nil {
+	if !f.AgentToolsetManagementConfigured() {
 		return false
 	}
 	return *f.Agent.Unsafe.AllowToolsetManagement
+}
+
+// AgentToolsetManagementConfigured reports whether the file explicitly sets
+// agent.unsafe.allow_toolset_management, as opposed to relying on the default.
+func (f *ToolsetFile) AgentToolsetManagementConfigured() bool {
+	return f != nil && f.Agent != nil && f.Agent.Unsafe != nil && f.Agent.Unsafe.AllowToolsetManagement != nil
 }
 
 // SetPackageVersion updates the declared package version and rewrites any tool

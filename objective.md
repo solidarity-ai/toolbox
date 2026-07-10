@@ -1,610 +1,669 @@
-# Auth CLI Update Objectives
+# Daemon-Backed OAuth Redirect Objective
 
 ## Purpose
 
-Refresh the `toolbox auth` experience so users can understand, configure, inspect, and repair authentication for tool packages with confidence.
+Make `toolbox auth` use the running Toolbox daemon as the preferred OAuth 2 redirect coordinator when the daemon is available, while preserving the current local callback/manual-paste behavior as a safe fallback.
 
-This document describes the desired outcomes and product requirements from a product/stakeholder lens. It intentionally avoids implementation details, exact command syntax, parser choices, storage internals, daemon APIs, or migration mechanics.
+The implementation should proceed in small vertical slices. Each phase must produce behavior that can be proven end-to-end before moving to the next phase. Avoid broad horizontal rewrites, speculative abstractions, and plumbing that is not needed by the next observable behavior.
 
-## Product Objective
+## Guiding Principles
 
-Authentication should become a clear, safe, and discoverable user journey for Toolbox packages.
+- Prefer small vertical, provable slices over horizontal modules.
+- Keep the code simple. Add only the abstractions needed by the current slice.
+- Maintain unusually high code quality: clear ownership, minimal coupling, readable state transitions, precise errors, and tests that describe behavior.
+- Use outside-in, Kent Beck-style TDD where practical: write behavioral tests that exercise the user-visible path across components, then implement the simplest code that passes.
+- Favor existing repository patterns for daemon integration tests, OAuth auth tests, Connect service tests, and HTTP daemon page tests.
+- Preserve existing behavior when the daemon is unavailable or daemon OAuth is not usable.
+- Keep browser-facing HTTP endpoints thin; authenticated daemon control must go through Connect over the verified Unix-socket transport.
+- Do not move token exchange or secret storage into the daemon in this objective. The CLI remains responsible for OAuth config, token exchange, and storing refresh tokens.
 
-A user should be able to answer:
 
-- Does this package need authentication?
-- What kind of authentication does it need?
-- Am I already authenticated?
-- Which account or profile is being used?
-- How do I log in, log out, configure, rotate, clear, or repair credentials?
-- What should I do if the secret store is locked, uninitialized, or unavailable?
+## Progress Tracking Instructions
 
-The auth CLI should hide unnecessary internals while making security-relevant scope explicit.
+This file is the living progress tracker for the implementation agent. Update it as work proceeds. Do not treat it as a static planning document.
 
-## Primary Goals
+- Before starting a phase, add an entry to the Progress Log describing the intended slice and expected proof.
+- As requirements and verification steps are completed, tick the corresponding checkboxes in this file.
+- Before ticking any checkbox, pause and reflect on why the item might **not** actually be complete. Look for missing edge cases, unproven integration points, stale UI state, fallback regressions, race conditions, and tests that pass without proving the behavior.
+- If that reflection reveals doubt, remediate first: improve the implementation, strengthen the behavioral test, or split the checkbox into smaller concrete checks.
+- Only tick a checkbox after the reflection has been performed and the item is genuinely proven.
+- Add concise Progress Log entries for important decisions, failed attempts, test results, and any deviations from this objective.
 
-### 1. Make package authentication understandable
 
-The auth CLI should be organized around user-facing authentication tasks for tool packages, not around internal credential paths or secret-store implementation details.
+## Anti-Overcomplication Guardrails
 
-Users should understand that:
+The implementing agent is expected to be smart and capable, but must bias strongly toward simple, direct code. Do not generalize before the second or third concrete use case appears.
 
-- tool packages may declare authentication requirements
-- a package may have one or more credentials
-- credentials may be OAuth-based or static secret material such as API keys
-- a credential may have one or more accounts/profiles
-- authentication state belongs to a specific package context
+Hard guardrails:
 
-Success means a user can inspect and satisfy a package’s auth requirements without needing to know how credentials are stored internally.
+- Do not introduce a generic workflow engine, task registry, event bus, plugin system, actor model, or broad state-machine framework.
+- Do not add a new persistence layer for OAuth flows. Pending OAuth flows are short-lived in-memory daemon state.
+- Do not add a database, file format, migration, or durable recovery mechanism for OAuth flow state.
+- Do not move OAuth token exchange, client secret ownership, or refresh-token storage into the daemon.
+- Do not redesign the auth CLI command model while implementing this objective.
+- Do not redesign the daemon web UI. Add the smallest existing-page card needed to expose pending OAuth flows.
+- Do not create a dedicated OAuth frontend app, router, template system, or asset pipeline. Use existing daemon page/template patterns.
+- Do not replace existing local callback/manual paste behavior. Keep it as fallback.
+- Do not make daemon OAuth mandatory. The daemon path is opportunistic and must fail back gracefully.
+- Do not add new global configuration beyond `TOOLBOX_HOST` unless a verification step proves it is required.
+- Do not log authorization URLs except in intentional user-facing output needed to complete the flow. Never log codes, tokens, client secrets, or refresh tokens.
+- Do not add sleeps to tests as synchronization except where existing test patterns already require polling; prefer channels, contexts, fake clocks, or observable state.
+- Do not use broad mocks that prove only that mocks were called. Prefer tests that start real daemon/connect/http components where practical.
+- Do not scatter new mutexes across services, handlers, client code, or templates. Synchronization belongs behind a narrow owner API.
+- Do not tick checkboxes based only on unit tests if the requirement is cross-component behavior. Add an outside-in behavioral test.
 
-### 2. Treat OAuth and static secrets as distinct workflows
+Preferred implementation style:
 
-The CLI should not pretend that all authentication material has the same lifecycle.
+- Prefer existing daemon synchronization/state-notification patterns before introducing new synchronization. Keep synchronization localized inside the OAuth flow manager; do not litter mutexes through call sites or UI code. If a new mutex is necessary, it should be private to one small struct with a clearly documented invariant.
+- Reuse existing sync primitives and lifecycle patterns where they fit, such as localized manager-owned state, channels for waiters, contexts for cancellation, and existing notifier patterns.
+- Keep browser HTTP callback parsing thin and delegate state changes to the daemon OAuth manager/service.
+- Keep Connect request validation boring and explicit.
+- Prefer plain errors with clear messages over elaborate error taxonomies, except where Connect status codes are needed.
+- Add interfaces only at package boundaries that already need them for existing daemon/client/test patterns.
+- Delete temporary helpers once the vertical slice no longer needs them.
+- If tempted to add an abstraction, first write down the second concrete caller/use case in the Progress Log. If there is no second caller, do not add it.
 
-OAuth flows and static secret configuration have different user expectations:
+Complexity budget:
 
-- OAuth users expect login, logout, token refresh, and account status.
-- Static-secret users expect setting, clearing, rotating, and validating configured values.
-- OAuth credentials may also require static setup values, such as client IDs or client secrets, which should be presented clearly as configuration rather than as the token login itself.
+- Each phase should be reviewable as a small vertical change. If a phase grows too large, split it in the Progress Log before continuing.
+- A phase is too large if it changes unrelated UX, storage, daemon lifecycle, or auth command semantics beyond what that phase requires.
+- Prefer shipping a boring, well-tested path with fallback over a clever complete framework.
 
-The product should make these differences clear while still presenting a unified auth experience.
+## Agreed Design
 
-### 3. Make authentication status easy to inspect
+### High-level behavior
 
-Users should be able to see the auth state of a package before attempting to use it.
+When `toolbox auth` runs an OAuth 2 flow:
 
-Status output should help users understand:
+1. The CLI checks whether the daemon is reachable through the existing daemon client/Connect path.
+2. If daemon OAuth is available, the CLI uses the daemon-backed OAuth receiver.
+3. If daemon OAuth is unavailable, incomplete, invalidly configured, or errors before the flow begins, the CLI falls back to the existing per-command localhost callback receiver.
+4. In daemon-backed mode, the daemon web UI shows a pending OAuth authorization card with a clickable provider authorization link.
+5. The CLI also prints useful terminal instructions and races daemon callback completion against manual paste input.
+6. The CLI still exchanges the authorization code for tokens and stores the refresh token exactly as it does today.
 
-- whether authentication is required
-- whether required credentials are present
-- whether OAuth credentials are logged in, expired, missing, or invalid
-- whether static secrets are configured or missing
-- which account/profile is active, where applicable
-- whether action is blocked by secret-store state
+### Control-plane vs browser-plane split
 
-A broader status view should help users understand auth state across the active toolset when appropriate.
+Authenticated/control actions must use Connect over the existing verified daemon Unix socket:
 
-### 4. Preserve clear security boundaries
+- request advertised daemon OAuth URLs
+- begin/register an OAuth flow
+- wait for completion
+- cancel/cleanup a flow
 
-The auth CLI must not silently blur credential scope.
+Browser-facing HTTP remains on the existing daemon webserver:
 
-Users and operators should be able to trust that credentials for one package context are not accidentally reused in another. The product must distinguish between:
+- `GET /oauth2/callback`
+- success/error HTML responses only
 
-- installed tool packages
-- overridden or replaced packages
-- local package directories used for development
-- different credentials declared by the same package
-- different accounts/profiles for the same credential
+The HTTP callback route must not create arbitrary flows. It must only complete states previously registered through authenticated Connect calls.
 
-When a command selects or crosses one of these boundaries, the CLI should make that scope explicit before mutating credentials.
+### Connect API shape
 
-### 5. Use package targets as the primary user concept
+Add a separate `OAuthService` to `daemon/apiv1/daemon.proto`, rather than adding OAuth methods to `SessionService`.
 
-The main auth target should be a tool package, because packages declare credentials and may contain multiple tools that share those credentials.
+The service should include, at minimum:
 
-The user should not need to authenticate individual tools unless the package model explicitly requires that distinction. Lower-level credential or account selection should appear only when needed to disambiguate.
+```proto
+service OAuthService {
+  rpc RedirectURI(OAuthRedirectURIRequest) returns (OAuthRedirectURIResponse);
+  rpc Begin(OAuthBeginRequest) returns (OAuthBeginResponse);
+  rpc Wait(OAuthWaitRequest) returns (OAuthWaitResponse);
+  rpc Cancel(OAuthCancelRequest) returns (OAuthCancelResponse);
+}
+```
 
-Local package directories should be treated as a separate, explicit target class so development credentials are not confused with installed package credentials.
+Recommended message shape:
 
-### 6. Handle ambiguity safely
+```proto
+message OAuthRedirectURIRequest {}
 
-The auth CLI should not guess when guessing could affect credential scope or account selection.
+message OAuthRedirectURIResponse {
+  string redirect_uri = 1;
+  string daemon_url = 2;
+}
 
-If a package has multiple relevant credentials, accounts, or possible target matches, the CLI should guide the user to make an explicit choice.
+message OAuthBeginRequest {
+  string state = 1;
+  string authorization_url = 2;
+  string label = 3;
+}
 
-Helpful ambiguity handling should include:
+message OAuthBeginResponse {
+  string flow_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
 
-- explaining what was ambiguous
-- showing the available choices
-- recommending the next command or option
-- avoiding unintended credential creation, overwrite, or deletion
+message OAuthWaitRequest {
+  string flow_id = 1;
+}
 
-### 7. Make secret-store state actionable
+message OAuthWaitResponse {
+  string code = 1;
+  string state = 2;
+  string error = 3;
+  string error_description = 4;
+  string error_uri = 5;
+}
 
-Auth commands depend on the secret store, but users should experience locked, uninitialized, or recovery-required states as expected product states rather than internal failures.
+message OAuthCancelRequest {
+  string flow_id = 1;
+}
 
-The auth CLI should explain:
+message OAuthCancelResponse {}
+```
 
-- when the secret store must be set up
-- when it must be unlocked
-- when recovery or backup codes are relevant
-- when an operation cannot proceed non-interactively
-- what command or action the user should take next
+`expires_at` must use `google.protobuf.Timestamp`.
 
-First-time setup must be intentional. If backup or recovery codes are generated, the user must be shown them clearly and understand that they are important.
+### URL rules
 
-### 8. Support both interactive users and automation
+The daemon should advertise OAuth URLs as follows:
 
-The auth CLI should work well in terminals and in scripts.
+- Default redirect URI:
 
-Interactive users should get prompts and guidance where appropriate. Non-interactive environments should receive deterministic errors, stable status signals, and no surprise prompts.
+  ```text
+  http://localhost:<actual-daemon-webserver-port>/oauth2/callback
+  ```
 
-Automation should be able to distinguish important auth states without scraping human prose, including:
+- Default daemon UI URL:
 
-- authenticated
-- missing credentials
-- expired credentials
-- locked secret store
-- uninitialized secret store
-- unsupported auth type
-- ambiguous target, credential, or account selection
+  ```text
+  http://localhost:<actual-daemon-webserver-port>/
+  ```
 
-### 9. Prefer a clean unreleased interface over prototype compatibility
+- If `TOOLBOX_HOST` is set, it replaces the advertised origin completely, including scheme:
 
-The current auth CLI has not been released, so the updated auth CLI does not need to preserve old command forms, flags, or migration behavior.
+  ```text
+  TOOLBOX_HOST=https://example.ngrok.app
+  redirect_uri = https://example.ngrok.app/oauth2/callback
+  daemon_url   = https://example.ngrok.app/
+  ```
 
-The product should choose the clearest long-term shape rather than carrying compatibility costs for internal prototype syntax.
+- `TOOLBOX_HOST` affects advertised URLs only. It must not affect bind behavior.
+- Bind behavior remains controlled by existing daemon bind configuration, including `TOOLBOX_BIND_ADDRESS`.
+- Trim whitespace and trailing slashes from `TOOLBOX_HOST`.
+- Require `TOOLBOX_HOST` to start with `http://` or `https://`. If invalid, daemon OAuth should fail cleanly and the CLI should fall back to the existing local receiver.
 
-## Product Requirements
+### Flow identity
 
-### Authentication workflow requirements
+Use both a daemon-generated `flow_id` and the OAuth `state`:
 
-- Users must be able to inspect auth status for one package.
-- Users should be able to inspect auth status across auth-relevant packages in the active context.
-- Users must be able to complete OAuth login for OAuth credentials.
-- Users must be able to log out or remove OAuth token material.
-- Users must be able to configure static secret material such as API keys.
-- Users must be able to clear or rotate static secret material.
-- Users must be able to distinguish package-level, credential-level, and account-level auth state.
-- The CLI must not silently choose among multiple credentials or accounts when the choice has security or data-access implications.
+- `flow_id` is the primary control-plane handle for `Wait` and `Cancel`.
+- `state` is used by the browser callback to find the pending flow.
+- The daemon must reject unknown, missing, expired, or already-consumed states at `/oauth2/callback` with a friendly HTML error page.
+- Multiple concurrent OAuth flows must be supported without races.
 
-### Targeting and scope requirements
+### Expiration and cleanup
 
-- The primary auth target should be a tool package.
-- Local directory authentication should require explicit user intent.
-- Overridden/replaced packages should have clearly defined credential identity.
-- The CLI should communicate which package context credentials will be read from or written to.
-- Auth commands should avoid exposing internal storage keys as the primary UX.
+- Pending daemon OAuth flows expire after 5 minutes, matching the current CLI OAuth timeout.
+- Expired flows must be automatically removed from daemon state and disappear from the UI.
+- Waiters must unblock with an expired/deadline-style error.
+- Late callbacks for expired flows must show a friendly expired/unknown-flow page and must not recreate state.
+- `Cancel` must be idempotent.
+- The daemon receiver's `Close()` must call `Cancel` when it has a `flow_id`, so manual-paste wins and interrupted flows remove stale UI cards.
 
-### Secret and credential safety requirements
+### UI behavior
 
-- Secret values must not be printed accidentally.
-- Secret values should not be encouraged in shell history or process arguments.
-- Credential-clearing operations should make their scope clear.
-- Error messages must avoid leaking sensitive credential material.
-- First-time secret-store setup should not silently create recovery material without showing it to the user.
+Pending OAuth flows should appear on the existing daemon index/approval console page, not on a new dedicated page.
 
-### Secret-store lifecycle requirements
+- Show all pending OAuth flows while the secret store is unlocked.
+- Do not show pending OAuth cards while the secret store is locked or setup is required.
+- Internally pending flows may remain alive while locked; they should appear if the store becomes unlocked before expiry.
+- Each visible OAuth card should include a human-readable label, created/expiry context, and a normal clickable provider authorization link.
+- The link should be a normal anchor using the authorization URL, with safe attributes such as `target="_blank"` and `rel="noopener noreferrer"`.
 
-- Uninitialized secret store should produce an actionable setup-required state.
-- Locked secret store should produce an actionable unlock-required state.
-- Recovery-required or recovery-window states should be explained in user-facing terms.
-- Interactive flows may guide setup/unlock where appropriate.
-- Non-interactive flows must fail predictably when required setup/unlock input is unavailable.
+Phase 1 should use a single human-readable `label` string in `OAuthBeginRequest`, composed by the CLI. Avoid adding structured provider/package/account fields until they are needed.
 
-### Output and diagnostics requirements
+Recommended label:
 
-- Human-readable output should be concise, clear, and action-oriented.
-- Machine-readable output should be available for automation-sensitive status checks.
-- Errors should say what failed, why it failed when known, and what to do next.
-- Status should distinguish missing, expired, invalid, configured, and authenticated states where the underlying auth type supports those distinctions.
+```text
+Authorize <credential-name> for <package-name-or-key> (<account>)
+```
 
-### Compatibility requirements
+If provider name is available and easy to include:
 
-- No old auth CLI command forms need to be preserved.
-- No old auth CLI command forms need deprecation messaging.
-- Prototype auth flags and passthrough argument parsing may be removed.
-- Existing unreleased tests and fixtures may be updated to the new command model rather than preserving old behavior.
+```text
+Authorize <credential-name> for <package-name-or-key> (<account>) via <provider-name>
+```
+
+### CLI behavior
+
+Daemon-backed OAuth should still race against manual paste input.
+
+- Daemon receiver waits for daemon callback through Connect.
+- Manual receiver accepts full redirect URL or code as today.
+- `RaceReceiver` chooses the first successful result.
+- If manual paste wins, daemon flow must be canceled and removed from UI.
+
+In daemon-backed mode, the CLI may try to open the daemon UI page. Browser-open failure is non-fatal.
+
+The CLI should print instructions along these lines:
+
+```text
+Authorization is waiting in the Toolbox daemon.
+
+Opening daemon page...
+If it does not open, visit:
+<daemon_url>
+
+Then click Continue authorization.
+
+Or visit directly:
+<authorization_url>
+
+Or paste the full redirect URL or authorization code here:
+```
+
+In local fallback mode, preserve the current behavior of opening the provider authorization URL and using the per-command callback server.
+
+### `oauth2flow` changes
+
+Add the smallest optional hook needed for receivers that must register/start authorization after the final auth URL is built but before waiting for the code.
+
+Recommended interface:
+
+```go
+type AuthorizationStarter interface {
+    StartAuthorization(ctx context.Context, state string, authorizationURL string) error
+}
+```
+
+`AuthorizeCode` should:
+
+1. get `receiver.RedirectURI()`
+2. generate state
+3. build final authorization URL
+4. if the receiver implements `AuthorizationStarter`, call `StartAuthorization(ctx, state, authorizationURL)`
+5. call `onAuthURL(authorizationURL)`
+6. call `receiver.ReceiveCode(ctx, state)`
+
+Existing receivers should not need to change.
+
+`RaceReceiver` should implement `AuthorizationStarter` by calling `StartAuthorization` on child receivers that support it. This allows daemon+manual composition without special casing in `authOAuth2`.
+
+
+## Advice to the Implementing Agent
+
+1. Keep daemon OAuth as a thin coordinator, not an auth subsystem.
+
+   The daemon should coordinate redirect/wait/UI state. It should not learn about token exchange, refresh-token storage, package credential internals, or auth policy. Protect this boundary carefully.
+
+2. Make the first implementation deliberately boring.
+
+   One in-memory owner for flows. One Connect service. One HTTP callback route. One UI card on the existing page. One daemon receiver in the CLI. No generalized pending-action framework.
+
+3. Treat fallback as part of the feature, not an error path.
+
+   The product behavior is: try daemon-backed OAuth if available; otherwise existing local OAuth still works. Fallback needs first-class behavioral tests. If fallback is only manually checked, it will rot.
+
+4. Be careful with the sequencing around `AuthorizeCode`.
+
+   The new `AuthorizationStarter` hook is a small but central seam. The ordering should be:
+
+   ```text
+   RedirectURI -> generate state -> build auth URL -> StartAuthorization -> onAuthURL -> ReceiveCode
+   ```
+
+   If that sequence gets wrong, callback races or UI cards with bad URLs can reappear.
+
+5. Do not treat the daemon webserver as trusted.
+
+   The browser-facing HTTP route is not authenticated. The trust boundary is:
+
+   - Connect over verified UDS: trusted local CLI control
+   - HTTP callback: untrusted browser/provider input
+
+   `/oauth2/callback` should only complete pre-registered state and should validate input boringly.
+
+6. Make expiry/cancel semantics simple and ruthless.
+
+   A flow is pending, completed, canceled, or expired. Once terminal, it should not be resurrected. Late callbacks get friendly errors. `Cancel` is idempotent. Expired flows disappear.
+
+7. Do not overfit the UI.
+
+   A small card on the existing page is enough:
+
+   ```text
+   Authorization needed
+   <label>
+   [Continue authorization]
+   Expires at ...
+   ```
+
+   No dedicated page, no OAuth dashboard, no generalized notifications unless later requirements prove they are needed.
+
+8. Use tests as design pressure.
+
+   If a design is hard to test outside-in, it is probably too abstract or too coupled. Follow the repository's existing daemon HTTP/auth test patterns.
+
+9. Keep `TOOLBOX_HOST` boring and explicit.
+
+   Prefer preserving paths if supplied, because it supports reverse proxies:
+
+   ```text
+   TOOLBOX_HOST=https://example.test/toolbox
+   => https://example.test/toolbox/oauth2/callback
+   ```
+
+   Whatever behavior is chosen, encode it once in tests and keep URL construction centralized.
+
+10. Add one golden-path integration test as early as possible.
+
+    The most important proof is:
+
+    ```text
+    fake provider -> CLI auth -> daemon UI/callback -> code returned -> token exchanged -> refresh token stored
+    ```
+
+    Even if the first version is rough, that test will keep the vertical slice honest.
+
+## Vertical Slice Phases
+
+Each phase below should be completed with outside-in behavioral tests first where practical. Unit tests are acceptable for small pure functions or difficult edge cases, but they should not substitute for behavioral proof of the slice.
+
+### Phase 1 — Prove proto generation and add empty OAuth service wiring
+
+#### Requirements
+
+- [x] Add a separate `OAuthService` to `daemon/apiv1/daemon.proto`.
+- [x] Add the agreed OAuth request/response messages.
+- [x] Regenerate Connect/protobuf Go code using the repository's Connect generator workflow.
+- [x] Add an OAuth service implementation in `daemon/internal/server` and register its handler in the daemon Connect mux.
+- [x] Add daemon client plumbing sufficient to call the new service.
+- [x] Keep behavior minimal: methods may initially return unimplemented/unavailable where no state exists, but the service must be reachable through the verified daemon Connect path.
+- [x] Do not modify OAuth CLI behavior in this phase.
+
+#### Verification steps
+
+- [x] Run proto generation and confirm generated files are updated and compile.
+- [x] Run `go test ./daemon/...` and relevant `cmd/toolbox` daemon tests.
+- [x] Add a behavioral test that starts a daemon server over its normal test transport and proves an OAuthService method can be called through the daemon client/Connect path.
+- [x] Confirm no browser-facing HTTP OAuth route exists yet or, if introduced as a placeholder, it does not accept callbacks.
+
+### Phase 2 — Advertise correct daemon OAuth URLs
+
+#### Requirements
+
+- [x] Implement `OAuthService.RedirectURI`.
+- [x] The service must return both `redirect_uri` and `daemon_url`.
+- [x] Use the actual daemon webserver listener port.
+- [x] Default advertised origin must be `http://localhost:<actual-port>`.
+- [x] If `TOOLBOX_HOST` is set, use it as the complete advertised origin.
+- [x] `TOOLBOX_HOST` must be trimmed and validated as `http://` or `https://`.
+- [x] Invalid `TOOLBOX_HOST` must cause a clean daemon OAuth error, not malformed URLs.
+- [x] If the daemon webserver is unavailable/disabled, `RedirectURI` must fail cleanly so the CLI can fall back later.
+
+#### Verification steps
+
+- [x] Behavioral test: start daemon debug webserver on `127.0.0.1:0`, call `OAuthService.RedirectURI`, and assert URLs use `localhost:<actual-port>` and not `127.0.0.1:0`.
+- [x] Behavioral test: set `TOOLBOX_HOST=https://example.test/base/`, call `RedirectURI`, and assert:
+  - `redirect_uri == https://example.test/base/oauth2/callback` if paths are intentionally preserved, or `https://example.test/oauth2/callback` if implementation chooses origin-only semantics. Choose and document one behavior before implementing.
+  - `daemon_url` is the corresponding advertised UI URL.
+- [x] Behavioral test: invalid `TOOLBOX_HOST=not-a-url` makes `RedirectURI` return an error.
+- [x] Run daemon and auth-related test packages.
+
+### Phase 3 — Register, wait, cancel, and expire daemon OAuth flows through Connect
+
+#### Requirements
+
+- [x] Implement daemon OAuth flow manager in `daemon/internal/server`.
+- [x] `Begin` must validate non-empty `state`, valid absolute `authorization_url`, and optional label.
+- [x] `Begin` must create a daemon-generated random `flow_id` and return `expires_at` as `google.protobuf.Timestamp`.
+- [x] Maintain indexes by `flow_id` and `state`.
+- [x] `Wait(flow_id)` must block until callback completion, cancellation, expiry, or caller context cancellation.
+- [x] `Cancel(flow_id)` must be idempotent and must unblock waiters.
+- [x] Flows must expire automatically after 5 minutes and be removed from state.
+- [x] Unknown states must not be implicitly created.
+- [x] Multiple concurrent flows with distinct states must not race or cross-complete.
+- [x] Keep this state manager simple. Prefer a mutex plus maps/channels over elaborate abstractions unless tests prove more is needed.
+
+#### Verification steps
+
+- [x] Behavioral Connect test: begin a flow, wait in a goroutine, complete it through an internal server method, and assert `Wait` returns the correct code/state.
+- [x] Behavioral Connect test: cancel a flow while waiting and assert waiter unblocks and pending state is removed.
+- [x] Behavioral Connect test: two simultaneous flows complete independently by state and return their own codes.
+- [x] Behavioral test with injectable clock/short TTL or controlled expiry: expired flow is removed, waiter unblocks, and callback after expiry is rejected.
+- [x] Run `go test ./daemon/...`.
+
+### Phase 4 — Add browser-facing `/oauth2/callback` route
+
+#### Requirements
+
+- [x] Add `GET /oauth2/callback` to the existing daemon webserver in `cmd/toolbox/daemon.go`.
+- [x] The route must parse successful callbacks containing `code` and `state`.
+- [x] The route must parse provider error callbacks containing `error`, `error_description`, and `error_uri`.
+- [x] The route must require a pre-registered known state.
+- [x] Missing state, unknown state, expired state, missing code/error, and repeated callbacks must return friendly HTML error pages.
+- [x] Successful callbacks must complete the daemon flow and return a friendly success page.
+- [x] Provider-error callbacks must complete the daemon flow with structured error data and return a friendly error/canceled page.
+- [x] The route should remain thin: parse HTTP, call the OAuth control/state manager, render response.
+
+#### Verification steps
+
+- [x] Outside-in HTTP + Connect test: begin a flow through Connect, call `/oauth2/callback?code=abc&state=<state>`, then assert `Wait(flow_id)` returns code `abc`.
+- [x] HTTP test: unknown state returns non-2xx friendly HTML and does not create a flow.
+- [x] HTTP + Connect test: provider error callback unblocks `Wait` with structured `error`, `error_description`, and `error_uri`.
+- [x] HTTP test: missing state or missing both code and error returns a useful error page.
+- [x] HTTP test: repeated callback does not overwrite the original result.
+- [x] Run relevant daemon webserver tests.
+
+### Phase 5 — Show pending OAuth cards on the existing daemon page
+
+#### Requirements
+
+- [x] Expose pending OAuth flows to the existing daemon page state through the in-process `daemonHTTPControl` path or a small extension interface.
+- [x] Show all pending OAuth flows on `/`, `/index.html`, and `/approval-console` while the secret store is unlocked.
+- [x] Do not show OAuth cards while the secret store is locked, setup-required, or otherwise unavailable.
+- [x] Each visible card must include label, useful created/expiry context, and clickable authorization link.
+- [x] Expired or canceled flows must disappear automatically.
+- [x] Keep UI changes minimal and consistent with existing approval console styles/templates.
+
+#### Verification steps
+
+- [x] Existing daemon page behavioral test: with unlocked secret store and a pending OAuth flow, rendered HTML contains the label and authorization URL.
+- [x] Existing daemon page behavioral test: with locked secret store and a pending OAuth flow, rendered HTML does not contain the OAuth label or authorization URL.
+- [x] Existing daemon page/events test if applicable: Datastar/SSE updates remove a flow after cancellation/expiry.
+- [x] Test that multiple pending flows are all visible while unlocked.
+- [x] Run `go test ./cmd/toolbox` or the narrow package tests that cover daemon page rendering.
+
+### Phase 6 — Add `oauth2flow.AuthorizationStarter` and daemon receiver
+
+#### Requirements
+
+- [x] Add optional `AuthorizationStarter` hook to `oauth2flow`.
+- [x] Update `AuthorizeCode` to call the hook after building the final authorization URL and before `onAuthURL`/`ReceiveCode`.
+- [x] Update `RaceReceiver` to forward `StartAuthorization` to child receivers that support it.
+- [x] Implement a daemon-backed `CodeReceiver` used by the CLI.
+- [x] The daemon receiver must:
+  - get redirect URI and daemon URL through Connect
+  - return daemon redirect URI from `RedirectURI()`
+  - call `OAuthService.Begin` from `StartAuthorization`
+  - wait through `OAuthService.Wait(flow_id)`
+  - return provider errors as authorization errors consistent with current behavior
+  - call idempotent `OAuthService.Cancel` from `Close()` once it has a `flow_id`
+- [x] Keep local `CallbackReceiver`, `ManualReceiver`, and existing behavior intact.
+
+#### Verification steps
+
+- [x] `oauth2flow` behavioral test: a fake receiver implementing `AuthorizationStarter` observes the generated state and authorization URL before `ReceiveCode` is called.
+- [x] `RaceReceiver` behavioral test: starter hook is forwarded to daemon child while manual child remains unaffected.
+- [x] Daemon receiver integration test: with a test daemon OAuth service, `AuthorizeCode` registers a flow, waits, receives a code, and closes cleanly.
+- [x] Manual-wins test: daemon flow is canceled when manual receiver wins the race.
+- [x] Run `go test ./oauth2flow ./cmd/toolbox ./daemon/...` as appropriate.
+
+### Phase 7 — Integrate daemon-backed OAuth into `toolbox auth` with fallback
+
+#### Requirements
+
+- [x] Modify `cmd/toolbox/auth.go` so OAuth auth prefers daemon-backed receiver only when daemon OAuth is reachable and returns valid URLs.
+- [x] If daemon connection, OAuth service, redirect URI, begin, or pre-flow validation fails, fall back to the existing local callback receiver.
+- [x] In daemon-backed mode, race daemon receiver against manual paste.
+- [x] In fallback mode, preserve current local callback + manual paste behavior.
+- [x] In daemon-backed mode, the CLI may try to open `daemon_url`; failure must be logged or ignored as non-fatal.
+- [x] In daemon-backed mode, print instructions that include daemon UI URL, direct authorization URL, and manual paste prompt.
+- [x] In fallback mode, preserve current provider browser opening and messaging unless intentionally improved by tests.
+- [x] Token exchange and refresh-token storage must remain in the CLI.
+- [x] Existing OAuth tests must continue to pass, updated only where the new preferred daemon behavior is explicitly under test.
+
+#### Verification steps
+
+- [x] End-to-end auth test with daemon available:
+  - start daemon webserver/Connect server
+  - run OAuth auth flow against a fake provider
+  - assert daemon page has pending OAuth card
+  - complete provider redirect to daemon `/oauth2/callback`
+  - assert CLI stores refresh token
+- [x] End-to-end auth test with daemon unavailable:
+  - run existing fake-provider OAuth flow
+  - assert local callback receiver path still works and stores refresh token.
+- [x] End-to-end auth test where daemon OAuth `RedirectURI` errors:
+  - assert CLI falls back to local receiver.
+- [x] Manual-paste test in daemon-backed mode:
+  - paste code/redirect manually
+  - assert token storage succeeds
+  - assert daemon flow is canceled/removed.
+- [x] Browser-open failure test:
+  - make daemon UI open fail
+  - assert auth still proceeds via printed/direct/manual path.
+
+### Phase 8 — Hardening, cleanup, and documentation polish
+
+#### Requirements
+
+- [x] Review all new errors for clarity and absence of secret leakage.
+- [x] Ensure authorization URLs are displayed only where necessary and never logged unexpectedly beyond user-facing terminal/UI surfaces.
+- [x] Ensure no stale goroutines/timers remain after wait/cancel/expiry.
+- [x] Ensure daemon shutdown cleans up waiters cleanly.
+- [x] Keep API and code names consistent and small.
+- [x] Remove any temporary test-only hooks that are no longer needed.
+- [x] Add concise comments only where they explain non-obvious concurrency, security, or URL-advertising decisions.
+- [x] Do not introduce broad frameworks or generic flow managers beyond this OAuth need.
+
+#### Verification steps
+
+- [x] Run `go test ./...`.
+- [x] Run targeted race-sensitive tests with `-race` if feasible for daemon/oauth packages.
+- [x] Manually inspect generated proto/connect diffs for expected service additions only.
+- [x] Manually inspect daemon web UI HTML for locked/unlocked behavior and link safety.
+- [x] Review fallback paths by forcing:
+  - daemon unavailable
+  - invalid `TOOLBOX_HOST`
+  - expired flow
+  - provider error callback
+  - manual paste wins
+
+## Open Implementation Detail to Resolve Before Phase 2
+
+`TOOLBOX_HOST` with a path needs one explicit decision before implementation:
+
+- Option A: preserve the path as a base path, so `TOOLBOX_HOST=https://example.test/toolbox` yields `https://example.test/toolbox/oauth2/callback` and `https://example.test/toolbox/`.
+- Option B: treat `TOOLBOX_HOST` as an origin only, ignoring paths or rejecting URLs with paths.
+
+Recommendation: preserve the path if supplied, because the user said `TOOLBOX_HOST` replaces everything including scheme. This is useful for reverse proxies mounted under a path. Trim trailing slashes before appending routes.
+
+## Progress Log
+
+Agents should append dated entries here as they work. Keep entries concise but specific enough for the next agent to understand what changed, what was proven, and what remains uncertain.
+
+Template:
+
+```text
+YYYY-MM-DD HH:MM — Phase N — short summary
+- Changed: files/components touched
+- Proved: tests or manual verification run
+- Reflected: why this might not be done, and what was remediated
+- Next: immediate next step
+```
+
+Entries:
+
+- 2026-05-26 23:24 — Phase 1 — start empty OAuthService wiring slice
+  - Changed: planning entry only so far.
+  - Proved: baseline `go test ./daemon/...` was green before code changes.
+  - Reflected: Phase 1 is not complete yet; current repo has no OAuth proto/service/client wiring and no behavioral reachability test.
+  - Next: add proto/messages, regenerate generated code, register an unimplemented daemon service, add daemon client plumbing, and prove it is reachable through the verified daemon transport.
+- 2026-05-26 23:39 — Phase 1 — empty OAuthService reachable through daemon client
+  - Changed: `daemon/apiv1/daemon.proto`, generated `daemon.pb.go`/`daemon.connect.go`, `daemon/internal/server/oauth_service.go`, server mux wiring, daemon client OAuth plumbing, public daemon aliases, and `daemon/daemon_test.go`.
+  - Proved: ran `PATH="$PATH:$HOME/go/bin" protoc -I. --go_out=. --go_opt=paths=source_relative --connect-go_out=. --connect-go_opt=paths=source_relative daemon/apiv1/daemon.proto`; `go test ./daemon/...`; `go test ./cmd/toolbox -run 'Daemon|daemon'`.
+  - Reflected: Phase 1 could be falsely complete if the route existed only in generated code or only direct service calls were tested. Remediated with `TestOAuthServiceReachableThroughVerifiedDaemonClient`, which starts the normal daemon test server and calls `client.OAuthRedirectURI`; it receives the service's intentional `Unavailable` rather than an HTTP route-not-found. No `/oauth2/callback` route was added and OAuth CLI files were not touched.
+  - Next: Phase 2 URL advertisement, including actual daemon webserver port and `TOOLBOX_HOST` handling.
+- 2026-05-26 23:43 — Phase 2 — start RedirectURI URL advertisement slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 1 test suite was green before this slice.
+  - Reflected: URL advertisement can look correct while still using the bind address (`127.0.0.1:0`) or ignoring reverse-proxy base paths. This slice will add behavior tests for actual listener port, `TOOLBOX_HOST` path preservation, invalid host errors, and webserver-disabled fallback.
+  - Next: implement centralized URL builder plus daemon HTTP address handoff from the browser webserver to the Connect OAuth service.
+- 2026-05-26 23:54 — Phase 2 — RedirectURI advertises actual webserver URLs
+  - Changed: `daemon/internal/server/oauth_service.go` now builds redirect/UI URLs, preserves `TOOLBOX_HOST` base paths, validates schemes, and fails cleanly when no webserver address is registered; `cmd/toolbox/daemon.go` registers the actual debug listener address with the daemon control; added daemon and cmd behavioral tests.
+  - Proved: `go test ./daemon/...`; `go test ./cmd/toolbox -run 'OAuth|Daemon|daemon'`.
+  - Reflected: The phase could be under-proven if only pure URL helpers were tested. Added Connect/daemon tests (`TestOAuthRedirectURIUsesRegisteredDaemonWebserverAddress`, `TestOAuthRedirectURIPreservesToolboxHostBasePath`, invalid host/unavailable tests) and a cmd-level integration test (`TestDaemonDebugServerAdvertisesOAuthURLsThroughConnect`) that starts a Unix-socket daemon plus debug webserver on `127.0.0.1:0` and calls through `daemon.EnsureConnection`, proving localhost + actual port behavior. Chose and encoded path-preserving `TOOLBOX_HOST` semantics.
+  - Next: Phase 3 in-memory flow manager for Begin/Wait/Cancel/expiry.
+- 2026-05-27 00:02 — Phase 3 — start Connect-managed OAuth flow lifecycle slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 2 targeted daemon and cmd tests were green before this slice.
+  - Reflected: Flow lifecycle can appear complete if direct manager calls pass while Connect wait/cancel paths, waiter wakeups, expiry cleanup, and state/flow indexes diverge. This slice will add behavioral Connect tests that begin through the daemon client path, wait concurrently, complete via a narrow internal server hook, cancel, handle multiple flows, and prove deterministic expiry without sleeps.
+  - Next: implement a small in-memory OAuth flow manager owned by `daemon/internal/server.OAuthService`, wire Begin/Wait/Cancel, expose the narrow completion hook, and run `go test ./daemon/...`.
+- 2026-05-27 00:31 — Phase 3 — Connect OAuth flow lifecycle implemented
+  - Changed: added `daemon/internal/server/oauth_flow_manager.go` with an in-memory mutex/map/channel flow owner; wired `OAuthService.Begin`, `Wait`, `Cancel`, and the narrow `CompleteOAuthFlow` internal hook; added daemon client Begin/Wait/Cancel helpers and public aliases.
+  - Proved: `go test ./daemon/...`; `go test ./cmd/toolbox -run 'OAuth|Daemon|daemon'`. Added Connect tests for begin/wait/complete, cancel/idempotent cleanup, independent concurrent flows, validation/duplicate states, unknown-state completion, and controlled manager expiry/default 5-minute TTL.
+  - Reflected: Phase 3 could be falsely complete if waiters were tested by sleeping or if completed/canceled states stayed callable. Tests synchronize with a manager-owned waiter hook, assert late completion fails after cancel/expiry/completion, assert unknown callback does not create state, and cover `expires_at`/default TTL. State remains in-memory only; no browser callback route or CLI OAuth behavior was added.
+  - Next: Phase 4 browser-facing `/oauth2/callback` route on the daemon webserver.
+- 2026-05-27 00:34 — Phase 4 — start browser callback route slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 3 daemon and cmd OAuth/daemon tests were green before this slice.
+  - Reflected: The callback route can look done if it parses query strings but bypasses authenticated registration or creates flows implicitly. This slice will keep the HTTP handler thin, complete only pre-registered states via the daemon control hook, return friendly HTML for success/error/failure, and prove behavior with HTTP + Connect tests.
+  - Next: inspect existing daemon webserver routing/template patterns, add `/oauth2/callback`, and run relevant daemon webserver tests.
+- 2026-05-27 00:58 — Phase 4 — browser OAuth callback route completed
+  - Changed: `cmd/toolbox/daemon.go` now registers `/oauth2/callback` before the `/` catch-all, parses success and provider-error callback query parameters, completes only through the daemon OAuth completion hook, and renders escaped friendly HTML without echoing authorization codes. `cmd/toolbox/daemon_test.go` now has HTTP + Connect callback tests and direct HTTP validation tests.
+  - Proved: `go test ./cmd/toolbox -run 'OAuth|Daemon|daemon'`; `go test ./daemon/...`; `go test ./cmd/toolbox`.
+  - Reflected: Phase 4 could be falsely complete if the route accepted unknown state by creating a flow, if repeated callbacks overwrote results, or if provider errors were only shown in HTML without reaching Connect waiters. Remediated with outside-in tests that begin via daemon Connect, callback via HTTP, and wait via Connect for both success and provider errors; a real-daemon unknown-state test proves callbacks do not reserve/create state; repeated callback keeps the first result; missing/expired/unknown states and missing code/error get non-2xx friendly HTML.
+  - Next: Phase 5 pending OAuth cards on the existing daemon page.
+- 2026-05-27 00:16 — Phase 5 — start pending OAuth cards slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 4 daemon/cmd tests were green before this slice per the prior entry.
+  - Reflected: UI cards can appear complete while leaking pending authorization links on locked/setup/unavailable pages or failing to disappear after cancel/expiry. This slice will expose only pending flow snapshots through a narrow in-process daemon control method, gate rendering on unlocked non-setup secret store state, and prove index/approval-console/SSE behavior with daemon page tests.
+  - Next: add pending-flow snapshots to the daemon OAuth manager/service/server, thread them into approval console state, render minimal cards, and verify with cmd/daemon tests.
+- 2026-05-27 00:30 — Phase 5 — pending OAuth cards completed on existing daemon page
+  - Changed: added pending-flow snapshots to the daemon OAuth manager/service/server/public alias; extended the daemon HTTP control path and approval-console state with pending OAuth summaries; rendered minimal OAuth cards in the existing approval console templates; regenerated templ output; added cmd/daemon behavioral tests.
+  - Proved: `go test ./cmd/toolbox`; `go test ./daemon/...`; targeted real-daemon proof `TestApprovalConsoleShowsRealDaemonPendingOAuthFlow`; manager expiry proof `TestOAuthFlowManagerPendingExpiresDueFlows`.
+  - Reflected: Phase 5 could have been falsely complete if only stub UI tests passed, if cards leaked while locked/setup/unavailable, or if canceled/expired flows lingered. Remediated with a real Unix-socket daemon + real secret-store setup test that begins through Connect, renders `/`, `/index.html`, and `/approval-console`, verifies locked suppression/unlocked restoration, cancels through the daemon client, and confirms the page plus `PendingOAuthFlows` are empty. Added controlled-time manager coverage proving `Pending()` expires due flows without relying on sleeps.
+  - Next: Phase 6 `oauth2flow.AuthorizationStarter` hook and daemon-backed receiver.
+- 2026-05-27 00:32 — Phase 6 — start AuthorizationStarter and daemon receiver slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 5 `go test ./cmd/toolbox` and `go test ./daemon/...` were green before this slice.
+  - Reflected: The hook can appear correct while registering before the final URL exists, after waiting starts, or only for one child in a race; the daemon receiver can appear correct while failing to cancel on manual wins or failing to preserve provider-error semantics. This slice will first add ordering/forwarding tests in `oauth2flow`, then add a thin cmd-level daemon receiver with Connect-backed begin/wait/cancel tests.
+  - Next: add `AuthorizationStarter`, update `AuthorizeCode` and `RaceReceiver`, then implement and prove the daemon-backed receiver.
+- 2026-05-27 00:44 — Phase 6 — AuthorizationStarter and daemon receiver completed
+  - Changed: `oauth2flow` now has the optional `AuthorizationStarter` hook, `AuthorizeCode` calls it after final auth URL construction and before `onAuthURL`/`ReceiveCode`, `RaceReceiver` forwards it to supporting children, and `cmd/toolbox/oauth_daemon_receiver.go` implements the daemon-backed receiver with Connect redirect/begin/wait/cancel behavior.
+  - Proved: `go test ./oauth2flow`; `go test ./cmd/toolbox -run DaemonOAuthReceiver`; `go test ./oauth2flow ./cmd/toolbox ./daemon/...`.
+  - Reflected: Phase 6 could be falsely complete if the receiver only passed mocks or if manual wins left stale daemon UI cards. Remediated with ordering/forwarding tests, provider-error parity tests, a real daemon + debug-server callback integration test, and both stub and real-daemon manual-wins cancellation tests. Local callback/manual receiver code was not changed; actual `toolbox auth` preference/fallback wiring remains Phase 7.
+  - Next: Phase 7 integration into `authOAuth2` with daemon preference and fallback.
+- 2026-05-27 00:45 — Phase 7 — start daemon-preferred auth integration slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 6 targeted and broad tests were green before this slice.
+  - Reflected: It would be easy to regress existing local OAuth tests by always trying daemon launch, or to incorrectly fall back after a provider/callback error rather than only pre-flow/registration failures. This slice will add narrow seams and outside-in auth tests for daemon available, daemon unavailable/invalid redirect fallback, manual wins cancellation, and non-fatal daemon UI browser-open failure while keeping token exchange/storage in the CLI.
+  - Next: factor receiver selection/instructions in `authOAuth2`, add daemon-preferred tests, then run the targeted and broad suites.
+- 2026-05-27 01:18 — Phase 7 — daemon-preferred auth integration completed
+  - Changed: `cmd/toolbox/auth.go` now selects daemon-backed OAuth opportunistically, falls back to the local callback/manual receiver before a daemon flow is established, preserves local behavior by default in existing test seams, and keeps token exchange/refresh-token storage in the CLI. `cmd/toolbox/auth_command.go` passes daemon preference for real CLI OAuth paths. `cmd/toolbox/auth_test.go` now has outside-in daemon-available, daemon-unavailable, redirect error/invalid URL, begin failure/empty flow id, manual-wins cancellation, and browser-open failure coverage.
+  - Proved: targeted Phase 7 suite; `go test ./cmd/toolbox -run 'TestRunAuthOAuth2|TestDaemonOAuthReceiver' -count=1`; `go test ./oauth2flow ./cmd/toolbox ./daemon/...`.
+  - Reflected: Phase 7 could be falsely complete if it only proved the golden daemon path, or if fallback was tested only for connection failures. Added explicit fallback coverage for RedirectURI errors, invalid advertised URLs, Begin errors, and empty flow ids. A broad OAuth run exposed that a late pasted callback URL could already be in `authInput` backlog before `IgnoreOnce`; fixed dispatch to re-check ignore rules before delivering backlog and reproved the callback/next-credential test.
+  - Next: Phase 8 hardening: full-suite tests, race-sensitive checks, and manual inspection for leakage, shutdown, generated code, UI link safety, and fallback/error paths.
+- 2026-05-27 01:19 — Phase 8 — start hardening and completion-audit slice
+  - Changed: planning entry only so far.
+  - Proved: Phase 7 targeted and broad OAuth/daemon suites are green before hardening.
+  - Reflected: Passing targeted tests is not enough for completion; hardening needs full `go test ./...`, selected `-race` runs, manual diff/security inspection, and an explicit audit against every objective requirement/non-goal.
+  - Next: inspect the new daemon/auth/oauth code and generated diffs, run full and race-sensitive tests, remediate anything uncovered, then perform the final checklist audit.
+- 2026-05-27 02:34 — Phase 8 — hardening inspection and verification completed
+  - Changed: `objective.md` Phase 8 checklist only.
+  - Proved: `go test ./...`; `go test -race ./oauth2flow ./daemon/...`; `go test -race ./cmd/toolbox -run 'OAuth|DaemonOAuth|ApprovalConsoleShowsRealDaemonPendingOAuthFlow'`; targeted fallback/error proofs `go test ./daemon -run 'TestOAuthRedirectURIRejectsInvalidToolboxHost|TestOAuthRedirectURIPreservesToolboxHostBasePath'`, `go test ./daemon/internal/server -run 'TestOAuthFlowManagerExpiresFlow|TestOAuthFlowManagerCompleteProviderError'`, and `go test ./cmd/toolbox -run 'TestRunAuthOAuth2FallsBackWhenDaemonUnavailable|TestRunAuthOAuth2FallsBackWhenDaemonRedirectURIErrors|TestRunAuthOAuth2ManualPasteCancelsDaemonFlow|TestDaemonOAuthCallbackProviderError'`.
+  - Reflected: Re-ran full and race-sensitive suites and manually inspected `cmd/toolbox/auth.go`, `cmd/toolbox/oauth_daemon_receiver.go`, `daemon/internal/server/oauth_flow_manager.go`, `daemon/internal/server/oauth_service.go`, `oauth2flow/oauth2flow.go`, generated proto/connect diffs, and the generated OAuth card HTML. Authorization URLs appear only in the user-facing CLI direct-visit instructions and daemon UI hrefs; callback success pages do not echo codes. Flow cleanup is localized in the manager with timers stopped on wait/cancel/close and waiters closed on shutdown. The generated proto/connect diff contains the expected `OAuthService` and messages only. UI output is gated by existing unlocked-page state and uses escaped label/URL plus `target="_blank" rel="noopener noreferrer"`. A process-wide forced invalid `TOOLBOX_HOST` makes daemon-preference auth tests fall back as expected, so invalid host was verified with the targeted daemon RedirectURI test rather than treating those daemon-golden auth tests as environment-independent.
+  - Next: perform final completion audit against the objective and stop only if no uncovered requirement remains.
 
 ## Non-Goals
 
-This objective document does not decide:
-
-- the exact auth command tree
-- exact flag names or positional arguments
-- the CLI parsing library
-- credential key naming internals
-- on-disk secret-store format
-- daemon/client API design
-- exact JSON output schemas
-- final rollout mechanics
-- implementation sequencing
-
-Those should be captured in RFCs, design docs, or implementation plans after the product objectives are agreed.
-
-## Success Criteria
-
-The auth CLI update is successful when:
-
-- a new user can authenticate a package without understanding Toolbox internals
-- users can clearly distinguish package, credential, and account/profile concepts
-- OAuth and static-secret workflows feel natural and separate where they need to be
-- credentials are scoped predictably across installed packages, overrides, and local directories
-- ambiguous credential or account situations produce helpful guidance instead of unsafe guessing
-- locked or uninitialized secret-store states are actionable rather than opaque
-- automated environments can reliably detect auth/setup/locked states
-- the implementation does not carry unnecessary compatibility behavior for unreleased prototype commands
-
----
-
-# Proposed Auth CLI Shape
-
-## Recommendation
-
-The new auth CLI should be package-first for general inspection, but workflow-specific for mutation. In particular, OAuth should be an explicit subcommand namespace rather than hidden behind a generic `login` command.
-
-The canonical shape should be:
-
-```text
-toolbox auth
-  status [TARGET]
-  list
-  accounts TARGET
-
-  oauth2
-    status TARGET
-    configure TARGET
-    login TARGET
-    logout TARGET
-    refresh TARGET
-
-  secret
-    status TARGET
-    set TARGET
-    clear TARGET
-    rotate TARGET
-    validate TARGET
-
-  setup
-  unlock
-  lock
-  recovery
-    codes
-    rewrap
-```
-
-This keeps the package as the primary user-facing target while making the credential workflow explicit:
-
-- OAuth2 credentials have a login/logout/refresh lifecycle.
-- Static secrets have a set/clear/rotate/validate lifecycle.
-- Package-level `status` and `list` provide the unified auth view.
-- Secret-store lifecycle commands are first-class and actionable.
-
-## Targeting Model
-
-The default target should be an installed package in the active toolset:
-
-```text
-toolbox auth status github
-toolbox auth oauth2 login github
-toolbox auth secret set openai
-```
-
-Local development package directories should require explicit intent:
-
-```text
-toolbox auth status --local ./package-dir
-toolbox auth oauth2 login --local ./package-dir
-toolbox auth secret set --local ./package-dir
-```
-
-Commands that read or mutate credentials should clearly communicate the resolved package context, especially when the target is local, overridden, replaced, or otherwise not the ordinary installed package.
-
-## General Package-Level Commands
-
-### `toolbox auth status [TARGET]`
-
-Shows the auth state for one package, or, where appropriate, the active auth context.
-
-It should answer:
-
-- whether authentication is required
-- which credentials are declared
-- whether each credential is configured, missing, expired, invalid, or authenticated
-- which accounts/profiles exist
-- whether the secret store is locked or uninitialized
-- what command the user should run next
-
-For mixed packages, status should recommend workflow-specific next steps:
-
-```text
-Package: example
-
-Credential: github-oauth
-Type: OAuth2
-Status: not logged in
-Next step:
-  toolbox auth oauth2 login example --credential github-oauth
-
-Credential: api-key
-Type: API key
-Status: missing
-Next step:
-  toolbox auth secret set example --credential api-key
-```
-
-### `toolbox auth list`
-
-Shows auth-relevant packages in the active toolset.
-
-It should be concise for humans and stable for automation:
-
-```text
-PACKAGE      REQUIRED  STATUS           NEXT STEP
-github       yes       not logged in    toolbox auth oauth2 login github
-openai       yes       configured       -
-slack        yes       missing secret   toolbox auth secret set slack
-weather      no        not required     -
-```
-
-### `toolbox auth accounts TARGET`
-
-Lists accounts/profiles known for a package, grouped by credential.
-
-This should not print secret values.
-
-## OAuth2 Commands
-
-OAuth2 commands apply only to OAuth2 credentials.
-
-### `toolbox auth oauth2 configure TARGET`
-
-Configures OAuth client setup values such as:
-
-- client ID
-- client secret
-- provider-specific static setup values
-
-These values are configuration for the OAuth app/client and should be presented separately from user token login.
-
-### `toolbox auth oauth2 login TARGET`
-
-Starts or completes an OAuth2 authorization flow and stores token material for an account/profile.
-
-If required OAuth client configuration is missing, interactive use may offer to configure it first. Non-interactive use should fail with a deterministic setup-required error.
-
-### `toolbox auth oauth2 logout TARGET`
-
-Removes OAuth token material for the selected credential/account.
-
-It should not remove OAuth client configuration unless explicitly requested.
-
-### `toolbox auth oauth2 refresh TARGET`
-
-Refreshes OAuth token material where supported.
-
-If refresh is unsupported or the token is invalid, the command should explain whether the user needs to log in again.
-
-### `toolbox auth oauth2 status TARGET`
-
-Shows OAuth-specific status:
-
-- client configuration present/missing
-- account logged in/logged out
-- token expired, invalid, or refreshable when detectable
-- active/default account where applicable
-
-## Static Secret Commands
-
-Static secret commands apply to non-OAuth secret material, including:
-
-- API keys
-- bearer tokens
-- basic auth username/password
-- other static secret types declared by packages
-
-### `toolbox auth secret set TARGET`
-
-Prompts for and stores static secret material.
-
-The primary UX should avoid passing secret values in shell arguments. Preferred input modes:
-
-```text
-toolbox auth secret set openai
-printf '%s' "$OPENAI_API_KEY" | toolbox auth secret set openai --stdin
-toolbox auth secret set openai --from-env OPENAI_API_KEY
-```
-
-If an unsafe argument-based value form is supported, it should not be the documented default and should warn where appropriate.
-
-### `toolbox auth secret clear TARGET`
-
-Removes selected static secret material.
-
-Destructive operations should show the affected package, credential, account/profile, and secret labels before proceeding in interactive mode.
-
-### `toolbox auth secret rotate TARGET`
-
-Replaces static secret material.
-
-Rotate should make it clear whether the old value is overwritten immediately and whether validation is available before replacement.
-
-### `toolbox auth secret validate TARGET`
-
-Validates configured static secrets where the credential type or package supports validation.
-
-If validation is unsupported, the command should return a stable unsupported state rather than pretending success.
-
-### `toolbox auth secret status TARGET`
-
-Shows static-secret-specific configuration state without printing values.
-
-## Secret Store Commands
-
-Secret-store lifecycle should be a product-level concept, not an internal failure.
-
-```text
-toolbox auth setup
-toolbox auth unlock
-toolbox auth lock
-toolbox auth recovery codes
-toolbox auth recovery rewrap
-```
-
-Uninitialized, locked, recovery-required, and unavailable states should produce actionable guidance. Non-interactive commands should not prompt unexpectedly.
-
-## Ambiguity and Safety Rules
-
-The CLI must not guess when a guess could affect credential scope or account selection.
-
-Safe to infer:
-
-- showing status for a package with multiple credentials
-- listing all possible choices
-
-Not safe to infer:
-
-- clearing credentials when multiple credentials or accounts exist
-- logging out when multiple OAuth2 accounts exist
-- rotating a static secret when multiple static credentials exist
-- writing credentials to a local package when the user did not explicitly choose local targeting
-
-When ambiguous, commands should:
-
-- explain what was ambiguous
-- show available choices
-- recommend the next command
-- avoid creating, overwriting, or deleting credentials
-
-Example:
-
-```text
-Error: package "example" declares multiple credentials.
-
-Credentials:
-  github-oauth      OAuth2
-  api-key           API key
-
-Choose one:
-  toolbox auth oauth2 login example --credential github-oauth
-  toolbox auth secret set example --credential api-key
-```
-
-## Compatibility and Migration
-
-No compatibility layer is required for the previous auth CLI shape because the auth CLI has not been released.
-
-The implementation should prefer the clean proposed command model over preserving internal prototype commands, flags, or argument forms.
-
----
-
-# Implementation Requirements Checklist
-
-## Command shape
-
-- [x] Add first-class auth subcommands instead of relying only on passthrough auth args.
-- [x] Add `toolbox auth status [TARGET]`.
-- [x] Add `toolbox auth list`.
-- [x] Add `toolbox auth accounts TARGET`.
-- [x] Add `toolbox auth oauth2 status TARGET`.
-- [x] Add `toolbox auth oauth2 configure TARGET`.
-- [x] Add `toolbox auth oauth2 login TARGET`.
-- [x] Add `toolbox auth oauth2 logout TARGET`.
-- [x] Add `toolbox auth oauth2 refresh TARGET`.
-- [x] Add `toolbox auth secret status TARGET`.
-- [x] Add `toolbox auth secret set TARGET`.
-- [x] Add `toolbox auth secret clear TARGET`.
-- [x] Add `toolbox auth secret rotate TARGET`.
-- [x] Add `toolbox auth secret validate TARGET`.
-- [x] Add `toolbox auth setup`.
-- [x] Add `toolbox auth unlock`.
-- [x] Add `toolbox auth lock`.
-- [x] Add `toolbox auth recovery codes`.
-- [x] Add `toolbox auth recovery rewrap`.
-
-## Targeting and scope
-
-- [x] Resolve ordinary auth targets as installed packages in the active toolset.
-- [x] Require explicit `--local` for local development package directories.
-- [x] Show resolved package context before mutating credentials.
-- [x] Distinguish installed packages from overridden/replaced package contexts.
-- [x] Avoid exposing internal secret-store keys as primary user-facing identifiers.
-- [x] Preserve package-level targeting as the default user concept.
-- [x] Support credential-level selection with `--credential`.
-- [x] Support account/profile-level selection with `--account`.
-- [x] Reject ambiguous mutating commands instead of guessing.
-- [x] Provide clear choices and suggested next commands on ambiguity.
-
-## OAuth2 workflow
-
-- [x] Treat `auth oauth2 login` as OAuth2-only.
-- [x] Treat `auth oauth2 logout` as OAuth2 token removal, not static secret clearing.
-- [x] Separate OAuth2 client configuration from OAuth2 login/token state.
-- [x] Prompt for missing OAuth2 client configuration interactively when safe.
-- [x] Fail deterministically for missing OAuth2 client configuration in non-interactive mode.
-- [x] Preserve existing OAuth2 authorization flow behavior.
-- [x] Preserve PKCE public-client behavior.
-- [x] Preserve manual paste/headless OAuth2 flow behavior.
-- [x] Track OAuth2 account/profile scope explicitly.
-- [x] Report OAuth2 logged-in, logged-out, missing, expired, invalid, and unsupported states where detectable.
-
-## Static secret workflow
-
-- [x] Treat `auth secret set` as the primary flow for API keys, bearer tokens, and basic auth secrets.
-- [x] Treat `auth secret clear` as static secret removal.
-- [x] Treat `auth secret rotate` as static secret replacement.
-- [x] Treat `auth secret validate` as validation where supported.
-- [x] Do not print static secret values in normal output.
-- [x] Prefer prompt, stdin, or environment-variable input over argv secret values.
-- [x] Provide deterministic unsupported state when validation is unavailable.
-- [x] Preserve current API key storage behavior.
-- [x] Preserve current bearer token storage behavior.
-- [x] Preserve current basic auth username/password storage behavior.
-
-## Status and output
-
-- [x] Provide concise human-readable status output.
-- [x] Provide machine-readable JSON status output.
-- [x] Provide stable machine-readable state names for automation.
-- [x] Distinguish `not_required`.
-- [x] Distinguish `configured`.
-- [x] Distinguish `authenticated`.
-- [x] Distinguish `missing_credentials`.
-- [x] Distinguish `expired_credentials` where the underlying credential type/storage exposes expiry; current stored OAuth2 refresh-token status has no local expiry signal.
-- [x] Distinguish `invalid_credentials` where the underlying credential type/storage exposes invalidity; current stored OAuth2 refresh-token/static-secret status has no local remote-validity signal.
-- [x] Distinguish `secret_store_locked`.
-- [x] Distinguish `secret_store_uninitialized`.
-- [x] Distinguish `unsupported_auth_type`.
-- [x] Distinguish `ambiguous_target`.
-- [x] Distinguish `ambiguous_credential`.
-- [x] Distinguish `ambiguous_account`.
-- [x] Include recommended next commands in human-readable output.
-- [x] Avoid requiring automation to scrape prose.
-
-## Secret-store lifecycle
-
-- [x] Detect uninitialized secret store before credential operations.
-- [x] Detect locked secret store before credential operations.
-- [x] Make setup-required state actionable.
-- [x] Make unlock-required state actionable.
-- [x] Support intentional first-time setup through `toolbox auth setup`.
-- [x] Ensure backup/recovery codes are shown clearly when generated.
-- [x] Support explicit unlock through `toolbox auth unlock`.
-- [x] Support explicit lock through `toolbox auth lock`.
-- [x] Support recovery-code display or generation through `toolbox auth recovery codes`.
-- [x] Support rewrapping after recovery through `toolbox auth recovery rewrap`.
-- [x] Avoid surprise prompts in non-interactive mode.
-
-## Destructive operation safety
-
-- [x] Show package, credential, account/profile, and affected secret labels before destructive changes.
-- [x] Require confirmation for interactive destructive operations.
-- [x] Provide `--yes` or equivalent for explicit non-interactive destructive operations.
-- [x] Never clear all credentials across ambiguous scope by default.
-- [x] Keep OAuth2 token logout separate from OAuth2 client configuration deletion.
-- [x] Keep account deletion separate from credential deletion.
-
-## Compatibility and migration
-
-- [x] Remove unreleased prototype auth command forms where they conflict with the new model.
-- [x] Remove unreleased prototype auth passthrough parsing where first-class subcommands replace it.
-- [x] Do not add deprecation messages for unreleased prototype auth commands.
-- [x] Do not add old-to-new command mapping behavior for unreleased prototype auth commands.
-- [x] Update existing tests and fixtures to exercise the new command model directly.
-- [x] Avoid introducing credential-scope migration code unless needed by released storage behavior.
-
-## Tests
-
-- [x] Add tests for package target resolution.
-- [x] Add tests for explicit local target resolution.
-- [x] Add tests that local directories are not selected implicitly in the new UX.
-- [x] Add tests for OAuth2 configure/login/logout/status.
-- [x] Add tests for static secret set/clear/rotate/status.
-- [x] Add tests for ambiguous credential handling.
-- [x] Add tests for ambiguous account handling.
-- [x] Add tests for locked secret-store behavior.
-- [x] Add tests for uninitialized secret-store behavior.
-- [x] Add tests for non-interactive deterministic failures.
-- [x] Add tests that secret values are not printed.
-- [x] Add tests for JSON output states.
-- [x] Add tests that unreleased prototype command forms are not required for the new UX.
+- Do not move OAuth token exchange into the daemon.
+- Do not move refresh-token storage into the daemon OAuth flow.
+- Do not add a new dedicated OAuth web page in phase 1.
+- Do not require the daemon to auto-open the provider authorization URL.
+- Do not remove manual paste fallback.
+- Do not remove or regress the existing local callback receiver.
+- Do not build a generic workflow engine, generic pending-task system, or broad UI routing abstraction unless later requirements prove it necessary.

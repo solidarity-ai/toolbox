@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing/fstest"
 
+	"github.com/mackross/repljs/jswire"
 	"github.com/microsoft/typescript-go/toolbox"
 	"github.com/solidarity-ai/toolbox/assembler"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
@@ -239,8 +240,11 @@ func decodeBuiltInArgs(args map[string]any, dst any) error {
 		args = map[string]any{}
 	}
 	if len(args) == 1 {
-		if nested, ok := args["params"].(map[string]any); ok {
+		switch nested := args["params"].(type) {
+		case map[string]any:
 			args = nested
+		case jswire.ObjectType:
+			args = map[string]any(nested)
 		}
 	}
 	raw, err := json.Marshal(args)

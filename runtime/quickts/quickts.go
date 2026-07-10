@@ -285,6 +285,10 @@ func installHost(rt *qjs.Runtime, host Host) error {
 		return err
 	}
 
+	if err := installURL(rt); err != nil {
+		return err
+	}
+
 	if host.ReadFile != nil || host.WriteFile != nil {
 		if err := installFS(rt, host); err != nil {
 			return err

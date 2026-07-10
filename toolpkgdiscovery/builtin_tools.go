@@ -143,6 +143,9 @@ export default async function tool(params: {
 				Source: `
 /**
  * Inspect one package target and return its resolved package metadata.
+ * Target accepts an installed package name or module path, a local package
+ * directory, or module@version. For packages that are not installed, the
+ * "@version" suffix is required (use latestVersion from search results).
  * @effect readOnly
  * @idempotent
  */

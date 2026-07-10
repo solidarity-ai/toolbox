@@ -415,6 +415,22 @@ export default function tool(_args?: any, _ctx?: any) {
   const bytes = new Uint8Array(4);
   return JSON.stringify({
     hasNavigatorUserAgent: typeof (globalThis as any).navigator.userAgent === "string" && (globalThis as any).navigator.userAgent.length > 0,
+    url: {
+      href: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").href,
+      protocol: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").protocol,
+      hostname: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").hostname,
+      pathname: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").pathname,
+      search: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").search,
+      hash: new URL("https://storage.basecamp.com/upload/blob_123?q=1#frag").hash,
+    },
+    params: {
+      first: new URLSearchParams("a=1&a=2&b=space+here").get("a"),
+      all: new URLSearchParams("a=1&a=2&b=space+here").getAll("a"),
+      b: new URLSearchParams("a=1&a=2&b=space+here").get("b"),
+    },
+    // The URL polyfill needs Buffer internally but must not leak it: a global
+    // Buffer makes npm deps sniff a Node environment this runtime is not.
+    bufferGlobal: typeof (globalThis as any).Buffer,
     textRoundTrip: new TextDecoder().decode(new TextEncoder().encode("A€😀")),
     btoa: (globalThis as any).btoa("Man"),
     atob: (globalThis as any).atob("TWE="),
@@ -437,7 +453,7 @@ export default function tool(_args?: any, _ctx?: any) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	got := tooltest.WireString(t, gotWire)
-	if got != `{"hasNavigatorUserAgent":true,"textRoundTrip":"A€😀","btoa":"TWFu","atob":"Ma","bytes":[0,1,2,3],"uuid":"00010203-0405-4607-8809-0a0b0c0d0e0f"}` {
+	if got != `{"hasNavigatorUserAgent":true,"url":{"href":"https://storage.basecamp.com/upload/blob_123?q=1#frag","protocol":"https:","hostname":"storage.basecamp.com","pathname":"/upload/blob_123","search":"?q=1","hash":"#frag"},"params":{"first":"1","all":["1","2"],"b":"space here"},"bufferGlobal":"undefined","textRoundTrip":"A€😀","btoa":"TWFu","atob":"Ma","bytes":[0,1,2,3],"uuid":"00010203-0405-4607-8809-0a0b0c0d0e0f"}` {
 		t.Fatalf("unexpected browser compat result: %q", got)
 	}
 }

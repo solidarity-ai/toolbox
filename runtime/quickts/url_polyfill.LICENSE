@@ -1,0 +1,21 @@
+Vendored URL/URLSearchParams polyfill bundle for QuickJS.
+
+Built from cached npm packages:
+- whatwg-url v7.1.0 (MIT), https://www.npmjs.com/package/whatwg-url
+- buffer v6.0.3 (MIT), https://www.npmjs.com/package/buffer
+- base64-js v1.5.1 (MIT), https://www.npmjs.com/package/base64-js
+- ieee754 v1.2.1 (BSD-3-Clause), https://www.npmjs.com/package/ieee754
+- tr46 v1.0.1 (MIT), https://www.npmjs.com/package/tr46
+- webidl-conversions v4.0.2 (BSD-2-Clause), https://www.npmjs.com/package/webidl-conversions
+- lodash.sortby v4.7.0 (MIT), https://www.npmjs.com/package/lodash.sortby
+- punycode v2.3.1 (MIT), https://www.npmjs.com/package/punycode
+
+The bundle is generated with esbuild from:
+
+  globalThis.Buffer = require("buffer").Buffer;
+  const whatwgURL = require("whatwg-url");
+  globalThis.URL = whatwgURL.URL;
+  globalThis.URLSearchParams = whatwgURL.URLSearchParams;
+
+License texts are in the corresponding npm packages. This file records the
+vendored provenance for redistribution review.

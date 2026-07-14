@@ -173,7 +173,7 @@ class Response {
 // --- fetch() wrapper ---
 
 globalThis.fetch = async function fetch(resource, init) {
-  var url = typeof resource === 'string' ? resource : resource.url;
+  var url = resource && typeof resource.url === 'string' ? resource.url : String(resource);
   var method = (init && init.method) || 'GET';
   var body = (init && init.body != null) ? String(init.body) : '';
 

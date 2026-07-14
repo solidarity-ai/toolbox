@@ -458,6 +458,31 @@ export default function tool(_args?: any, _ctx?: any) {
 	}
 }
 
+func TestFetchAcceptsURLObject(t *testing.T) {
+	var fetchedURL string
+	_, err := quickts.RunWithHost(tooldef.TSToolDef{
+		Entry: "tools/fetch-url.ts",
+		Files: fstest.MapFS{
+			"tools/fetch-url.ts": &fstest.MapFile{Data: []byte(`
+export default async function tool(_args?: any, _ctx?: any) {
+  await fetch(new URL("https://example.com/path?q=1#fragment"));
+}
+`)},
+		},
+	}, tooltest.WireArgs(t, map[string]any{}), quickts.Host{
+		Fetch: func(url, _, _, _ string) (quickts.FetchResult, error) {
+			fetchedURL = url
+			return quickts.FetchResult{Status: 200, Headers: [][2]string{}}, nil
+		},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("fetch URL object: %v", err)
+	}
+	if want := "https://example.com/path?q=1#fragment"; fetchedURL != want {
+		t.Fatalf("fetched URL = %q, want %q", fetchedURL, want)
+	}
+}
+
 func calcTool(t testing.TB, name string) assembler.LoadedTool {
 	t.Helper()
 

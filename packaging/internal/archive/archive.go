@@ -88,6 +88,10 @@ func Pack(loaded source.LoadedPackage, outDir string, packerVersion tooldef.Vers
 	h := sha256.Sum256(archiveData)
 	hashStr := hex.EncodeToString(h[:])
 
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return PackResult{}, fmt.Errorf("create output directory: %w", err)
+	}
+
 	// Write archive file
 	archivePath := filepath.Join(outDir, loaded.Package.Name+ArchiveExtension)
 	if err := os.WriteFile(archivePath, archiveData, 0o644); err != nil {

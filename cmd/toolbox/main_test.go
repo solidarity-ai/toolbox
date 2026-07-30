@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mackross/repljs/jswire"
 	"github.com/mark3labs/mcp-go/client"
 	clienttransport "github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -1325,9 +1326,13 @@ func TestBuildPackageCredentialPolicies_IsolatesLoadedPackages_EndToEnd(t *testi
 
 	blockedURL := strings.Replace(upstream.URL, "127.0.0.1", "localhost", 1) + "/api/blocked"
 
-	_, err = invoke.Run(prepared, "pkgA.get", map[string]any{
+	args, err := jswire.Encode(map[string]any{
 		"url": blockedURL,
 	})
+	if err != nil {
+		t.Fatalf("encode args: %v", err)
+	}
+	_, err = invoke.Run(prepared, "pkgA.get", args)
 	if err == nil {
 		t.Fatal("expected allowlist error, got nil")
 	}

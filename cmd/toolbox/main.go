@@ -18,6 +18,7 @@ type cli struct {
 	Info           infoCmd          `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
 	Outdated       outdatedCmd      `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
 	Search         searchCmd        `cmd:"" help:"Search the tool registry for packages or tools."`
+	Package        packageCmd       `cmd:"" help:"Compile and pack Toolbox packages."`
 	Version        versionCmd       `cmd:"" help:"Print the Toolbox binary version."`
 	MCP            mcpCmd           `cmd:"" help:"Serve the selected toolset over MCP stdio."`
 	Codemode       codemodeCmd      `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
@@ -69,6 +70,15 @@ type infoCmd struct {
 
 type versionCmd struct {
 	JSON bool `help:"Emit structured JSON output."`
+}
+
+type packageCmd struct {
+	Pack packagePackCmd `cmd:"" help:"Compile a development package into distributable artifacts."`
+}
+
+type packagePackCmd struct {
+	Directory string `arg:"" optional:"" default:"." name:"package-dir" type:"path" help:"Development package directory."`
+	Out       string `name:"out" default:"." type:"path" help:"Output directory for the archive and manifest."`
 }
 
 type outdatedCmd struct {
@@ -314,6 +324,8 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runOutdated(parsed.Outdated, stdout)
 	case strings.HasPrefix(command, "search"):
 		return runSearch(parsed.Search, stdout)
+	case strings.HasPrefix(command, "package pack"):
+		return runPackagePack(parsed.Package.Pack, stdout)
 	case strings.HasPrefix(command, "mcp"):
 		return runMCP(parsed.MCP, secretOpts, stdin, stdout, stderr)
 	case strings.HasPrefix(command, "codemode repl"):

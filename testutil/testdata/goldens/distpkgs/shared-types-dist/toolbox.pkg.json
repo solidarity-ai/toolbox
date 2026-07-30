@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/shared-types",
   "name": "shared-types",
   "runtime": "typescript-sandbox",
-  "sha256": "a1dad5313c1670ce4a4726ab84bb36a4dcd0120014a74be9391dcccdc209fa51",
+  "sha256": "1061bd592f9592fab43ab5cd4d6a31cbe9c9a8207fa91c7894be47dd8663ffdc",
   "tools": [
     {
       "entry_ts": "tools/tickets.get.ts",

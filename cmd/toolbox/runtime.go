@@ -14,6 +14,7 @@ import (
 
 	"github.com/solidarity-ai/toolbox/credentialrepo"
 	"github.com/solidarity-ai/toolbox/daemon"
+	"github.com/solidarity-ai/toolbox/internal/buildinfo"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/secrets"
 	"github.com/solidarity-ai/toolbox/toolset"
@@ -97,13 +98,25 @@ func newResolver() (*registry.Resolver, error) {
 		}
 		sources = append(sources, source)
 	}
+	toolboxVersion, released := buildinfo.ReleaseVersion()
 	sources = append(
 		sources,
 		registry.NewGitHubReleaseSource(githubBaseURL, githubClient),
-		&registry.GitSourceFallback{URLPrefix: gitURLPrefix},
+		&registry.GitSourceFallback{URLPrefix: gitURLPrefix, PackerVersion: toolboxVersion},
 	)
 
-	return registry.NewResolver(cache, sources...), nil
+	resolver := registry.NewResolver(cache, sources...)
+	if released {
+		resolver.SetToolboxVersion(toolboxVersion)
+	}
+	policyClient, policyEnabled, err := newSecurityPolicyClient()
+	if err != nil {
+		return nil, err
+	}
+	if policyEnabled {
+		resolver.SetPackageGuard(policyClient)
+	}
+	return resolver, nil
 }
 
 func newGitHubHTTPClient(token string) *http.Client {

@@ -153,5 +153,8 @@ func EnrichToolMetadata(files fs.FS, pkg *tooldef.Package) error {
 			}
 		}
 	}
+	if err := tooldef.ResolvePackageResources(pkg); err != nil {
+		return fmt.Errorf("resolve package resources: %w", err)
+	}
 	return nil
 }

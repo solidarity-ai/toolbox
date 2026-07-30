@@ -1,0 +1,64 @@
+{
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
+  "module": "fixtures.local/resource-collections",
+  "name": "resource_collections",
+  "runtime": "typescript-sandbox",
+  "sha256": "6252ae14c8155b6d2927277f19d2ffe38ab99a443eaa798b48d398fffb8dad8f",
+  "resources": [
+    {
+      "path": "workbook",
+      "params": [
+        {
+          "name": "path",
+          "binding_name": "workbook"
+        }
+      ]
+    },
+    {
+      "path": "workbook.sheet",
+      "params": [
+        {
+          "name": "sheet",
+          "binding_name": "worksheet"
+        }
+      ]
+    },
+    {
+      "path": "workbook.sheet.range",
+      "params": [
+        {
+          "name": "start",
+          "binding_name": "range_start"
+        },
+        {
+          "name": "end",
+          "binding_name": "range_end"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/workbook.officejs.run.ts",
+      "effect": "irreversible",
+      "description": "Run Office.js source against a workbook."
+    },
+    {
+      "entry_ts": "tools/workbook.sheet.list.ts",
+      "effect": "readOnly",
+      "description": "List sheets in a workbook."
+    },
+    {
+      "entry_ts": "tools/workbook.sheet.get.ts",
+      "effect": "readOnly",
+      "description": "Read one sheet in a workbook."
+    },
+    {
+      "entry_ts": "tools/workbook.sheet.range.get.ts",
+      "effect": "readOnly",
+      "description": "Read a range from a sheet in a workbook."
+    }
+  ]
+}

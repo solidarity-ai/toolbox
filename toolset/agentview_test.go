@@ -321,11 +321,11 @@ func TestAgentViewResourceBindingHidesParam(t *testing.T) {
 	t.Parallel()
 
 	// Use the real calc.add fixture (has params a, b with a Sig).
-	// Add a ResourceParam so we can verify that without bindings all params
+	// Add a resolved package resource so we can verify that without bindings all params
 	// remain visible.
 	rt := calcLoadedTool(t, "calc.add")
-	rt.ResourceParams = []tooldef.ResourceParam{
-		{Name: "a", BindingName: "shared_a"},
+	rt.ResourceUses = []tooldef.ResourceUse{
+		{Resource: tooldef.Resource{Path: "calc", Params: []tooldef.ResourceParam{{Name: "a", BindingName: "shared_a"}}}, Selected: true},
 	}
 	prepared := toolset.NewPreparedToolset([]assembler.LoadedTool{rt})
 
@@ -353,14 +353,13 @@ func TestResourceBindingTwoTierFlow(t *testing.T) {
 	// Use real calc fixtures (calc.add and calc.sub both have params a, b).
 	// Treat param "a" as a shared resource param on both tools.
 	addTool := calcLoadedTool(t, "calc.add")
-	addTool.ResourceParams = []tooldef.ResourceParam{
-		{Name: "a", BindingName: "shared_a"},
+	addTool.ResourceUses = []tooldef.ResourceUse{
+		{Resource: tooldef.Resource{Path: "calc", Params: []tooldef.ResourceParam{{Name: "a", BindingName: "shared_a"}}}, Selected: true},
 	}
 
 	subTool := calcLoadedTool(t, "calc.sub")
-	subTool.ResourceParams = []tooldef.ResourceParam{
-		{Name: "a", BindingName: "shared_a"},
-		{Name: "b", BindingName: "shared_b"},
+	subTool.ResourceUses = []tooldef.ResourceUse{
+		{Resource: tooldef.Resource{Path: "calc", Params: []tooldef.ResourceParam{{Name: "a", BindingName: "shared_a"}}}, Selected: true},
 	}
 
 	tools := []assembler.LoadedTool{addTool, subTool}
@@ -393,7 +392,7 @@ func TestResourceBindingTwoTierFlow(t *testing.T) {
 		t.Error("param 'a' should be hidden from calc.sub AgentView")
 	}
 	if _, ok := subProps["b"]; !ok {
-		t.Error("param 'b' should be visible (no resource binding for shared_b)")
+		t.Error("ordinary param 'b' should remain visible")
 	}
 
 	// ValidateCall should inject param "a" from context.

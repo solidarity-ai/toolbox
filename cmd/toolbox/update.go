@@ -126,7 +126,7 @@ func runOutdated(cmd outdatedCmd, stdout io.Writer) error {
 			continue
 		}
 		latest := versions[0]
-		if compareVersions(latest, current) <= 0 {
+		if tooldef.CompareVersions(latest, current) <= 0 {
 			continue
 		}
 		rows = append(rows, row{module: module, current: current, latest: latest})
@@ -146,23 +146,21 @@ func runOutdated(cmd outdatedCmd, stdout io.Writer) error {
 }
 
 func selectUpdateVersion(current tooldef.Version, versions []tooldef.Version, patchOnly, minorOnly bool) (tooldef.Version, bool, error) {
-	currentSemver, currentOK := parseSemver(current)
-	if (patchOnly || minorOnly) && !currentOK {
+	if (patchOnly || minorOnly) && current.MajorMinor() == "" {
 		return "", false, fmt.Errorf("current version %s is not a strict semver, so --patch/--minor cannot be applied", current)
 	}
 	for _, candidate := range versions {
-		if compareVersions(candidate, current) <= 0 {
+		if tooldef.CompareVersions(candidate, current) <= 0 {
 			continue
 		}
 		if patchOnly || minorOnly {
-			candidateSemver, ok := parseSemver(candidate)
-			if !ok {
+			if candidate.MajorMinor() == "" {
 				continue
 			}
-			if candidateSemver.major != currentSemver.major {
+			if candidate.Major() != current.Major() {
 				continue
 			}
-			if patchOnly && candidateSemver.minor != currentSemver.minor {
+			if patchOnly && candidate.MajorMinor() != current.MajorMinor() {
 				continue
 			}
 		}

@@ -25,13 +25,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
+          ldflags="-X github.com/solidarity-ai/toolbox/internal/buildinfo.releaseVersion=${GITHUB_REF_NAME}"
           # Toolbox is pure Go today, so cross-compiling from one Linux runner is faster.
           # Expand this back to per-platform runners if the release binary starts requiring native builds.
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/toolbox-linux-x64 ./cmd/toolbox
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/toolbox-linux-arm64 ./cmd/toolbox
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o dist/toolbox-darwin-x64 ./cmd/toolbox
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/toolbox-darwin-arm64 ./cmd/toolbox
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/toolbox-win32-x64.exe ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$ldflags" -o dist/toolbox-linux-x64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$ldflags" -o dist/toolbox-linux-arm64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$ldflags" -o dist/toolbox-darwin-x64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$ldflags" -o dist/toolbox-darwin-arm64 ./cmd/toolbox
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "$ldflags" -o dist/toolbox-win32-x64.exe ./cmd/toolbox
+          test "$(dist/toolbox-linux-x64 version)" = "${GITHUB_REF_NAME}"
 
       - name: Upload release binaries
         uses: actions/upload-artifact@v4

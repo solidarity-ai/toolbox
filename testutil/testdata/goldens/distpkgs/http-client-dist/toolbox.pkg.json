@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/http-client",
   "name": "http-client",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "35475e8d669e6c079277c98df668135fa44983a12841f30b523326dc846c6d0c",
+  "sha256": "73d9e17a6bb6a3dab358cfc341732a20162f14a6fe7162d448437a454973f0f0",
   "executables": {
     "http-client": "dist/http-client.wasm"
   },

@@ -1,0 +1,18 @@
+{
+  "module": "fixtures.local/resource-intrinsic-collisions",
+  "name": "resource_intrinsic_collisions",
+  "runtime": "typescript-sandbox",
+  "resources": [
+    {
+      "path": "workbook",
+      "params": [{ "name": "path", "binding_name": "workbook" }]
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/workbook.get.ts" },
+    { "entry_ts": "tools/workbook.name.ts" },
+    { "entry_ts": "tools/workbook.length.ts" },
+    { "entry_ts": "tools/workbook.prototype.ts" },
+    { "entry_ts": "tools/workbook.call.ts" }
+  ]
+}

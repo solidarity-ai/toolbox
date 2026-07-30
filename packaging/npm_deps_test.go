@@ -55,12 +55,12 @@ func TestNpmDepsDistMode(t *testing.T) {
 	npmInstall(t, workDir)
 
 	outDir := t.TempDir()
-	result, err := packaging.Pack(workDir, outDir)
+	result, err := packaging.Pack(workDir, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
 
-	loaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath)
+	loaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("LoadArchive: %v", err)
 	}

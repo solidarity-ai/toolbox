@@ -121,7 +121,7 @@ func (s *ToolRegistrySource) ListVersions(ctx context.Context, module ModulePath
 		seen[version] = struct{}{}
 		versions = append(versions, version)
 	}
-	sortVersionsDesc(versions)
+	tooldef.SortVersionsDesc(versions)
 	return versions, nil
 }
 

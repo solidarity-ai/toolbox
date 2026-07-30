@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/auth-test",
   "name": "auth-test",
   "runtime": "typescript-sandbox",
-  "sha256": "d38d751abab56a280c7bb562e721006ae9bd6a720174097e24f2309d03fce68b",
+  "sha256": "ab2fc6829f58ab0f798941de675262777a92fa32cfcc3bd2ecbd94e68f10dc9c",
   "tools": [
     {
       "entry_ts": "tools/auth-test.get.ts",

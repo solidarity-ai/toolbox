@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/solidarity-ai/toolbox/packaging"
+	"github.com/solidarity-ai/toolbox/safeguard"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // ResolveResult carries the loaded package plus provenance metadata that can be
@@ -21,14 +23,43 @@ type ResolveResult struct {
 // ErrReleaseNotFound or ErrSourceUnavailable causes the next source to be
 // tried, while any other error short-circuits the chain immediately.
 type Resolver struct {
-	cache   *Cache
-	sources []PackageSource
+	cache          *Cache
+	sources        []PackageSource
+	guard          safeguard.PackageGuard
+	toolboxVersion Version
 }
 
 // NewResolver returns a Resolver that checks the given cache first, then
 // tries the provided sources in order.
 func NewResolver(cache *Cache, sources ...PackageSource) *Resolver {
 	return &Resolver{cache: cache, sources: sources}
+}
+
+// SetPackageGuard installs a revocation check that runs before package use,
+// again before a cached or fetched package is trusted, and while filtering
+// version listings.
+func (r *Resolver) SetPackageGuard(guard safeguard.PackageGuard) {
+	r.guard = guard
+}
+
+func (r *Resolver) PackageGuard() safeguard.PackageGuard {
+	return r.guard
+}
+
+// SetToolboxVersion enables package compatibility checks while loading archives.
+func (r *Resolver) SetToolboxVersion(version Version) {
+	r.toolboxVersion = version
+}
+
+// CheckPackageCompatibility rejects packages that require a newer Toolbox.
+func (r *Resolver) CheckPackageCompatibility(pkg tooldef.Package) error {
+	if r.toolboxVersion == "" || pkg.MinimumToolboxVersion == "" {
+		return nil
+	}
+	if tooldef.CompareVersions(r.toolboxVersion, pkg.MinimumToolboxVersion) < 0 {
+		return fmt.Errorf("package %s requires Toolbox %s or newer (running %s)", pkg.Module, pkg.MinimumToolboxVersion, r.toolboxVersion)
+	}
+	return nil
 }
 
 // Resolve returns a loaded package plus any provenance metadata available from
@@ -46,6 +77,9 @@ func (r *Resolver) ResolveWithExpected(ctx context.Context, module ModulePath, v
 			return ResolveResult{}, fmt.Errorf("resolve %s@%s: invalid expected metadata: %w", module, version, err)
 		}
 	}
+	if err := r.checkPackage(ctx, module, version); err != nil {
+		return ResolveResult{}, fmt.Errorf("resolve %s@%s: %w", module, version, err)
+	}
 
 	if r.cache.Has(module, version) {
 		archiveSHA, err := r.cache.ArchiveSHA256(module, version)
@@ -53,7 +87,10 @@ func (r *Resolver) ResolveWithExpected(ctx context.Context, module ModulePath, v
 			return ResolveResult{}, fmt.Errorf("resolve %s@%s: cache hit but archive hash failed: %w", module, version, err)
 		}
 		if expected == nil || strings.EqualFold(archiveSHA, expected.ArchiveSHA256) {
-			pkg, err := r.cache.LoadArchive(module, version)
+			if err := r.checkPackage(ctx, module, version); err != nil {
+				return ResolveResult{}, fmt.Errorf("resolve %s@%s: %w", module, version, err)
+			}
+			pkg, err := r.cache.LoadArchive(module, version, r.CheckPackageCompatibility)
 			if err != nil {
 				return ResolveResult{}, fmt.Errorf("resolve %s@%s: cache hit but load failed: %w", module, version, err)
 			}
@@ -76,12 +113,15 @@ func (r *Resolver) ResolveWithExpected(ctx context.Context, module ModulePath, v
 	if expected != nil && !strings.EqualFold(fetch.Metadata.ArchiveSHA256, expected.ArchiveSHA256) {
 		return ResolveResult{}, fmt.Errorf("resolve %s@%s: cache mismatch refetch failed integrity check for provenance %s: expected archive_sha256 %s, got %s", module, version, fetch.Metadata.ResolvedFrom, expected.ArchiveSHA256, fetch.Metadata.ArchiveSHA256)
 	}
+	if err := r.checkPackage(ctx, module, version); err != nil {
+		return ResolveResult{}, fmt.Errorf("resolve %s@%s: %w", module, version, err)
+	}
 
 	if err := r.cache.Put(module, version, fetch.Archive, fetch.Manifest); err != nil {
 		return ResolveResult{}, fmt.Errorf("resolve %s@%s: cache write failed: %w", module, version, err)
 	}
 
-	pkg, err := r.cache.LoadArchive(module, version)
+	pkg, err := r.cache.LoadArchive(module, version, r.CheckPackageCompatibility)
 	if err != nil {
 		return ResolveResult{}, fmt.Errorf("resolve %s@%s: cache load after write failed: %w", module, version, err)
 	}
@@ -144,6 +184,33 @@ func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Versi
 	if len(versions) == 0 {
 		return nil, fmt.Errorf("list versions for %s: %w", module, ErrReleaseNotFound)
 	}
-	sortVersionsDesc(versions)
-	return versions, nil
+	tooldef.SortVersionsDesc(versions)
+	allowed := versions[:0]
+	var firstBlocked error
+	for _, version := range versions {
+		err := r.checkPackage(ctx, module, version)
+		if err == nil {
+			allowed = append(allowed, version)
+			continue
+		}
+		var blocked *safeguard.BlockedError
+		if errors.As(err, &blocked) {
+			if firstBlocked == nil {
+				firstBlocked = err
+			}
+			continue
+		}
+		return nil, fmt.Errorf("list versions for %s: security policy: %w", module, err)
+	}
+	if len(allowed) == 0 && firstBlocked != nil {
+		return nil, fmt.Errorf("list versions for %s: %w", module, firstBlocked)
+	}
+	return allowed, nil
+}
+
+func (r *Resolver) checkPackage(ctx context.Context, module ModulePath, version Version) error {
+	if r.guard == nil {
+		return nil
+	}
+	return r.guard.CheckPackage(ctx, module, version)
 }

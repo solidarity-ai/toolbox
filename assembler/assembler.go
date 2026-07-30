@@ -103,7 +103,11 @@ func Load(ctx context.Context, resolver *registry.Resolver, decl Declaration) (L
 			continue
 		}
 		if pkgDecl.ArchivePath != "" {
-			pkg, err := packaging.LoadArchive(pkgDecl.ArchivePath, pkgDecl.ManifestPath)
+			var check func(tooldef.Package) error
+			if resolver != nil {
+				check = resolver.CheckPackageCompatibility
+			}
+			pkg, err := packaging.LoadArchive(pkgDecl.ArchivePath, pkgDecl.ManifestPath, check)
 			if err != nil {
 				return LoadedPackages{}, fmt.Errorf("resolve %s from archive %q: %w", packageKey, pkgDecl.ArchivePath, err)
 			}

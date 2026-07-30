@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/fetch-test",
   "name": "fetch-test",
   "runtime": "typescript-sandbox",
-  "sha256": "ecaa4c72fb89f2b7d02ab5373dccd8e72efe4a9896576e5962e5866394ba9794",
+  "sha256": "72face88d23cfefc7fc04d7c17addf0ac476dc0a984a38a95f98096007da616c",
   "tools": [
     {
       "entry_ts": "tools/fetch-test.get.ts",

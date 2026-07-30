@@ -31,7 +31,19 @@ type PackResult struct {
 // Pack creates a .toolbox.pkg archive from a loaded source package.
 // The archive is written to outDir as <name>.toolbox.pkg alongside
 // an external toolbox.pkg.json with the sha256 of the archive.
-func Pack(loaded source.LoadedPackage, outDir string) (PackResult, error) {
+func Pack(loaded source.LoadedPackage, outDir string, packerVersion tooldef.Version) (PackResult, error) {
+	if !packerVersion.IsRelease() {
+		return PackResult{}, fmt.Errorf("pack: Toolbox version %q is not a released semantic version", packerVersion)
+	}
+	loaded.Package.ManifestSchemaVersion = tooldef.PackageManifestSchemaVersion
+	loaded.Package.PackedByToolboxVersion = packerVersion
+	if loaded.Package.MinimumToolboxVersion == "" {
+		loaded.Package.MinimumToolboxVersion = packerVersion
+	}
+	if _, err := manifest.ValidateCompiled(loaded.Package, manifest.ValidationModeDist); err != nil {
+		return PackResult{}, err
+	}
+
 	// Compile the internal manifest (no sha256 — that goes in the external one)
 	internalPkg := loaded.Package
 	internalPkg.SHA256 = ""
@@ -106,7 +118,7 @@ func Pack(loaded source.LoadedPackage, outDir string) (PackResult, error) {
 // It verifies the sha256 from the external manifest, checks that
 // the internal manifest matches the external one (ignoring sha256),
 // and validates the loaded package against the dist schema.
-func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error) {
+func LoadArchive(archivePath, manifestPath string, check func(tooldef.Package) error) (source.LoadedPackage, error) {
 	// Read external manifest
 	externalRaw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -152,6 +164,11 @@ func LoadArchive(archivePath, manifestPath string) (source.LoadedPackage, error)
 	}
 	if _, err := manifest.ValidateCompiled(externalPkg, manifest.ValidationModeDist); err != nil {
 		return source.LoadedPackage{}, fmt.Errorf("validate archive manifest for distribution: %w", err)
+	}
+	if check != nil {
+		if err := check(externalPkg); err != nil {
+			return source.LoadedPackage{}, err
+		}
 	}
 
 	if err := source.EnrichToolMetadata(archiveFS, &externalPkg); err != nil {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // mockSource is a test PackageSource that returns preconfigured results.
@@ -18,6 +19,28 @@ type mockSource struct {
 	versions   []Version
 	versionErr error
 	listCalled int
+}
+
+func TestResolverPackageCompatibility(t *testing.T) {
+	pkg := tooldef.Package{Module: "example.com/acme/calc", MinimumToolboxVersion: "v1.2.0"}
+	for _, tt := range []struct {
+		name    string
+		current Version
+		wantErr bool
+	}{
+		{name: "older", current: "v1.1.9", wantErr: true},
+		{name: "equal", current: "v1.2.0"},
+		{name: "newer", current: "v2.0.0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := NewResolver(newTempCache(t))
+			resolver.SetToolboxVersion(tt.current)
+			err := resolver.CheckPackageCompatibility(pkg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CheckPackageCompatibility() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func (m *mockSource) Fetch(_ context.Context, _ ModulePath, _ Version) (FetchResult, error) {
@@ -115,7 +138,7 @@ func TestResolver(t *testing.T) {
 	t.Run("PseudoVersionFetchPopulatesCacheAndSecondResolveHitsCache", func(t *testing.T) {
 		meta := gitfixture.CreatePseudoVersionRepoFromDir(t, fixtureSourceDir(t, "calc"))
 		cache := newTempCache(t)
-		src := &countingSource{inner: &GitSourceFallback{URLPrefix: "file://"}}
+		src := &countingSource{inner: &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}}
 		resolver := NewResolver(cache, src)
 		module := ModulePath(meta.RepoDir)
 		version := mustVersion(t, meta.PseudoVersion)

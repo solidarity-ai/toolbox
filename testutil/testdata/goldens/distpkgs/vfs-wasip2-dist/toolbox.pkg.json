@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/vfs-wasip2",
   "name": "vfs-wasip2",
   "runtime": "typescript+wasip2-sandbox",
-  "sha256": "bda406fcda3c6b0cdf488adb5ddf4992e25aaf93fe6a414889dbf3f359d3762f",
+  "sha256": "072d8f1248d70fe8c3b7f6092d1323fc973a3220fbdccc251962e4e575109c36",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

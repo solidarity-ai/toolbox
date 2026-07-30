@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/github-issues",
   "name": "github-issues",
   "runtime": "typescript-sandbox",
-  "sha256": "9051ae038519b1097d6e18ebcbcab469f496328a230b063ccdda784461b9dc87",
+  "sha256": "42253fcd030aaa395aeaa48b944b7694cb772275e9ffda4dbdfb1a626bdfbc95",
   "additionalTypeScriptGlobs": [
     "tools/shims.ts"
   ],

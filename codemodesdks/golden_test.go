@@ -89,6 +89,19 @@ func TestGithubIssuesGoldens(t *testing.T) {
 	checkGolden(t, goldenPath("github-issues-passthrough.schema.json"), schemaGoldenSource(t, prepared))
 }
 
+func TestResourceCollectionGoldens(t *testing.T) {
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-collections"), toolset.Config{})
+
+	checkGolden(t, goldenPath("resource-collections.d.ts"), codemodesdks.DeclarationSource(prepared))
+	checkGolden(t, goldenPath("resource-collections.schema.json"), schemaGoldenSource(t, prepared))
+}
+
+func TestResourceIntrinsicCollisionGolden(t *testing.T) {
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-intrinsic-collisions"), toolset.Config{})
+
+	checkGolden(t, goldenPath("resource-intrinsic-collisions.d.ts"), codemodesdks.DeclarationSource(prepared))
+}
+
 func goldenPath(name string) string {
 	return filepath.Join(testfileDir(), "..", "testutil", "testdata", "goldens", "codemode", name)
 }

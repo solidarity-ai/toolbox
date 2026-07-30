@@ -1,0 +1,3 @@
+cell 1
+--
+=> {officejs: {code: "return 1", workbook: "/tmp/book.xlsx"}, range: {end: "B2", sheet: "Forecast", start: "A1", workbook: "/tmp/book.xlsx"}, sheet: {sheet: "Forecast", workbook: "/tmp/book.xlsx"}, sheets: {sheets: Array(2)[…], workbook: "/tmp/book.xlsx"}}

@@ -14,6 +14,9 @@ func JoinPreparedToolsets(sets ...PreparedToolset) (PreparedToolset, error) {
 		if out.fetchTransport == nil && set.fetchTransport != nil {
 			out.fetchTransport = set.fetchTransport
 		}
+		if out.packageGuard == nil && set.packageGuard != nil {
+			out.packageGuard = set.packageGuard
+		}
 		out.omitted = append(out.omitted, set.omitted...)
 		for _, tool := range set.tools {
 			if _, exists := out.byName[tool.Name]; exists {

@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/calc",
   "name": "calc",
   "runtime": "typescript-sandbox",
-  "sha256": "9fd3521611ebc61941fc7b1cb4542ee8d15307eb42d03e148c5c5339aa180df3",
+  "sha256": "948d32e9a80558c4c069dd46786f8364b2d3e2725b37550649f2ab07dacc08c8",
   "tools": [
     {
       "entry_ts": "tools/calc.add.ts",

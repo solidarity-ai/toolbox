@@ -18,6 +18,7 @@ type cli struct {
 	Info           infoCmd          `cmd:"" help:"Show package manifest information for an installed target, local dir, or explicit package version."`
 	Outdated       outdatedCmd      `cmd:"" help:"Show installed packages in the selected toolset with newer published versions."`
 	Search         searchCmd        `cmd:"" help:"Search the tool registry for packages or tools."`
+	Version        versionCmd       `cmd:"" help:"Print the Toolbox binary version."`
 	MCP            mcpCmd           `cmd:"" help:"Serve the selected toolset over MCP stdio."`
 	Codemode       codemodeCmd      `cmd:"" help:"Codemode REPL and codemode MCP surfaces."`
 	Auth           authCmd          `cmd:"" help:"Inspect and manage package authentication."`
@@ -64,6 +65,10 @@ type infoCmd struct {
 	Toolset string `name:"toolset" short:"t" default:"toolbox.toolset.json" type:"path" help:"Toolset file used to resolve non-version targets."`
 	JSON    bool   `help:"Emit structured JSON output."`
 	Target  string `arg:"" name:"target" help:"Installed target, local package dir, or package@version."`
+}
+
+type versionCmd struct {
+	JSON bool `help:"Emit structured JSON output."`
 }
 
 type outdatedCmd struct {
@@ -289,7 +294,14 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	command := ctx.Command()
 	secretOpts := parsed.secretStoreOptions()
 	secretOpts.BackupCodeWriter = stderr
+	if !securityCheckExempt(command) {
+		if err := checkCurrentToolboxPolicy(stderr); err != nil {
+			return err
+		}
+	}
 	switch {
+	case strings.HasPrefix(command, "version"):
+		return runVersion(parsed.Version, stdout)
 	case strings.HasPrefix(command, "install"):
 		return runInstall(parsed.Install, stdout)
 	case strings.HasPrefix(command, "update"):

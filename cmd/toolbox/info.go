@@ -86,26 +86,19 @@ func loadInfoView(ctx context.Context, cache *registry.Cache, resolver *registry
 	}
 
 	if pkgVer, err := tooldef.ParsePackageVer(target); err == nil {
-		if cache.Has(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version)) {
-			pkg, err := cache.LoadArchive(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
-			if err != nil {
-				return packageInfoView{}, err
-			}
-			return packageInfoView{
-				Target:  target,
-				Version: pkgVer.Version.String(),
-				Source:  "cache",
-				Package: pkg.Package,
-			}, nil
-		}
+		cached := cache.Has(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
 		result, err := resolver.Resolve(ctx, registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
 		if err != nil {
 			return packageInfoView{}, err
 		}
+		source := string(result.Metadata.ResolvedFrom)
+		if cached {
+			source = "cache"
+		}
 		return packageInfoView{
 			Target:  target,
 			Version: pkgVer.Version.String(),
-			Source:  string(result.Metadata.ResolvedFrom),
+			Source:  source,
 			Package: result.Package.Package,
 		}, nil
 	}

@@ -55,9 +55,15 @@ type returnCandidate struct {
 	hasMultiLineDesc bool
 }
 
-type declNamespaceNode struct {
-	funcs    []toolset.AgentTool
-	children map[string]*declNamespaceNode
+type declTool struct {
+	tool           toolset.AgentTool
+	selectorParams map[string]bool
+}
+
+type declResourceParam struct {
+	name        string
+	typeName    string
+	description string
 }
 
 func groupedPackageNames(prepared toolset.PreparedToolset) []string {
@@ -299,10 +305,13 @@ func packageDeclarationSource(prepared toolset.PreparedToolset, packageName stri
 		interfaceBlocks = append(interfaceBlocks, ib.String())
 	}
 
-	tree := buildNamespaceTree(tools)
+	tree, err := buildResourceAPIPlan(tools)
+	if err != nil {
+		panic(fmt.Errorf("compile resource API for package %q: %w", packageName, err))
+	}
 
 	var body strings.Builder
-	renderNamespaceNode(&body, "", tree, prepared, returnTypes, paramTypeOverrides)
+	renderNamespaceNode(&body, "", tree.Root, tools, prepared, returnTypes, paramTypeOverrides)
 	hasTypes := len(inputDeclLines) > 0 || len(refLines) > 0 || len(interfaceBlocks) > 0
 	if hasTypes {
 		if body.Len() > 0 {
@@ -325,57 +334,82 @@ func packageDeclarationSource(prepared toolset.PreparedToolset, packageName stri
 	return wrapNamespacePath(namespaceSegments(packageName), strings.TrimRight(body.String(), "\n"))
 }
 
-func buildNamespaceTree(tools []toolset.AgentTool) *declNamespaceNode {
-	root := &declNamespaceNode{}
-	for _, tool := range tools {
-		segments := toolSegments(tool.Name)
-		if len(segments) == 0 {
-			continue
-		}
-		node := root
-		for _, segment := range segments[:len(segments)-1] {
-			if node.children == nil {
-				node.children = map[string]*declNamespaceNode{}
+func buildResourceAPIPlan(tools []toolset.AgentTool) (*tooldef.ResourceAPIPlan, error) {
+	inputs := make([]tooldef.ResourceAPITool, 0, len(tools))
+	for _, agentTool := range tools {
+		input := tooldef.ResourceAPITool{Name: agentTool.Name}
+		hidden := agentTool.HiddenParams()
+		for _, use := range agentTool.ResourceUses {
+			apiUse := tooldef.ResourceAPIUse{Path: use.Resource.Path, Selected: use.Selected}
+			for _, param := range use.Resource.Params {
+				if !hidden[param.Name] {
+					apiUse.Params = append(apiUse.Params, param.Name)
+				}
 			}
-			child := node.children[segment]
-			if child == nil {
-				child = &declNamespaceNode{}
-				node.children[segment] = child
-			}
-			node = child
+			input.Uses = append(input.Uses, apiUse)
 		}
-		node.funcs = append(node.funcs, tool)
+		inputs = append(inputs, input)
 	}
-	return root
+	return tooldef.CompileResourceAPI(inputs)
 }
 
-func renderNamespaceNode(b *strings.Builder, indent string, node *declNamespaceNode, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+func declarationResourceParams(agentTool toolset.AgentTool, names []string) []declResourceParam {
+	hidden := agentTool.HiddenParams()
+	byName := map[string]*toolbox.FuncParam{}
+	if agentTool.Sig != nil {
+		for _, param := range agentTool.Sig.Params() {
+			param := param
+			byName[param.Name()] = &param
+		}
+	}
+	out := make([]declResourceParam, 0, len(names))
+	for _, name := range names {
+		if hidden[name] {
+			continue
+		}
+		param, ok := byName[name]
+		if !ok {
+			continue
+		}
+		out = append(out, declResourceParam{name: name, typeName: param.Type().ToTS(), description: param.Description()})
+	}
+	return out
+}
+
+func renderNamespaceNode(b *strings.Builder, indent string, node *tooldef.ResourceAPINode, tools []toolset.AgentTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
 	if node == nil {
 		return
 	}
-	for _, tool := range node.funcs {
-		method := sanitizeIdentifierSegment(lastSegment(tool.Name))
-		writeToolDeclaration(b, indent, method, tool, prepared, returnTypes, paramTypeOverrides)
+	for _, method := range node.Methods {
+		selectorParams := make(map[string]bool, len(method.SelectorParams))
+		for _, name := range method.SelectorParams {
+			selectorParams[name] = true
+		}
+		writeToolDeclaration(b, indent, sanitizeIdentifierSegment(method.Name), declTool{tool: tools[method.Tool], selectorParams: selectorParams}, prepared, returnTypes, paramTypeOverrides)
 	}
-	if len(node.funcs) > 0 && len(node.children) > 0 {
+	if len(node.Methods) > 0 && len(node.Children) > 0 {
 		b.WriteString("\n")
 	}
-	childNames := make([]string, 0, len(node.children))
-	for name := range node.children {
-		childNames = append(childNames, name)
-	}
-	sort.Strings(childNames)
-	for i, name := range childNames {
+	for i, child := range node.Children {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(b, "%snamespace %s {\n", indent, sanitizeIdentifierSegment(name))
-		renderNamespaceNode(b, indent+"  ", node.children[name], prepared, returnTypes, paramTypeOverrides)
+		if child.Resource != nil {
+			writeResourceDeclaration(b, indent, sanitizeIdentifierSegment(child.Name), "const ", child.Resource, tools, prepared, returnTypes, paramTypeOverrides)
+			continue
+		}
+		fmt.Fprintf(b, "%snamespace %s {\n", indent, sanitizeIdentifierSegment(child.Name))
+		renderNamespaceNode(b, indent+"  ", child.Plain, tools, prepared, returnTypes, paramTypeOverrides)
 		fmt.Fprintf(b, "%s}\n", indent)
 	}
 }
 
-func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolset.AgentTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+func writeToolDeclaration(b *strings.Builder, indent, method string, tool declTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+	writeToolDeclarationKind(b, indent, method, "function ", tool, prepared, returnTypes, paramTypeOverrides)
+}
+
+func writeToolDeclarationKind(b *strings.Builder, indent, method, prefix string, item declTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+	tool := item.tool
 	hidden := tool.HiddenParams()
 	literals := tool.BoundLiterals()
 	modeLabel := effectLabel(tool.Effect, tool.Idempotent)
@@ -383,7 +417,7 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 	visibleParams := make([]toolbox.FuncParam, 0)
 	if tool.Sig != nil {
 		for _, p := range tool.Sig.Params() {
-			if !hidden[p.Name()] {
+			if !hidden[p.Name()] && !item.selectorParams[p.Name()] {
 				visibleParams = append(visibleParams, p)
 			}
 		}
@@ -469,7 +503,7 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 	}
 
 	if useMultiLine && len(paramParts) > 0 {
-		fmt.Fprintf(b, "%sfunction %s(\n", indent, method)
+		fmt.Fprintf(b, "%s%s%s(\n", indent, prefix, method)
 		for i, part := range paramParts {
 			if i < len(visibleParams) {
 				if desc := visibleParams[i].Description(); desc != "" {
@@ -488,7 +522,84 @@ func writeToolDeclaration(b *strings.Builder, indent, method string, tool toolse
 		return
 	}
 
-	fmt.Fprintf(b, "%sfunction %s(%s): %s;%s\n", indent, method, strings.Join(paramParts, ", "), returnType, modeTrail)
+	fmt.Fprintf(b, "%s%s%s(%s): %s;%s\n", indent, prefix, method, strings.Join(paramParts, ", "), returnType, modeTrail)
+}
+
+func writeResourceDeclaration(b *strings.Builder, indent, name, prefix string, resource *tooldef.ResourceAPIResource, tools []toolset.AgentTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string) {
+	fmt.Fprintf(b, "%s%s%s: {\n", indent, prefix, name)
+	if resource.Callable {
+		params := declarationResourceParams(tools[resource.ParamTool], resource.Params)
+		parts := make([]string, 0, len(params))
+		for _, param := range params {
+			part := param.name + ": " + param.typeName
+			if param.description != "" {
+				part = "/** " + strings.ReplaceAll(param.description, "*/", "* /") + " */ " + part
+			}
+			parts = append(parts, part)
+		}
+		fmt.Fprintf(b, "%s  (%s): {\n", indent, strings.Join(parts, ", "))
+		renderResourceObjectNode(b, indent+"    ", resource.Member, tools, prepared, returnTypes, paramTypeOverrides, false)
+		fmt.Fprintf(b, "%s  };\n", indent)
+	}
+	renderResourceObjectNode(b, indent+"  ", resource.Collection, tools, prepared, returnTypes, paramTypeOverrides, resource.Callable)
+	fmt.Fprintf(b, "%s};\n", indent)
+}
+
+func writeCallableIntrinsicAlias(b *strings.Builder, indent, name string) {
+	alias, ok := tooldef.CallableResourceIntrinsicAlias(name)
+	if !ok {
+		return
+	}
+	fmt.Fprintf(b, "%s/** Original function property displaced by %s. */\n", indent, name)
+	fmt.Fprintf(b, "%s%s%s;\n", indent, alias, callableIntrinsicAliasSignature(name))
+}
+
+func callableIntrinsicAliasSignature(name string) string {
+	switch name {
+	case "name":
+		return "(): string"
+	case "length":
+		return "(): number"
+	case "call":
+		return "(thisArg: unknown, ...args: unknown[]): unknown"
+	case "apply":
+		return "(thisArg: unknown, args?: unknown[]): unknown"
+	case "bind":
+		return "(thisArg: unknown, ...args: unknown[]): (...args: unknown[]) => unknown"
+	default:
+		return "(...args: unknown[]): unknown"
+	}
+}
+
+func renderResourceObjectNode(b *strings.Builder, indent string, node *tooldef.ResourceAPINode, tools []toolset.AgentTool, prepared toolset.PreparedToolset, returnTypes map[string]returnTypeInfo, paramTypeOverrides map[string]string, callableCollection bool) {
+	if node == nil {
+		return
+	}
+	for _, method := range node.Methods {
+		selectorParams := make(map[string]bool, len(method.SelectorParams))
+		for _, name := range method.SelectorParams {
+			selectorParams[name] = true
+		}
+		item := declTool{tool: tools[method.Tool], selectorParams: selectorParams}
+		name := sanitizeIdentifierSegment(method.Name)
+		writeToolDeclarationKind(b, indent, name, "", item, prepared, returnTypes, paramTypeOverrides)
+		if callableCollection {
+			writeCallableIntrinsicAlias(b, indent, name)
+		}
+	}
+	for _, child := range node.Children {
+		name := sanitizeIdentifierSegment(child.Name)
+		if child.Resource != nil {
+			writeResourceDeclaration(b, indent, name, "", child.Resource, tools, prepared, returnTypes, paramTypeOverrides)
+		} else {
+			fmt.Fprintf(b, "%s%s: {\n", indent, name)
+			renderResourceObjectNode(b, indent+"  ", child.Plain, tools, prepared, returnTypes, paramTypeOverrides, false)
+			fmt.Fprintf(b, "%s};\n", indent)
+		}
+		if callableCollection {
+			writeCallableIntrinsicAlias(b, indent, name)
+		}
+	}
 }
 
 func renderFunctionParam(p toolbox.FuncParam, tsType string, later []toolbox.FuncParam) (name string, renderedType string) {
@@ -572,10 +683,6 @@ func namespaceSegments(packageName string) []string {
 	return out
 }
 
-func toolSegments(toolName string) []string {
-	return splitDotted(toolName)
-}
-
 func splitDotted(value string) []string {
 	raw := strings.Split(strings.TrimSpace(value), ".")
 	out := make([]string, 0, len(raw))
@@ -636,14 +743,6 @@ func sanitizeIdentifierSegment(segment string) string {
 		return "pkg"
 	}
 	return string(out)
-}
-
-func lastSegment(name string) string {
-	parts := splitDotted(name)
-	if len(parts) == 0 {
-		return name
-	}
-	return parts[len(parts)-1]
 }
 
 // hasDescriptions reports whether any property has a description.

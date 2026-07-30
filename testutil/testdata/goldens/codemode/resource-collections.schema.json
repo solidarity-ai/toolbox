@@ -1,0 +1,79 @@
+{
+  "workbook.officejs.run": {
+    "description": "Run Office.js source against a workbook.",
+    "properties": {
+      "code": {
+        "description": "Office.js source to execute.",
+        "type": "string"
+      },
+      "path": {
+        "description": "Local workbook path.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "code"
+    ],
+    "type": "object"
+  },
+  "workbook.sheet.get": {
+    "description": "Read one sheet in a workbook.",
+    "properties": {
+      "path": {
+        "description": "Local workbook path.",
+        "type": "string"
+      },
+      "sheet": {
+        "description": "Worksheet name.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "sheet"
+    ],
+    "type": "object"
+  },
+  "workbook.sheet.list": {
+    "description": "List sheets in a workbook.",
+    "properties": {
+      "path": {
+        "description": "Local workbook path.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "workbook.sheet.range.get": {
+    "description": "Read a range from a sheet in a workbook.",
+    "properties": {
+      "end": {
+        "description": "Last cell in the selected range.",
+        "type": "string"
+      },
+      "path": {
+        "description": "Local workbook path.",
+        "type": "string"
+      },
+      "sheet": {
+        "description": "Worksheet name.",
+        "type": "string"
+      },
+      "start": {
+        "description": "First cell in the selected range.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "sheet",
+      "start",
+      "end"
+    ],
+    "type": "object"
+  }
+}

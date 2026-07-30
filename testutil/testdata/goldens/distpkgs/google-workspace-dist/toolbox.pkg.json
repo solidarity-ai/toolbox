@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/google-workspace",
   "name": "google-workspace",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "a401b153c843252c8e9ba70cf90991ad0719a3ab1eb6ba3a16b7074d4dbdfb4b",
+  "sha256": "c2f02fb3bc972caefa3b42886c861f9384aad3085be9c6cf290fcf7d1bbacf9b",
   "executables": {
     "gwc": "dist/gwc.wasm"
   },

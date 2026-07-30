@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/solidarity-ai/toolbox/internal/buildinfo"
 	"github.com/solidarity-ai/toolbox/packaging"
 )
 
@@ -18,7 +19,12 @@ func main() {
 	}
 	srcDir := flag.Arg(0)
 
-	result, err := packaging.Pack(srcDir, *outDir)
+	packerVersion, ok := buildinfo.ReleaseVersion()
+	if !ok {
+		fmt.Fprintln(os.Stderr, "error: toolbox-pack must be installed from a released Toolbox version")
+		os.Exit(1)
+	}
+	result, err := packaging.Pack(srcDir, *outDir, packerVersion)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -1,0 +1,28 @@
+{
+  "module": "fixtures.local/resource-collections",
+  "name": "resource_collections",
+  "runtime": "typescript-sandbox",
+  "resources": [
+    {
+      "path": "workbook",
+      "params": [{ "name": "path", "binding_name": "workbook" }]
+    },
+    {
+      "path": "workbook.sheet",
+      "params": [{ "name": "sheet", "binding_name": "worksheet" }]
+    },
+    {
+      "path": "workbook.sheet.range",
+      "params": [
+        { "name": "start", "binding_name": "range_start" },
+        { "name": "end", "binding_name": "range_end" }
+      ]
+    }
+  ],
+  "tools": [
+    { "entry_ts": "tools/workbook.officejs.run.ts" },
+    { "entry_ts": "tools/workbook.sheet.list.ts" },
+    { "entry_ts": "tools/workbook.sheet.get.ts" },
+    { "entry_ts": "tools/workbook.sheet.range.get.ts" }
+  ]
+}

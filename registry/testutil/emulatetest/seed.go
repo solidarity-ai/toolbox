@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/solidarity-ai/toolbox/packaging"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 const defaultRepoOwner = "admin"
@@ -241,7 +242,7 @@ func packReleaseAssets(pkgDir string) (*packedReleaseAssets, error) {
 	}
 	defer os.RemoveAll(outDir)
 
-	packResult, err := packaging.Pack(pkgDir, outDir)
+	packResult, err := packaging.Pack(pkgDir, outDir, tooldef.Version("v1.0.0"))
 	if err != nil {
 		return nil, fmt.Errorf("pack source package %q: %w", pkgDir, err)
 	}

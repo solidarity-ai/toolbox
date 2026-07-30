@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/solidarity-ai/toolbox/assembler"
+	"github.com/solidarity-ai/toolbox/safeguard"
 	"github.com/solidarity-ai/toolbox/secrets"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
@@ -26,6 +27,7 @@ type PreparedToolset struct {
 	tools          []PreparedTool
 	byName         map[string]int
 	fetchTransport http.RoundTripper
+	packageGuard   safeguard.PackageGuard
 	omitted        []OmittedPackage
 	agentView      AgentView
 }
@@ -44,6 +46,16 @@ type OmittedPackage struct {
 // Config.FetchTransport. Used to intercept fetch calls in tests.
 func (r PreparedToolset) FetchTransport() http.RoundTripper {
 	return r.fetchTransport
+}
+
+// CheckToolExecution applies the current package revocation policy immediately
+// before a tool call. Local development packages have no immutable version and
+// are intentionally outside the central registry policy.
+func (r PreparedToolset) CheckToolExecution(ctx context.Context, tool PreparedTool) error {
+	if r.packageGuard == nil || tool.PackageMeta == nil || tool.PackageVersion == "" {
+		return nil
+	}
+	return r.packageGuard.CheckPackage(ctx, tool.PackageMeta.Module, tool.PackageVersion)
 }
 
 // PrepareTools prepares a pre-built list of loaded tools with the given config.
@@ -74,16 +86,19 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 			}
 		}
 
-		// Merge resource-level bindings from the two-tier model:
-		// assembler.LoadedTool.ResourceParams maps param name -> canonical binding name
-		// Config.ResourceBindings maps canonical name -> Binding
-		for _, rp := range tool.ResourceParams {
-			// Skip if explicit per-tool binding already set
-			if _, exists := bindings[rp.Name]; exists {
+		// Merge package-resource bindings for selector parameters consumed by
+		// this tool. Collection-surface tools do not consume that selector.
+		for _, use := range tool.ResourceUses {
+			if !use.Selected {
 				continue
 			}
-			if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
-				bindings[rp.Name] = rb
+			for _, rp := range use.Resource.Params {
+				if _, exists := bindings[rp.Name]; exists {
+					continue
+				}
+				if rb, ok := cfg.ResourceBindings[rp.BindingName]; ok {
+					bindings[rp.Name] = rb
+				}
 			}
 		}
 
@@ -147,6 +162,10 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		out = append(out, prepared)
 	}
 
+	if err := validatePreparedResourceSurfaces(out); err != nil {
+		return PreparedToolset{}, err
+	}
+
 	if err := validateToolApprovals(cfg.ToolApprovals, out); err != nil {
 		return PreparedToolset{}, err
 	}
@@ -162,6 +181,7 @@ func PrepareTools(ctx context.Context, tools []assembler.LoadedTool, cfg Config)
 		tools:          out,
 		byName:         byName,
 		fetchTransport: cfg.FetchTransport,
+		packageGuard:   cfg.PackageGuard,
 		omitted:        omitted,
 	}
 	ts.agentView = ts.buildAgentView()
@@ -239,6 +259,7 @@ func (r PreparedToolset) FilterTools(keep func(PreparedTool) bool) PreparedTools
 		tools:          out,
 		byName:         byName,
 		fetchTransport: r.fetchTransport,
+		packageGuard:   r.packageGuard,
 		omitted:        r.OmittedPackages(),
 		agentView:      AgentView{Tools: filteredTools},
 	}

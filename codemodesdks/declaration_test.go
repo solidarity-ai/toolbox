@@ -105,6 +105,64 @@ export default function tool(args: { body: string }): { ok: boolean } {
 	}
 }
 
+func TestDeclarationSource_ResourceFactoryCapturesParentID(t *testing.T) {
+	dir := writePackage(t, t.TempDir(), "example.com/excel", "excel", map[string]string{
+		"tools/workbook.officejs.run.ts": `export default async function tool(path: string, code: string): Promise<{ value: string }> {
+  return { value: path + code };
+}
+`,
+	})
+	manifest := `{
+  "module": "example.com/excel",
+  "name": "excel",
+  "runtime": "typescript-sandbox",
+  "resources": [
+    { "path": "workbook", "params": [{ "name": "path" }] }
+  ],
+  "tools": [
+    { "entry_ts": "tools/workbook.officejs.run.ts" }
+  ]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, packaging.DevManifestFilename), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write resource manifest: %v", err)
+	}
+
+	prepared := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{})
+	got := codemodesdks.DeclarationSource(prepared)
+	if !strings.Contains(got, `const workbook: {`) || !strings.Contains(got, `(path: string): {`) {
+		t.Fatalf("missing workbook resource factory:\n%s", got)
+	}
+	if !strings.Contains(got, `officejs: {`) || !strings.Contains(got, `run(code: string): ToolCallPromise<{ value: string }>;`) {
+		t.Fatalf("missing resource child method:\n%s", got)
+	}
+	if strings.Contains(got, `run(path:`) {
+		t.Fatalf("workbook id leaked onto resource method:\n%s", got)
+	}
+	typecheckDeclarations(t, got, `const result = await excel.workbook("/tmp/book.xlsx").officejs.run("return 1");
+void result.value;
+export {};
+`)
+
+	bound := tooltest.PrepareToolset(t, tooltest.LocalPackageDecl(dir), toolset.Config{
+		EnvContext: map[string]any{"workbook_path": "/tmp/bound.xlsx"},
+		ResourceBindings: map[string]toolset.Binding{
+			"path": {Value: "context.workbook_path", Hidden: true},
+		},
+	})
+	boundGot := codemodesdks.DeclarationSource(bound)
+	if strings.Contains(boundGot, `(path: string):`) || strings.Contains(boundGot, `(): {`) {
+		t.Fatalf("bound hidden workbook remained callable:\n%s", boundGot)
+	}
+	if !strings.Contains(boundGot, `const workbook: {`) || !strings.Contains(boundGot, `officejs: {`) {
+		t.Fatalf("bound hidden workbook did not collapse to an object:\n%s", boundGot)
+	}
+	typecheckDeclarations(t, boundGot, `const result = await excel.workbook.officejs.run("return 1");
+void result.value;
+export {};
+`)
+}
+
 func TestDeclarationSource_DoesNotDeduplicatePackagePrefixFromToolName(t *testing.T) {
 	dir := writePackage(t, t.TempDir(), "example.com/gmail", "gmail", map[string]string{
 		"tools/gmail.reply.ts": `/**

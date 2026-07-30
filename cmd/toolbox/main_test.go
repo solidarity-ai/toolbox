@@ -31,6 +31,7 @@ import (
 	"github.com/solidarity-ai/toolbox/sdkbridge"
 	"github.com/solidarity-ai/toolbox/testutil"
 	"github.com/solidarity-ai/toolbox/testutil/fixtures"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/toolset"
 	"github.com/solidarity-ai/toolbox/toolsetfile"
 )
@@ -1149,7 +1150,7 @@ func TestRunCodemodeMCPServesSuperTool(t *testing.T) {
 	if !ok {
 		t.Fatalf("new_super_tool_session first content item = %#v, want text content", newSessionResult.Content[0])
 	}
-	tbSession := strings.TrimSpace(newSessionText.Text)
+	tbSession := strings.TrimSpace(strings.SplitN(newSessionText.Text, "\n", 2)[0])
 
 	callReq := mcp.CallToolRequest{}
 	callReq.Params.Name = "super_tool"
@@ -1541,7 +1542,7 @@ func packSourceFixtureBytesWithModule(t *testing.T, fixtureName, module string) 
 	rewriteSourceFixtureModule(t, workDir, module)
 
 	outDir := t.TempDir()
-	result, err := packaging.Pack(workDir, outDir)
+	result, err := packaging.Pack(workDir, outDir, tooldef.Version("v1.0.0"))
 	if err != nil {
 		t.Fatalf("Pack(%q): %v", workDir, err)
 	}

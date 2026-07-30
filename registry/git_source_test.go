@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
+
+const testPackerVersion = tooldef.Version("v1.0.0")
 
 func TestGitSource(t *testing.T) {
 	t.Run("list_versions", func(t *testing.T) {
@@ -18,7 +21,7 @@ func TestGitSource(t *testing.T) {
 		gitfixture.AddCommitAndTag(t, repoDir, "v1.1.0", map[string][]byte{"README.md": []byte("v1.1.0\n")}, "v1.1.0")
 		gitfixture.AddCommitAndTag(t, repoDir, "not-a-version", map[string][]byte{"README.md": []byte("invalid tag\n")}, "invalid tag")
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		versions, err := src.ListVersions(context.Background(), ModulePath(repoDir))
 		if err != nil {
 			t.Fatalf("ListVersions(): %v", err)
@@ -33,7 +36,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("happy_path", func(t *testing.T) {
 		repoDir := gitfixture.CreateTaggedRepoFromDir(t, "v1.0.0", fixtureSourceDir(t, "calc"))
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		module := ModulePath(repoDir)
 		version := mustVersion(t, "v1.0.0")
 
@@ -64,7 +67,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("pseudo_version_happy_path", func(t *testing.T) {
 		meta := gitfixture.CreatePseudoVersionRepoFromDir(t, fixtureSourceDir(t, "calc"))
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		module := ModulePath(meta.RepoDir)
 		version := mustVersion(t, meta.PseudoVersion)
 
@@ -89,7 +92,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("missing_tag", func(t *testing.T) {
 		repoDir := gitfixture.CreateRepoMissingTag(t, "v1.0.0", "v9.9.9")
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		_, err := src.Fetch(context.Background(), ModulePath(repoDir), mustVersion(t, "v9.9.9"))
 		if err == nil {
 			t.Fatal("Fetch(): expected error for missing tag")
@@ -102,7 +105,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("pseudo_version_missing_commit_prefix", func(t *testing.T) {
 		meta := gitfixture.CreatePseudoVersionRepoFromDir(t, fixtureSourceDir(t, "calc"))
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		missingVersion := mustVersion(t, "v0.0.0-"+meta.PseudoTimestamp+"-deadbeefcafe")
 
 		_, err := src.Fetch(context.Background(), ModulePath(meta.RepoDir), missingVersion)
@@ -117,7 +120,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("pseudo_version_timestamp_mismatch", func(t *testing.T) {
 		meta := gitfixture.CreatePseudoVersionRepoFromDir(t, fixtureSourceDir(t, "calc"))
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		mismatchVersion := mustVersion(t, "v0.0.0-19700101000000-"+meta.ShortCommit)
 
 		_, err := src.Fetch(context.Background(), ModulePath(meta.RepoDir), mismatchVersion)
@@ -135,7 +138,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("broken_repo", func(t *testing.T) {
 		repoDir := gitfixture.CreateBrokenRepo(t, "v1.0.0")
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		_, err := src.Fetch(context.Background(), ModulePath(repoDir), mustVersion(t, "v1.0.0"))
 		if err == nil {
 			t.Fatal("Fetch(): expected error for repo missing toolbox.devpkg.json")
@@ -148,7 +151,7 @@ func TestGitSource(t *testing.T) {
 	t.Run("corrupt_package", func(t *testing.T) {
 		repoDir := gitfixture.CreateCorruptPackageRepo(t, "v1.0.0")
 
-		src := &GitSourceFallback{URLPrefix: "file://"}
+		src := &GitSourceFallback{URLPrefix: "file://", PackerVersion: testPackerVersion}
 		_, err := src.Fetch(context.Background(), ModulePath(repoDir), mustVersion(t, "v1.0.0"))
 		if err == nil {
 			t.Fatal("Fetch(): expected error for corrupt toolbox.devpkg.json")

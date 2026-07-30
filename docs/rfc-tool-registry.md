@@ -421,7 +421,7 @@ Key design choices:
 - **`agent.unsafe.allow_toolset_management`** controls whether the agent may install, uninstall, authenticate, or otherwise change the active toolset at runtime. This defaults to disabled because it mutates the tool surface seen by the agent and any attached sessions.
 - **`replace`** (in `toolbox.toolset.local.json`, gitignored) redirects a module path to a local directory for development.
 - **`tools`** lists the specific tools included in the toolset with their bindings. Tool references use the FQN (or short name resolvable from the `packages` map).
-- **`resource_bindings`** are scoped per package (module path). This resolves the open question in the toolset design doc — "resource-level bindings may still need package scoping." They do. Different packages may infer `account_id` with different semantics.
+- **`resource_bindings`** are scoped per package (module path). Different packages may explicitly reuse a selector or canonical binding name such as `account_id` with different semantics.
 - **`context`** declares the expected context inputs. These are documentation and validation — the harness provides actual values at runtime.
 - **`credentials`** binds package-declared credential requirements to sources. Packages declare what credentials they need (e.g., `slack_token`, `zendesk_key`) in their manifest. The toolset binds those to concrete sources — environment variables (`env:SLACK_BOT_TOKEN`), secret vaults (`vault:zendesk/api-key`), or other providers. The package declares *what* it needs; the toolset decides *where* the value comes from.
 
@@ -760,9 +760,13 @@ As proposed in the toolset file format, resource bindings are scoped to a module
 }
 ```
 
-This binding applies to all tools from `github.com/acme-corp/zendesk-tools` whose resource path starts with `account`. It does NOT apply to a hypothetical `account_id` in a different package.
+This binding applies to tools from `github.com/acme-corp/zendesk-tools` that
+consume a package resource selector whose declared `binding_name` is
+`account_id`. It does NOT apply merely because a filename starts with `account`.
 
-This resolves the open question from the toolset design doc. Different packages may infer the same resource param name (e.g., `account_id`) with completely different semantics. Package-scoping prevents cross-contamination.
+Different packages may declare the same selector parameter name with different
+semantics. Package scoping and explicit canonical binding names prevent
+cross-contamination; no resource parameter names are inferred.
 
 #### Version changes and binding stability
 

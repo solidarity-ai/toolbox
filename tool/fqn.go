@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 var (
-	semverPattern        = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
+	versionPattern       = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 	pseudoVersionPattern = regexp.MustCompile(`^v0\.0\.0-([0-9]{14})-([0-9a-f]{12})$`)
 	toolPathPattern      = regexp.MustCompile(`^[^.]+(?:\.[^.]+)*$`)
 )
@@ -63,10 +66,30 @@ func ParseVersion(s string) (Version, error) {
 			return "", fmt.Errorf("invalid pseudo-version %q", s)
 		}
 	}
-	if semverPattern.MatchString(s) {
+	if versionPattern.MatchString(s) && semver.IsValid(s) {
 		return Version(s), nil
 	}
 	return "", fmt.Errorf("invalid version %q", s)
+}
+
+// CompareVersions returns -1, 0, or 1 when a is older than, equal to, or newer
+// than b according to semantic-version precedence.
+func CompareVersions(a, b Version) int {
+	return semver.Compare(a.String(), b.String())
+}
+
+func SortVersionsDesc(versions []Version) {
+	sort.Slice(versions, func(i, j int) bool {
+		return CompareVersions(versions[i], versions[j]) > 0
+	})
+}
+
+func (v Version) Major() string {
+	return semver.Major(v.String())
+}
+
+func (v Version) MajorMinor() string {
+	return semver.MajorMinor(v.String())
 }
 
 func ParseToolPath(s string) (ToolPath, error) {
@@ -147,6 +170,11 @@ func (p PackageVer) String() string {
 
 func (v Version) IsPseudo() bool {
 	return pseudoVersionPattern.MatchString(v.String())
+}
+
+func (v Version) IsRelease() bool {
+	_, err := ParseVersion(v.String())
+	return err == nil && !v.IsPseudo()
 }
 
 func (v Version) PseudoTimestamp() string {

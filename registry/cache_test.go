@@ -48,7 +48,7 @@ func TestCache(t *testing.T) {
 					t.Fatalf("Put() error: %v", err)
 				}
 
-				loaded, err := cache.LoadArchive(module, version)
+				loaded, err := cache.LoadArchive(module, version, nil)
 				if err != nil {
 					t.Fatalf("LoadArchive() error: %v", err)
 				}
@@ -114,7 +114,7 @@ func TestCache(t *testing.T) {
 			name: "LoadArchiveMissingEntryReturnsError",
 			run: func(t *testing.T) {
 				cache := newTempCache(t)
-				if _, err := cache.LoadArchive(module, version); err == nil {
+				if _, err := cache.LoadArchive(module, version, nil); err == nil {
 					t.Fatalf("LoadArchive() error = nil, want non-nil")
 				}
 			},

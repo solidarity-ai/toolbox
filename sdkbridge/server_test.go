@@ -558,6 +558,9 @@ func TestBridgeComposeUnlockedCodemodeRequiresTBSessionAndSupportsFreshSessions(
 	if !schemaRequiresParam(composed.Tools[1].ParamsSchema, codemodesession.TBSessionParam) {
 		t.Fatalf("unlocked codemode params schema = %#v, want required %q", composed.Tools[1].ParamsSchema, codemodesession.TBSessionParam)
 	}
+	if !strings.Contains(composed.Tools[1].Description, "Call new_super_tool_session first") || !strings.Contains(composed.Tools[1].Description, "- calc") {
+		t.Fatalf("unlocked codemode description = %q, want session bootstrap and package index", composed.Tools[1].Description)
+	}
 
 	_, err = bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
 		ToolsetID: composed.ToolsetID,
@@ -583,9 +586,13 @@ func TestBridgeComposeUnlockedCodemodeRequiresTBSessionAndSupportsFreshSessions(
 	if err != nil {
 		t.Fatalf("tool.invoke new_super_tool_session: %v", err)
 	}
-	tbSession := strings.TrimSpace(freshAny.(ToolInvokeResult).Content)
+	newSessionContent := freshAny.(ToolInvokeResult).Content
+	tbSession := strings.TrimSpace(strings.SplitN(newSessionContent, "\n", 2)[0])
 	if err := codemodesession.ValidateTBSession(tbSession); err != nil {
 		t.Fatalf("new tb_session = %q, want valid session id: %v", tbSession, err)
+	}
+	if !strings.Contains(newSessionContent, "Important Notebook Usage Information:") || !strings.Contains(newSessionContent, "$pkgMetadata") {
+		t.Fatalf("new session content = %q, want full notebook instructions", newSessionContent)
 	}
 
 	invoked, err := bridge.handleMethod(context.Background(), "tool.invoke", mustJSON(t, ToolInvokeParams{
@@ -930,7 +937,7 @@ func packSourceFixtureBytesWithModule(t *testing.T, fixtureName, module string) 
 	rewriteSourceFixtureModule(t, workDir, module)
 
 	outDir := t.TempDir()
-	result, err := packaging.Pack(workDir, outDir)
+	result, err := packaging.Pack(workDir, outDir, tooldef.Version("v1.0.0"))
 	if err != nil {
 		t.Fatalf("Pack(%q): %v", workDir, err)
 	}

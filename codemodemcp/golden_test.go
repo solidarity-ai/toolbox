@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -79,10 +80,11 @@ func TestNewSuperToolSessionOutputGolden(t *testing.T) {
 }
 
 func normalizeTBSessionOutput(out string) string {
-	if tbSessionOutputPattern.MatchString(out) {
-		return "<tb-session>"
+	parts := strings.SplitN(out, "\n", 2)
+	if tbSessionOutputPattern.MatchString(parts[0]) {
+		parts[0] = "<tb-session>"
 	}
-	return out
+	return strings.Join(parts, "\n")
 }
 
 func toolDescription(t testing.TB, tools []mcp.Tool, name string) string {

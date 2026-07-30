@@ -7,9 +7,14 @@ import (
 )
 
 // Package is the smallest useful static package shape for the first package-loading seam.
+const PackageManifestSchemaVersion = 1
+
 type Package struct {
-	Module ModulePath `json:"module"`
-	Name   string     `json:"name"`
+	ManifestSchemaVersion  int        `json:"manifestSchemaVersion,omitempty"`
+	MinimumToolboxVersion  Version    `json:"minimumToolboxVersion,omitempty"`
+	PackedByToolboxVersion Version    `json:"packedByToolboxVersion,omitempty"`
+	Module                 ModulePath `json:"module"`
+	Name                   string     `json:"name"`
 	// UseWhenHint is optional short guidance for packages that are not obvious
 	// from general model knowledge. Leave it empty for well-known services.
 	UseWhenHint               string              `json:"useWhenHint,omitempty"`
@@ -17,6 +22,7 @@ type Package struct {
 	SHA256                    string              `json:"sha256,omitempty"`
 	AdditionalTypeScriptGlobs []string            `json:"additionalTypeScriptGlobs,omitempty"`
 	Executables               map[string]string   `json:"executables,omitempty"`
+	Resources                 []Resource          `json:"resources,omitempty"`
 	Tools                     []PackageTool       `json:"tools"`
 	Credentials               []PackageCredential `json:"credentials,omitempty"`
 	AllowedHosts              []string            `json:"allowed_hosts,omitempty"`
@@ -75,10 +81,24 @@ const (
 	EffectIrreversible Effect = "irreversible"
 )
 
-// ResourceParam describes one inferred resource parameter and its canonical binding name.
+// ResourceParam describes one parameter used to select a package resource.
 type ResourceParam struct {
-	Name        string `json:"name"`         // e.g. "account_id"
-	BindingName string `json:"binding_name"` // e.g. "zendesk_account" (defaults to Name)
+	Name        string `json:"name"`
+	BindingName string `json:"binding_name"`
+}
+
+// Resource declares one callable node in a package's generated code-mode API.
+// Path is the dotted tool-name prefix at which Params are captured.
+type Resource struct {
+	Path   string          `json:"path"`
+	Params []ResourceParam `json:"params"`
+}
+
+// ResourceUse is the resolved relationship between one tool and one package
+// resource. It is derived from the tool signature and is never serialized.
+type ResourceUse struct {
+	Resource Resource
+	Selected bool
 }
 
 type PackageTool struct {
@@ -89,7 +109,7 @@ type PackageTool struct {
 	MaxFetchResponseBytes *int64                 `json:"max_fetch_response_bytes,omitempty"`
 	ParamsSchema          map[string]any         `json:"paramsSchema,omitempty"`
 	Sig                   *toolbox.FuncSignature `json:"-"`
-	ResourceParams        []ResourceParam        `json:"resourceParams,omitempty"`
+	ResourceUses          []ResourceUse          `json:"-"`
 }
 
 // TSToolDef is the smallest useful TS tool definition for the current invoke

@@ -149,7 +149,7 @@ func TestSeedCorruptArchiveRelease(t *testing.T) {
 	}
 
 	archivePath, manifestPath := writeSeedAssets(t, result)
-	_, err = packaging.LoadArchive(archivePath, manifestPath)
+	_, err = packaging.LoadArchive(archivePath, manifestPath, nil)
 	if err == nil {
 		t.Fatal("LoadArchive() succeeded for corrupt archive bytes")
 	}

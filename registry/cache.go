@@ -78,9 +78,9 @@ func (c *Cache) Put(module ModulePath, version Version, archiveBytes, manifestBy
 	return nil
 }
 
-func (c *Cache) LoadArchive(module ModulePath, version Version) (packaging.LoadedPackage, error) {
+func (c *Cache) LoadArchive(module ModulePath, version Version, check func(tooldef.Package) error) (packaging.LoadedPackage, error) {
 	paths := c.paths(module, version)
-	return packaging.LoadArchive(paths.archive, paths.manifest)
+	return packaging.LoadArchive(paths.archive, paths.manifest, check)
 }
 
 func (c *Cache) ArchiveSHA256(module ModulePath, version Version) (string, error) {
@@ -121,7 +121,7 @@ func (c *Cache) ListVersions(module ModulePath) ([]Version, error) {
 		versions = append(versions, version)
 	}
 
-	sortVersionsDesc(versions)
+	tooldef.SortVersionsDesc(versions)
 	return versions, nil
 }
 

@@ -1,15 +1,16 @@
 package manifest
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/jinzhu/inflection"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
@@ -38,19 +39,16 @@ type Warning struct {
 	Message string
 }
 
-type LoadResult struct {
-	Package  tooldef.Package
-	Warnings []Warning
-}
-
 // DevManifest is the source authoring format read from toolbox.devpkg.json.
 type DevManifest struct {
+	MinimumToolboxVersion     tooldef.Version         `json:"minimumToolboxVersion,omitempty"`
 	Module                    tooldef.ModulePath      `json:"module"`
 	Name                      string                  `json:"name"`
 	UseWhenHint               string                  `json:"useWhenHint,omitempty"`
 	Runtime                   tooldef.ToolRuntime     `json:"runtime"`
 	AdditionalTypeScriptGlobs []string                `json:"additionalTypeScriptGlobs"`
 	Executables               map[string]string       `json:"executables"`
+	Resources                 []DevManifestResource   `json:"resources,omitempty"`
 	Tools                     []DevManifestTool       `json:"tools"`
 	Credentials               []DevManifestCredential `json:"credentials,omitempty"`
 	AllowedHosts              []string                `json:"allowed_hosts,omitempty"`
@@ -75,17 +73,21 @@ type DevManifestInject struct {
 	AllowUnsafeHTTPInjection bool     `json:"allow_unsafe_http_injection,omitempty"`
 }
 
-// DevManifestToolResource groups resource-related overrides for a tool.
-type DevManifestToolResource struct {
-	Bindings map[string]string `json:"bindings,omitempty"`
-	Mode     string            `json:"mode,omitempty"` // "collection" or "member", empty means infer
+// DevManifestResource declares one package-level resource selector.
+type DevManifestResource struct {
+	Path   string                     `json:"path"`
+	Params []DevManifestResourceParam `json:"params"`
+}
+
+type DevManifestResourceParam struct {
+	Name        string `json:"name"`
+	BindingName string `json:"binding_name,omitempty"`
 }
 
 type DevManifestTool struct {
-	EntryTS    string                   `json:"entry_ts"`
-	Idempotent *bool                    `json:"idempotent"`
-	Effect     *tooldef.Effect          `json:"effect"`
-	Resource   *DevManifestToolResource `json:"resource,omitempty"`
+	EntryTS    string          `json:"entry_ts"`
+	Idempotent *bool           `json:"idempotent"`
+	Effect     *tooldef.Effect `json:"effect"`
 }
 
 func mustResolveSchema(raw []byte) *jsonschema.Resolved {
@@ -125,19 +127,30 @@ func ParseDev(data []byte) (DevManifest, error) {
 			return DevManifest{}, fmt.Errorf("invalid tool entry %q: %w", tool.EntryTS, err)
 		}
 	}
+	if err := validateDevResources(manifest.Resources); err != nil {
+		return DevManifest{}, fmt.Errorf("parse dev manifest: %w", err)
+	}
 	return manifest, nil
 }
 
 // ParsePkg parses a compiled package manifest (toolbox.pkg.json).
 func ParsePkg(data []byte) (tooldef.Package, error) {
 	var pkg tooldef.Package
-	if err := json.Unmarshal(data, &pkg); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&pkg); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: trailing JSON")
 	}
 	if err := validateModulePath(pkg.Module); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
 	if err := validateUseWhenHint(pkg.UseWhenHint); err != nil {
+		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
+	}
+	if err := validateCompiledResources(pkg.Resources); err != nil {
 		return tooldef.Package{}, fmt.Errorf("parse pkg manifest: %w", err)
 	}
 	return pkg, nil
@@ -147,12 +160,14 @@ func ParsePkg(data []byte) (tooldef.Package, error) {
 // applying inference rules for missing fields.
 func Compile(dev DevManifest) tooldef.Package {
 	pkg := tooldef.Package{
+		MinimumToolboxVersion:     dev.MinimumToolboxVersion,
 		Module:                    dev.Module,
 		Name:                      dev.Name,
 		UseWhenHint:               strings.TrimSpace(dev.UseWhenHint),
 		Runtime:                   dev.Runtime,
 		AdditionalTypeScriptGlobs: append([]string(nil), dev.AdditionalTypeScriptGlobs...),
 		Executables:               dev.Executables,
+		Resources:                 compileResources(dev.Resources),
 		Tools:                     make([]tooldef.PackageTool, len(dev.Tools)),
 		AllowedHosts:              append([]string(nil), dev.AllowedHosts...),
 	}
@@ -165,25 +180,10 @@ func Compile(dev DevManifest) tooldef.Package {
 			effect = *tool.Effect
 		}
 
-		var resourceMode string
-		var resourceBindings map[string]string
-		if tool.Resource != nil {
-			resourceMode = tool.Resource.Mode
-			resourceBindings = tool.Resource.Bindings
-		}
-		resourceParams := InferResourceParamsWithMode(tool.EntryTS, resourceMode)
-		// Apply manifest overrides for binding names
-		for j := range resourceParams {
-			if override, ok := resourceBindings[resourceParams[j].Name]; ok {
-				resourceParams[j].BindingName = override
-			}
-		}
-
 		pkg.Tools[i] = tooldef.PackageTool{
-			EntryTS:        tool.EntryTS,
-			Idempotent:     tool.Idempotent,
-			Effect:         effect,
-			ResourceParams: resourceParams,
+			EntryTS:    tool.EntryTS,
+			Idempotent: tool.Idempotent,
+			Effect:     effect,
 		}
 	}
 	for _, cred := range dev.Credentials {
@@ -252,24 +252,41 @@ func compileProvider(raw json.RawMessage) *tooldef.OAuth2ProviderConfig {
 // and dist (strict) schemas. In dev mode, dist violations are returned as
 // warnings. In dist mode, they are errors.
 func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, error) {
+	if err := validateCompiledVersions(pkg); err != nil {
+		return nil, fmt.Errorf("validate compiled package: %w", err)
+	}
 	if err := validateModulePath(pkg.Module); err != nil {
 		return nil, fmt.Errorf("validate compiled package: %w", err)
 	}
 	if err := validateUseWhenHint(pkg.UseWhenHint); err != nil {
 		return nil, fmt.Errorf("validate compiled package: %w", err)
 	}
-
-	raw, err := json.Marshal(pkg)
-	if err != nil {
-		return nil, fmt.Errorf("marshal compiled package: %w", err)
+	if err := validateCompiledResources(pkg.Resources); err != nil {
+		return nil, fmt.Errorf("validate compiled package: %w", err)
 	}
 
-	var instance map[string]any
-	if err := json.Unmarshal(raw, &instance); err != nil {
-		return nil, fmt.Errorf("unmarshal compiled package: %w", err)
+	devPkg := pkg
+	devPkg.ManifestSchemaVersion = 0
+	devPkg.PackedByToolboxVersion = ""
+	instance, err := compiledInstance(devPkg)
+	if err != nil {
+		return nil, err
 	}
 	if err := resolvedToolboxPkgDevSchema.Validate(instance); err != nil {
 		return nil, fmt.Errorf("validate compiled package: %w", err)
+	}
+
+	distPkg := pkg
+	if mode == ValidationModeDev {
+		distPkg.ManifestSchemaVersion = tooldef.PackageManifestSchemaVersion
+		if distPkg.MinimumToolboxVersion == "" {
+			distPkg.MinimumToolboxVersion = "v0.0.0"
+		}
+		distPkg.PackedByToolboxVersion = "v0.0.0"
+	}
+	instance, err = compiledInstance(distPkg)
+	if err != nil {
+		return nil, err
 	}
 
 	var warnings []Warning
@@ -280,6 +297,37 @@ func ValidateCompiled(pkg tooldef.Package, mode ValidationMode) ([]Warning, erro
 		warnings = append(warnings, Warning{Message: fmt.Sprintf("distribution validation: %v", err)})
 	}
 	return warnings, nil
+}
+
+func compiledInstance(pkg tooldef.Package) (map[string]any, error) {
+	raw, err := json.Marshal(pkg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal compiled package: %w", err)
+	}
+	var instance map[string]any
+	if err := json.Unmarshal(raw, &instance); err != nil {
+		return nil, fmt.Errorf("unmarshal compiled package: %w", err)
+	}
+	return instance, nil
+}
+
+func validateCompiledVersions(pkg tooldef.Package) error {
+	if pkg.ManifestSchemaVersion != 0 && pkg.ManifestSchemaVersion != tooldef.PackageManifestSchemaVersion {
+		return fmt.Errorf("unsupported manifestSchemaVersion %d", pkg.ManifestSchemaVersion)
+	}
+	for name, version := range map[string]tooldef.Version{
+		"minimumToolboxVersion":  pkg.MinimumToolboxVersion,
+		"packedByToolboxVersion": pkg.PackedByToolboxVersion,
+	} {
+		if version == "" {
+			continue
+		}
+		parsed, err := tooldef.ParseVersion(version.String())
+		if err != nil || !parsed.IsRelease() {
+			return fmt.Errorf("%s %q must be a released semantic version", name, version)
+		}
+	}
+	return nil
 }
 
 func validateModulePath(module tooldef.ModulePath) error {
@@ -354,83 +402,119 @@ func validateEntryName(entryTS string) error {
 	return nil
 }
 
-// ResourceParam describes one inferred resource parameter.
-type ResourceParam = tooldef.ResourceParam
-
-// InferResourceParams derives resource parameters from the tool entry filename.
-//
-// Convention: "users.calendars.events.list.ts" -> user_id, calendar_id.
-// The verb (last segment) is stripped. For "list" the deepest resource ID is
-// excluded; for "get"/"update"/"delete" it is included.
-// Only applies when there are 3+ segments (resource.subresource.verb).
-func InferResourceParams(entryTS string) []ResourceParam {
-	return InferResourceParamsWithMode(entryTS, "")
-}
-
-// InferResourceParamsWithMode is like InferResourceParams but accepts an
-// optional mode override. When mode is "collection", the deepest resource ID
-// is always excluded. When mode is "member", it is always included. When mode
-// is empty, the current isCollectionMethod inference is used.
-func InferResourceParamsWithMode(entryTS string, mode string) []ResourceParam {
-	base := filepath.Base(entryTS)
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	parts := strings.Split(base, ".")
-
-	// Need at least 3 parts: resource.subresource.verb
-	if len(parts) < 3 {
+func compileResources(resources []DevManifestResource) []tooldef.Resource {
+	if len(resources) == 0 {
 		return nil
 	}
-
-	verb := parts[len(parts)-1]
-	resources := parts[:len(parts)-1] // all segments except verb
-
-	// Determine whether to treat as collection (exclude deepest ID) or member
-	// (include deepest ID), based on mode override or verb inference.
-	var collection bool
-	switch mode {
-	case "collection":
-		collection = true
-	case "member":
-		collection = false
-	default:
-		collection = isCollectionMethod(verb)
+	out := make([]tooldef.Resource, 0, len(resources))
+	for _, resource := range resources {
+		compiled := tooldef.Resource{
+			Path:   normalizeResourcePath(resource.Path),
+			Params: make([]tooldef.ResourceParam, 0, len(resource.Params)),
+		}
+		for _, param := range resource.Params {
+			bindingName := strings.TrimSpace(param.BindingName)
+			if bindingName == "" {
+				bindingName = param.Name
+			}
+			compiled.Params = append(compiled.Params, tooldef.ResourceParam{
+				Name:        param.Name,
+				BindingName: bindingName,
+			})
+		}
+		out = append(out, compiled)
 	}
-
-	count := len(resources)
-	if collection {
-		count = len(resources) - 1
-	}
-
-	if count <= 0 {
-		return nil
-	}
-
-	params := make([]ResourceParam, 0, count)
-	for i := 0; i < count; i++ {
-		name := singularize(resources[i]) + "_id"
-		params = append(params, ResourceParam{
-			Name:        name,
-			BindingName: name,
-		})
-	}
-	return params
+	return out
 }
 
-// isCollectionMethod returns true for verbs that operate on a collection
-// (and therefore don't need the deepest resource ID).
-func isCollectionMethod(verb string) bool {
-	switch verb {
-	case "list", "create", "add", "append", "search", "find", "new", "send", "post":
-		return true
-	default:
-		return false
-	}
+func validateDevResources(resources []DevManifestResource) error {
+	return validateResources(resources, kebabSegmentRe, normalizeResourcePath, false,
+		func(resource DevManifestResource) (string, []DevManifestResourceParam) {
+			return resource.Path, resource.Params
+		},
+		func(param DevManifestResourceParam) (string, string) { return param.Name, param.BindingName },
+	)
 }
 
-// singularize converts a plural resource name to its singular form
-// using jinzhu/inflection for Rails-style irregular handling.
-func singularize(s string) string {
-	return inflection.Singular(s)
+var compiledResourceSegmentRe = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+
+func validateCompiledResources(resources []tooldef.Resource) error {
+	return validateResources(resources, compiledResourceSegmentRe, strings.TrimSpace, true,
+		func(resource tooldef.Resource) (string, []tooldef.ResourceParam) {
+			return resource.Path, resource.Params
+		},
+		func(param tooldef.ResourceParam) (string, string) { return param.Name, param.BindingName },
+	)
+}
+
+func validateResources[R, P any](
+	resources []R,
+	segmentPattern *regexp.Regexp,
+	normalizePath func(string) string,
+	requireBinding bool,
+	fields func(R) (string, []P),
+	paramFields func(P) (string, string),
+) error {
+	seenPaths := make(map[string]map[string]bool, len(resources))
+	for _, resource := range resources {
+		rawPath, params := fields(resource)
+		path := strings.TrimSpace(rawPath)
+		if path == "" {
+			return fmt.Errorf("resource path must not be empty")
+		}
+		for _, part := range strings.Split(path, ".") {
+			if !segmentPattern.MatchString(part) {
+				return fmt.Errorf("resource path %q has invalid segment %q", rawPath, part)
+			}
+		}
+		normalized := normalizePath(path)
+		if _, ok := seenPaths[normalized]; ok {
+			return fmt.Errorf("duplicate resource path %q", rawPath)
+		}
+		if len(params) == 0 {
+			return fmt.Errorf("resource %q must declare at least one selector parameter", rawPath)
+		}
+		seenParams := map[string]bool{}
+		for _, param := range params {
+			name, binding := paramFields(param)
+			name = strings.TrimSpace(name)
+			if name == "" || requireBinding && strings.TrimSpace(binding) == "" {
+				if requireBinding {
+					return fmt.Errorf("resource %q contains an empty selector parameter name or binding name", rawPath)
+				}
+				return fmt.Errorf("resource %q contains an empty selector parameter name", rawPath)
+			}
+			if seenParams[name] {
+				return fmt.Errorf("resource %q contains duplicate selector parameter %q", rawPath, name)
+			}
+			seenParams[name] = true
+		}
+		seenPaths[normalized] = seenParams
+	}
+	for path, params := range seenPaths {
+		parts := strings.Split(path, ".")
+		for depth := 1; depth < len(parts); depth++ {
+			ancestor := strings.Join(parts[:depth], ".")
+			ancestorParams, ok := seenPaths[ancestor]
+			if !ok {
+				continue
+			}
+			for name := range params {
+				if ancestorParams[name] {
+					return fmt.Errorf("resource %q repeats selector parameter %q from ancestor %q", path, name, ancestor)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeResourcePath(path string) string {
+	parts := strings.Split(strings.TrimSpace(path), ".")
+	for i, part := range parts {
+		parts[i] = kebabToCamel(part)
+	}
+	return strings.Join(parts, ".")
 }
 
 func inferVerb(entryTS string) string {

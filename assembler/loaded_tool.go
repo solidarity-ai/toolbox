@@ -17,7 +17,7 @@ type LoadedTool struct {
 	Effect                tooldef.Effect
 	Idempotent            *bool
 	MaxFetchResponseBytes *int64
-	ResourceParams        []tooldef.ResourceParam
+	ResourceUses          []tooldef.ResourceUse
 	PackageMeta           *tooldef.Package
 	PackageVersion        tooldef.Version
 	BuiltIn               BuiltInFunc
@@ -40,7 +40,7 @@ func LoadedTools(p packaging.LoadedPackage) []LoadedTool {
 			Effect:                pkgTool.Effect,
 			Idempotent:            pkgTool.Idempotent,
 			MaxFetchResponseBytes: pkgTool.MaxFetchResponseBytes,
-			ResourceParams:        pkgTool.ResourceParams,
+			ResourceUses:          tooldef.CloneResourceUses(pkgTool.ResourceUses),
 			PackageMeta:           &p.Package,
 		}
 

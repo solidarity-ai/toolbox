@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/solidarity-ai/toolbox/packaging"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // TestDistGoldens verifies that packing each source fixture produces output
@@ -30,7 +31,7 @@ func TestDistGoldens(t *testing.T) {
 
 		t.Run(distName, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			result, err := packaging.Pack(srcDir, tmpDir)
+			result, err := packaging.Pack(srcDir, tmpDir, tooldef.Version("v1.0.0"))
 			if err != nil {
 				t.Fatalf("Pack(%s): %v", srcDir, err)
 			}
@@ -49,11 +50,11 @@ func TestDistGoldens(t *testing.T) {
 			// (ignoring sha256 since tar timestamps make archives non-deterministic)
 			goldenArchive := filepath.Join(goldenDir, filepath.Base(result.ArchivePath))
 			goldenManifest := filepath.Join(goldenDir, packaging.PkgManifestFilename)
-			goldenLoaded, err := packaging.LoadArchive(goldenArchive, goldenManifest)
+			goldenLoaded, err := packaging.LoadArchive(goldenArchive, goldenManifest, nil)
 			if err != nil {
 				t.Fatalf("load golden archive: %v", err)
 			}
-			freshLoaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath)
+			freshLoaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 			if err != nil {
 				t.Fatalf("load fresh archive: %v", err)
 			}

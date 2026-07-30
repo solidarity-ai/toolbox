@@ -102,6 +102,26 @@ func (m *Manager) Instructions() string {
 	return meta.InstructionsForSurface(ToolSurfaceModeUnlocked, awaitAvailable)
 }
 
+func (m *Manager) SuperToolDescription() string {
+	if m == nil {
+		return (&Session{}).SuperToolDescriptionForSurface(ToolSurfaceModeUnlocked, false)
+	}
+	meta := &Session{}
+	prepared := m.preparedSnapshot()
+	meta.SetPreparedTools(prepared)
+	awaitAvailable := prepared.HasApprovalTools()
+	if m.Locked() {
+		return meta.SuperToolDescriptionForSurface(ToolSurfaceModeLocked, awaitAvailable)
+	}
+	return meta.SuperToolDescriptionForSurface(ToolSurfaceModeUnlocked, awaitAvailable)
+}
+
+// NewSessionResult keeps the tb_session on the first line and follows it with
+// the same instructions previously carried by the super_tool description.
+func (m *Manager) NewSessionResult(tbSession string) string {
+	return strings.TrimSpace(tbSession) + "\n\n" + m.Instructions()
+}
+
 func (m *Manager) SetPreparedTools(prepared toolset.PreparedToolset) {
 	if m == nil {
 		return

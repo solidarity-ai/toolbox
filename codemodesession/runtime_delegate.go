@@ -40,15 +40,25 @@ type runtimeBinding struct {
 }
 
 type runtimeState struct {
-	Tools []runtimeToolState `json:"tools,omitempty"`
+	Version int                `json:"version"`
+	Tools   []runtimeToolState `json:"tools,omitempty"`
 }
 
+const runtimeStateVersion = 2
+
 type runtimeToolState struct {
-	Name          string   `json:"name"`
-	Package       string   `json:"package"`
-	Params        []string `json:"params,omitempty"`
-	ReplayPolicy  string   `json:"replayPolicy"`
-	NeedsApproval bool     `json:"needsApproval,omitempty"`
+	Name          string               `json:"name"`
+	Package       string               `json:"package"`
+	Params        []string             `json:"params,omitempty"`
+	Resources     []runtimeResourceUse `json:"resources,omitempty"`
+	ReplayPolicy  string               `json:"replayPolicy"`
+	NeedsApproval bool                 `json:"needsApproval,omitempty"`
+}
+
+type runtimeResourceUse struct {
+	Path     string   `json:"path"`
+	Params   []string `json:"params,omitempty"`
+	Selected bool     `json:"selected,omitempty"`
 }
 
 func newRuntimeDelegate(prepared func() toolset.PreparedToolset, toolCalls toolCallJournal, approvals approvalStore, executor *invoke.Executor, toolCtx func(context.Context) (context.Context, func())) repl.VMDelegate {
@@ -136,6 +146,18 @@ func buildRuntimeToolStates(prepared toolset.PreparedToolset) []runtimeToolState
 				toolState.Params = append(toolState.Params, param.Name())
 			}
 		}
+		hidden := preparedTool.HiddenParams()
+		for _, use := range preparedTool.ResourceUses {
+			resourceState := runtimeResourceUse{Path: use.Resource.Path, Selected: use.Selected}
+			if use.Selected {
+				for _, resourceParam := range use.Resource.Params {
+					if !hidden[resourceParam.Name] {
+						resourceState.Params = append(resourceState.Params, resourceParam.Name)
+					}
+				}
+			}
+			toolState.Resources = append(toolState.Resources, resourceState)
+		}
 		out = append(out, toolState)
 	}
 	return out
@@ -154,6 +176,7 @@ func runtimeBindingsFromState(prepared func() toolset.PreparedToolset, executor 
 				Name:          toolState.Name,
 				Package:       toolState.Package,
 				Params:        append([]string(nil), toolState.Params...),
+				Resources:     cloneRuntimeResourceUses(toolState.Resources),
 				ReplayPolicy:  toolState.ReplayPolicy,
 				NeedsApproval: toolState.NeedsApproval,
 			},
@@ -162,8 +185,20 @@ func runtimeBindingsFromState(prepared func() toolset.PreparedToolset, executor 
 	return out
 }
 
+func cloneRuntimeResourceUses(in []runtimeResourceUse) []runtimeResourceUse {
+	if in == nil {
+		return nil
+	}
+	out := make([]runtimeResourceUse, len(in))
+	for i, use := range in {
+		out[i] = use
+		out[i].Params = append([]string(nil), use.Params...)
+	}
+	return out
+}
+
 func marshalRuntimeState(toolStates []runtimeToolState) (json.RawMessage, error) {
-	state := runtimeState{Tools: make([]runtimeToolState, 0, len(toolStates))}
+	state := runtimeState{Version: runtimeStateVersion, Tools: make([]runtimeToolState, 0, len(toolStates))}
 	state.Tools = append(state.Tools, toolStates...)
 	data, err := json.Marshal(state)
 	if err != nil {
@@ -188,6 +223,9 @@ func decodeRuntimeState(raw json.RawMessage) (runtimeState, error) {
 	if err := json.Unmarshal(normalized, &decoded); err != nil {
 		return runtimeState{}, fmt.Errorf("decode persisted runtime state: %w", err)
 	}
+	if decoded.Version != runtimeStateVersion {
+		return runtimeState{}, fmt.Errorf("decode persisted runtime state: unsupported version %d", decoded.Version)
+	}
 	return decoded, nil
 }
 
@@ -211,45 +249,172 @@ func installRuntimeBindings(rt *goja.Runtime, host repl.HostFuncBuilder, binding
 	if err := installToolCallInspector(rt, host, toolCalls, sessionID); err != nil {
 		return err
 	}
+	byPackage := map[string][]runtimeBinding{}
 	for _, binding := range bindings {
 		binding.toolCalls = toolCalls
 		binding.approvals = approvals
-		pkgObj, err := ensureObjectPath(rt, global, packageNamespaceSegments(binding.state.Package))
+		byPackage[binding.state.Package] = append(byPackage[binding.state.Package], binding)
+	}
+	for packageName, packageBindings := range byPackage {
+		pkgObj, err := ensureObjectPath(rt, global, packageNamespaceSegments(packageName))
 		if err != nil {
-			return fmt.Errorf("install package %q: %w", binding.state.Package, err)
+			return fmt.Errorf("install package %q: %w", packageName, err)
 		}
-
-		toolSegments := splitDotted(binding.state.Name)
-		if len(toolSegments) == 0 {
-			continue
-		}
-		parent, err := ensureObjectPath(rt, pkgObj, sanitizeSegments(toolSegments[:len(toolSegments)-1]))
+		plan, err := buildRuntimeAPIPlan(packageBindings)
 		if err != nil {
-			return fmt.Errorf("install tool namespace for %q: %w", binding.state.Name, err)
+			return fmt.Errorf("build package %q resource tree: %w", packageName, err)
 		}
-		wrapper, err := buildRuntimeWrapper(rt, host, binding, sessionID, isCurrentRuntime)
-		if err != nil {
-			return fmt.Errorf("build tool %q wrapper: %w", binding.state.Name, err)
-		}
-		if err := parent.Set(sanitizeIdentifierSegment(toolSegments[len(toolSegments)-1]), wrapper); err != nil {
-			return fmt.Errorf("install tool %q: %w", binding.state.Name, err)
+		if err := installRuntimeAPINode(rt, host, pkgObj, plan.Root, packageBindings, nil, sessionID, isCurrentRuntime); err != nil {
+			return fmt.Errorf("install package %q resources: %w", packageName, err)
 		}
 	}
 	return nil
 }
 
+func buildRuntimeAPIPlan(bindings []runtimeBinding) (*tooldef.ResourceAPIPlan, error) {
+	inputs := make([]tooldef.ResourceAPITool, 0, len(bindings))
+	for _, binding := range bindings {
+		segments := sanitizeSegments(splitDotted(binding.state.Name))
+		input := tooldef.ResourceAPITool{Name: strings.Join(segments, ".")}
+		for _, use := range binding.state.Resources {
+			input.Uses = append(input.Uses, tooldef.ResourceAPIUse{
+				Path: use.Path, Params: append([]string(nil), use.Params...), Selected: use.Selected,
+			})
+		}
+		inputs = append(inputs, input)
+	}
+	return tooldef.CompileResourceAPI(inputs)
+}
+
+func installRuntimeAPINode(rt *goja.Runtime, host repl.HostFuncBuilder, target *goja.Object, node *tooldef.ResourceAPINode, bindings []runtimeBinding, bound map[string]goja.Value, sessionID repl.SessionID, isCurrentRuntime func() bool) error {
+	return installRuntimeAPINodeOnSurface(rt, host, target, node, bindings, bound, sessionID, isCurrentRuntime, false)
+}
+
+func installRuntimeAPINodeOnSurface(rt *goja.Runtime, host repl.HostFuncBuilder, target *goja.Object, node *tooldef.ResourceAPINode, bindings []runtimeBinding, bound map[string]goja.Value, sessionID repl.SessionID, isCurrentRuntime func() bool, callableCollection bool) error {
+	if callableCollection {
+		if err := installCallableIntrinsicAliases(rt, target, node); err != nil {
+			return err
+		}
+	}
+	for _, method := range node.Methods {
+		binding := bindings[method.Tool]
+		wrapper, err := buildRuntimeWrapper(rt, host, binding, bound, sessionID, isCurrentRuntime)
+		if err != nil {
+			return fmt.Errorf("build tool %q wrapper: %w", binding.state.Name, err)
+		}
+		if err := defineRuntimeAPIMember(target, method.Name, wrapper); err != nil {
+			return fmt.Errorf("install tool %q: %w", binding.state.Name, err)
+		}
+	}
+	for _, child := range node.Children {
+		name := child.Name
+		var value goja.Value
+		if child.Resource != nil && child.Resource.Callable {
+			resourceNode := child.Resource
+			factory := func(call goja.FunctionCall) goja.Value {
+				if len(call.Arguments) != len(resourceNode.Params) {
+					panic(rt.NewTypeError("resource %s requires %d selector arguments; received %d", name, len(resourceNode.Params), len(call.Arguments)))
+				}
+				nextBound := make(map[string]goja.Value, len(bound)+len(resourceNode.Params))
+				for key, item := range bound {
+					nextBound[key] = item
+				}
+				for i, param := range resourceNode.Params {
+					nextBound[param] = call.Arguments[i]
+				}
+				resource := rt.NewObject()
+				if err := installRuntimeAPINode(rt, host, resource, resourceNode.Member, bindings, nextBound, sessionID, isCurrentRuntime); err != nil {
+					panic(rt.NewTypeError("resource %s: %v", name, err))
+				}
+				return resource
+			}
+			value = rt.ToValue(factory)
+			factoryObject := value.ToObject(rt)
+			if err := installRuntimeAPINodeOnSurface(rt, host, factoryObject, resourceNode.Collection, bindings, bound, sessionID, isCurrentRuntime, true); err != nil {
+				return err
+			}
+		} else if child.Resource != nil {
+			resource := rt.NewObject()
+			if err := installRuntimeAPINode(rt, host, resource, child.Resource.Collection, bindings, bound, sessionID, isCurrentRuntime); err != nil {
+				return err
+			}
+			value = resource
+		} else {
+			resource := rt.NewObject()
+			if err := installRuntimeAPINode(rt, host, resource, child.Plain, bindings, bound, sessionID, isCurrentRuntime); err != nil {
+				return err
+			}
+			value = resource
+		}
+		if err := defineRuntimeAPIMember(target, name, value); err != nil {
+			return fmt.Errorf("install resource %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func installCallableIntrinsicAliases(rt *goja.Runtime, target *goja.Object, node *tooldef.ResourceAPINode) error {
+	members := make([]string, 0, len(node.Methods)+len(node.Children))
+	for _, method := range node.Methods {
+		members = append(members, method.Name)
+	}
+	for _, child := range node.Children {
+		members = append(members, child.Name)
+	}
+	for _, name := range members {
+		alias, ok := tooldef.CallableResourceIntrinsicAlias(name)
+		if !ok {
+			continue
+		}
+		var original goja.Value
+		getErr := rt.Try(func() {
+			original = target.Get(name)
+		})
+		if getErr == nil && original == nil {
+			original = goja.Undefined()
+		}
+		aliasWrapper := func(call goja.FunctionCall) goja.Value {
+			if getErr != nil {
+				panic(getErr)
+			}
+			if callable, ok := goja.AssertFunction(original); ok {
+				result, err := callable(target, call.Arguments...)
+				if err != nil {
+					panic(err)
+				}
+				return result
+			}
+			return original
+		}
+		if err := defineRuntimeAPIMember(target, alias, rt.ToValue(aliasWrapper)); err != nil {
+			return fmt.Errorf("install intrinsic escape method %q for %q: %w", alias, name, err)
+		}
+	}
+	return nil
+}
+
+func defineRuntimeAPIMember(target *goja.Object, name string, value goja.Value) error {
+	return target.DefineDataProperty(name, value, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE)
+}
+
 func removeRuntimeBindings(rt *goja.Runtime, toolStates []runtimeToolState) error {
 	global := rt.GlobalObject()
+	removedPackages := make(map[string]bool)
 	for _, toolState := range toolStates {
-		if err := removeRuntimeBinding(global, toolState); err != nil {
+		path := packageNamespaceSegments(toolState.Package)
+		key := strings.Join(path, ".")
+		if len(path) == 0 || removedPackages[key] {
+			continue
+		}
+		removedPackages[key] = true
+		if err := removeRuntimePath(global, path); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error {
-	path := append(packageNamespaceSegments(toolState.Package), sanitizeSegments(splitDotted(toolState.Name))...)
+func removeRuntimePath(global *goja.Object, path []string) error {
 	if len(path) == 0 {
 		return nil
 	}
@@ -279,7 +444,7 @@ func removeRuntimeBinding(global *goja.Object, toolState runtimeToolState) error
 	return nil
 }
 
-func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, sessionID repl.SessionID, isCurrentRuntime func() bool) (goja.Value, error) {
+func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding runtimeBinding, bound map[string]goja.Value, sessionID repl.SessionID, isCurrentRuntime func() bool) (goja.Value, error) {
 	staleMessage := fmt.Sprintf("tool %s came from a previous runtime and is no longer callable", binding.state.Name)
 	rawApproval := host.WrapSyncWithEffectID(pendingApprovalEffectName(binding.state.Name), repl.ReplayReadonly, func(_ context.Context, effectID repl.EffectID, params jswire.Value) (jswire.Value, error) {
 		toolCallID := string(effectID)
@@ -310,11 +475,17 @@ func buildRuntimeWrapper(rt *goja.Runtime, host repl.HostFuncBuilder, binding ru
 			panic(rt.NewTypeError("%s", staleMessage))
 		}
 		argsObj := rt.NewObject()
-		for i, paramName := range binding.state.Params {
-			if i >= len(call.Arguments) {
+		argumentIndex := 0
+		for _, paramName := range binding.state.Params {
+			if value, ok := bound[paramName]; ok {
+				_ = argsObj.Set(paramName, value)
+				continue
+			}
+			if argumentIndex >= len(call.Arguments) {
 				break
 			}
-			_ = argsObj.Set(paramName, call.Arguments[i])
+			_ = argsObj.Set(paramName, call.Arguments[argumentIndex])
+			argumentIndex++
 		}
 		paramsEncoded, err := jswire.EncodeGoja(argsObj)
 		if err != nil {

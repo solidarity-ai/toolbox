@@ -1,0 +1,21 @@
+{
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
+  "module": "fixtures.local/nested-return-types",
+  "name": "nested-return-types",
+  "runtime": "typescript-sandbox",
+  "sha256": "0fcba70fdd4bc5fbb7cfb0f4404c5df82dd7c72fc1db608f80c7f8374ef6dbd3",
+  "tools": [
+    {
+      "entry_ts": "tools/pets.get.ts",
+      "effect": "readOnly",
+      "description": "Fetch a single pet by name. The return type is a named interface with no\nproperty descriptions, used by only this tool, so the SDK inlines its body —\nwhich still references the nested `Mood` alias."
+    },
+    {
+      "entry_ts": "tools/pets.list.ts",
+      "effect": "readOnly",
+      "description": "List pets. The inlined result body references the nested `PetSummary` type,\nwhich in turn references the `Mood` alias."
+    }
+  ]
+}

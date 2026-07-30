@@ -16,7 +16,10 @@ import (
 	"github.com/solidarity-ai/toolbox/packaging/internal/manifest"
 	"github.com/solidarity-ai/toolbox/packaging/internal/source"
 	"github.com/solidarity-ai/toolbox/registry/testutil/gitfixture"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
+
+const testPackerVersion = tooldef.Version("v1.0.0")
 
 func TestPack(t *testing.T) {
 	t.Parallel()
@@ -28,7 +31,12 @@ func TestPack(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	for _, version := range []tooldef.Version{"", "v0.0.0-20260327112233-abcdef123456", "v01.0.0"} {
+		if _, err := Pack(loaded, outDir, version); err == nil {
+			t.Fatalf("Pack() accepted non-release packer version %q", version)
+		}
+	}
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
@@ -62,6 +70,13 @@ func TestPack(t *testing.T) {
 	if pkg.SHA256 == "" {
 		t.Fatalf("expected sha256 in external manifest")
 	}
+	if pkg.ManifestSchemaVersion != tooldef.PackageManifestSchemaVersion ||
+		pkg.MinimumToolboxVersion != testPackerVersion ||
+		pkg.PackedByToolboxVersion != testPackerVersion {
+		t.Fatalf("pack metadata = (%d, %s, %s), want (%d, %s, %s)",
+			pkg.ManifestSchemaVersion, pkg.MinimumToolboxVersion, pkg.PackedByToolboxVersion,
+			tooldef.PackageManifestSchemaVersion, testPackerVersion, testPackerVersion)
+	}
 
 	// Verify sha256 matches actual archive
 	archiveData, err := os.ReadFile(result.ArchivePath)
@@ -85,13 +100,13 @@ func TestPackRoundTrip(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
 
 	// Load the archive back
-	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("LoadArchive() error: %v", err)
 	}
@@ -127,7 +142,7 @@ func TestLoadArchiveVerifiesSHA256(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
@@ -142,7 +157,7 @@ func TestLoadArchiveVerifiesSHA256(t *testing.T) {
 		t.Fatalf("write tampered archive: %v", err)
 	}
 
-	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err == nil {
 		t.Fatalf("expected sha256 verification error")
 	}
@@ -161,7 +176,7 @@ func TestLoadArchiveRequiresSHA256(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
@@ -177,7 +192,7 @@ func TestLoadArchiveRequiresSHA256(t *testing.T) {
 	pkg.SHA256 = ""
 	writePkgManifest(t, result.ManifestPath, pkg)
 
-	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err == nil {
 		t.Fatalf("expected missing sha256 error")
 	}
@@ -196,7 +211,7 @@ func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
@@ -211,7 +226,7 @@ func TestLoadArchiveVerifiesManifestMatch(t *testing.T) {
 		t.Fatalf("write tampered manifest: %v", err)
 	}
 
-	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err == nil {
 		t.Fatalf("expected manifest mismatch error")
 	}
@@ -230,12 +245,12 @@ func TestLoadArchiveAcceptsMissingIdempotent(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
 
-	_, err = LoadArchive(result.ArchivePath, result.ManifestPath)
+	_, err = LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("expected no dist validation error for missing idempotent, got: %v", err)
 	}
@@ -251,12 +266,12 @@ func TestArchiveContainsInternalManifest(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
 
-	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("LoadArchive() error: %v", err)
 	}
@@ -298,12 +313,12 @@ func TestPackBundlesExecutables(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	result, err := Pack(loaded, outDir)
+	result, err := Pack(loaded, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
 
-	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath)
+	archiveLoaded, err := LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("LoadArchive() error: %v", err)
 	}
@@ -348,12 +363,12 @@ func TestPackSameCommittedPackageTwiceProducesIdenticalArchive(t *testing.T) {
 	}
 
 	out1 := t.TempDir()
-	result1, err := Pack(loaded1, out1)
+	result1, err := Pack(loaded1, out1, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack(clone1): %v", err)
 	}
 	out2 := t.TempDir()
-	result2, err := Pack(loaded2, out2)
+	result2, err := Pack(loaded2, out2, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack(clone2): %v", err)
 	}

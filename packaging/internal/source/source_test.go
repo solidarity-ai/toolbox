@@ -142,7 +142,7 @@ func TestLoadDirWithMode(t *testing.T) {
 		}
 	})
 
-	t.Run("dist mode accepts missing idempotent", func(t *testing.T) {
+	t.Run("dist mode requires pack metadata", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		mustWriteFile(t, filepath.Join(dir, manifest.DevManifestFilename), `{
@@ -155,8 +155,8 @@ func TestLoadDirWithMode(t *testing.T) {
 }`)
 		mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), "export default function tool() { return \"ok\"; }\n")
 		_, err := LoadDirWithMode(dir, manifest.ValidationModeDist)
-		if err != nil {
-			t.Fatalf("expected no error for missing idempotent, got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "manifestSchemaVersion") {
+			t.Fatalf("expected missing pack metadata error, got: %v", err)
 		}
 	})
 }

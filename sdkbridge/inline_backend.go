@@ -148,30 +148,23 @@ func (b *inlineBackend) Inspect(ctx context.Context, req toolpkgdiscovery.Inspec
 	}
 
 	if pkgVer, err := tooldef.ParsePackageVer(target); err == nil {
-		cache, cacheErr := registry.NewCache("")
-		if cacheErr == nil && cache.Has(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version)) {
-			pkg, err := cache.LoadArchive(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
-			if err != nil {
-				return toolpkgdiscovery.InspectResult{}, err
-			}
-			return toolpkgdiscovery.InspectResult{
-				Target:  target,
-				Version: pkgVer.Version.String(),
-				Source:  "cache",
-				Package: pkg.Package,
-			}, nil
-		}
 		if b.resolver == nil {
 			return toolpkgdiscovery.InspectResult{}, fmt.Errorf("inspect %s: resolver is not configured", target)
 		}
+		cache, cacheErr := registry.NewCache("")
+		cached := cacheErr == nil && cache.Has(registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
 		result, err := b.resolver.Resolve(ctx, registry.ModulePath(pkgVer.Module), registry.Version(pkgVer.Version))
 		if err != nil {
 			return toolpkgdiscovery.InspectResult{}, err
 		}
+		source := string(result.Metadata.ResolvedFrom)
+		if cached {
+			source = "cache"
+		}
 		return toolpkgdiscovery.InspectResult{
 			Target:  target,
 			Version: pkgVer.Version.String(),
-			Source:  string(result.Metadata.ResolvedFrom),
+			Source:  source,
 			Package: result.Package.Package,
 		}, nil
 	}

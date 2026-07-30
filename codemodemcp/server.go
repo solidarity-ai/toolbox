@@ -169,7 +169,7 @@ func (s *ManagedServer) tools(prepared toolset.PreparedToolset) []server.ServerT
 
 func (s *ManagedServer) newSuperTool() mcp.Tool {
 	options := []mcp.ToolOption{
-		mcp.WithDescription(s.manager.Instructions()),
+		mcp.WithDescription(s.manager.SuperToolDescription()),
 		mcp.WithString(codemodesession.TypeScriptCellSourceParam, mcp.Required(), mcp.Description("TypeScript code (can be multiline) for next cell.")),
 		mcp.WithNumber(codemodesession.TimeoutSecsParam,
 			mcp.Description(fmt.Sprintf("Optional. Maximum seconds to allow this cell to run before it fails. Use a larger value for long-running network or tool-heavy work. Defaults to %g.", codemodesession.DefaultSubmitTimeout.Seconds())),
@@ -258,7 +258,7 @@ func (s *ManagedServer) handleNewSession(ctx context.Context, request mcp.CallTo
 		return nil, err
 	}
 	s.notifyChange()
-	return mcp.NewToolResultText(tbSession), nil
+	return mcp.NewToolResultText(s.manager.NewSessionResult(tbSession)), nil
 }
 
 func (s *ManagedServer) notifyChange() {

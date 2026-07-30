@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/vfs-test",
   "name": "vfs-test",
   "runtime": "typescript+wasix-sandbox",
-  "sha256": "fb7664966a27b551b76a6a96292b77ad94a9ef25c55c8120b18beeea4d8ea568",
+  "sha256": "71d7ccf01392ea094d2030977ee3a12fc92b8b5e1faaf0bef29815f03d8c789a",
   "executables": {
     "vfs-guest": "dist/vfs-guest.wasm"
   },

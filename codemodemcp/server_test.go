@@ -25,10 +25,7 @@ func TestMCPServerListsSuperTool(t *testing.T) {
 	names := h.ToolNames()
 
 	assertSliceContains(t, names, codemodemcp.ToolSuperTool)
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "super_tool submits a code cell to a notebook like environment")
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// Notebook Input")
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "// Notebook Output")
-	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "$pkgMetadata")
+	assertToolDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, "Call new_super_tool_session first")
 	assertToolPropertyDescriptionContains(t, tools.Tools, codemodemcp.ToolSuperTool, codemodesession.TimeoutSecsParam, "Maximum seconds to allow this cell to run")
 }
 
@@ -520,7 +517,7 @@ func mustNewTBSession(t testing.TB, h *mcptest.Harness) string {
 	if result.IsError {
 		t.Fatalf("new_super_tool_session expected non-error result")
 	}
-	return strings.TrimSpace(resultText(t, result))
+	return strings.TrimSpace(strings.SplitN(resultText(t, result), "\n", 2)[0])
 }
 
 func mustCreateTBSession(t testing.TB, currentDir string) string {

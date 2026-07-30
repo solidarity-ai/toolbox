@@ -1,0 +1,3 @@
+cell 1
+--
+=> {intrinsicCallStillSelects: true, naturalLengthIsTool: true, naturalNameIsTool: true, naturalPrototypeIsTool: true, …+3}

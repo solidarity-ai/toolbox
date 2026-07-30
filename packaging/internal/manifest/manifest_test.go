@@ -318,6 +318,17 @@ func TestParseDev(t *testing.T) {
 			wantErr: "typo_field",
 		},
 		{
+			name: "pack-managed field rejected",
+			json: `{
+  "module": "example.com/bad",
+  "name": "bad",
+  "runtime": "typescript-sandbox",
+  "packedByToolboxVersion": "v1.0.0",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }]
+}`,
+			wantErr: "packedByToolboxVersion",
+		},
+		{
 			name:    "invalid json",
 			json:    `{not json`,
 			wantErr: "invalid character",
@@ -376,6 +387,27 @@ func TestCompile(t *testing.T) {
 				Runtime:     tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
+				},
+			},
+		},
+		{
+			name: "preserves minimum Toolbox version",
+			dev: DevManifest{
+				MinimumToolboxVersion: "v0.9.0",
+				Module:                testModule("calc"),
+				Name:                  "calc",
+				Runtime:               tooldef.RuntimeTypeScriptSandbox,
+				Tools: []DevManifestTool{
+					{EntryTS: "tools/calc.add.ts", Effect: effectPtr(tooldef.EffectReadOnly)},
+				},
+			},
+			want: tooldef.Package{
+				MinimumToolboxVersion: "v0.9.0",
+				Module:                testModule("calc"),
+				Name:                  "calc",
+				Runtime:               tooldef.RuntimeTypeScriptSandbox,
+				Tools: []tooldef.PackageTool{
+					{EntryTS: "tools/calc.add.ts", Effect: tooldef.EffectReadOnly},
 				},
 			},
 		},
@@ -458,14 +490,14 @@ func TestValidateCompiled(t *testing.T) {
 		},
 		{
 			name: "valid dist complete",
-			pkg: tooldef.Package{
+			pkg: distPackage(tooldef.Package{
 				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true), Effect: tooldef.EffectReadOnly},
 				},
-			},
+			}),
 			mode: ValidationModeDist,
 		},
 		{
@@ -482,14 +514,14 @@ func TestValidateCompiled(t *testing.T) {
 		},
 		{
 			name: "missing idempotent valid in dist",
-			pkg: tooldef.Package{
+			pkg: distPackage(tooldef.Package{
 				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Effect: tooldef.EffectReversible},
 				},
-			},
+			}),
 			mode: ValidationModeDist,
 		},
 		{
@@ -507,14 +539,14 @@ func TestValidateCompiled(t *testing.T) {
 		},
 		{
 			name: "missing effect errors in dist",
-			pkg: tooldef.Package{
+			pkg: distPackage(tooldef.Package{
 				Module:  testModule("calc"),
 				Name:    "calc",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
 				Tools: []tooldef.PackageTool{
 					{EntryTS: "tools/calc.add.ts", Idempotent: boolPtr(true)},
 				},
-			},
+			}),
 			mode:    ValidationModeDist,
 			wantErr: `"effect"`,
 		},
@@ -563,7 +595,7 @@ func TestValidateCompiled(t *testing.T) {
 		},
 		{
 			name: "package with credentials passes dist validation",
-			pkg: tooldef.Package{
+			pkg: distPackage(tooldef.Package{
 				Module:  testModule("google-workspace"),
 				Name:    "google-workspace",
 				Runtime: tooldef.RuntimeTypeScriptSandbox,
@@ -581,7 +613,7 @@ func TestValidateCompiled(t *testing.T) {
 					},
 				},
 				AllowedHosts: []string{"api.example.com"},
-			},
+			}),
 			mode: ValidationModeDist,
 		},
 		{
@@ -813,6 +845,17 @@ func TestParsePkg(t *testing.T) {
 			json:    `{bad}`,
 			wantErr: "invalid character",
 		},
+		{
+			name: "unknown field rejected",
+			json: `{
+  "module": "example.com/calc",
+  "name": "calc",
+  "runtime": "typescript-sandbox",
+  "tools": [{ "entry_ts": "tools/calc.add.ts" }],
+  "futureField": true
+}`,
+			wantErr: "unknown field",
+		},
 	}
 
 	for _, tt := range tests {
@@ -841,157 +884,153 @@ func TestParsePkg(t *testing.T) {
 	}
 }
 
-func TestInferResourceParams(t *testing.T) {
+func distPackage(pkg tooldef.Package) tooldef.Package {
+	pkg.ManifestSchemaVersion = tooldef.PackageManifestSchemaVersion
+	pkg.MinimumToolboxVersion = "v1.0.0"
+	pkg.PackedByToolboxVersion = "v1.0.0"
+	return pkg
+}
+
+func TestParseDevResourceValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		entryTS string
-		want    []ResourceParam
+		name      string
+		resources string
+		wantErr   string
 	}{
-		// Single resource: account.tickets.list -> account_id (list doesn't need ticket_id)
-		{"tools/account.tickets.list.ts", []ResourceParam{
-			{Name: "account_id", BindingName: "account_id"},
-		}},
-		// Single resource: account.tickets.get -> account_id, ticket_id (get needs deepest)
-		{"tools/account.tickets.get.ts", []ResourceParam{
-			{Name: "account_id", BindingName: "account_id"},
-			{Name: "ticket_id", BindingName: "ticket_id"},
-		}},
-		// Deep nesting: users.calendars.events.list -> user_id, calendar_id
-		{"tools/users.calendars.events.list.ts", []ResourceParam{
-			{Name: "user_id", BindingName: "user_id"},
-			{Name: "calendar_id", BindingName: "calendar_id"},
-		}},
-		// Deep nesting with get: users.calendars.events.get -> user_id, calendar_id, event_id
-		{"tools/users.calendars.events.get.ts", []ResourceParam{
-			{Name: "user_id", BindingName: "user_id"},
-			{Name: "calendar_id", BindingName: "calendar_id"},
-			{Name: "event_id", BindingName: "event_id"},
-		}},
-		// Unknown verb defaults to member (includes deepest ID)
-		{"tools/account.tickets.archive.ts", []ResourceParam{
-			{Name: "account_id", BindingName: "account_id"},
-			{Name: "ticket_id", BindingName: "ticket_id"},
-		}},
-		// Flat tool: calc.add -> no resource params
-		{"tools/calc.add.ts", nil},
-		// Simple tool: users.list -> no parent resources (list at top level)
-		{"tools/users.list.ts", nil},
+		{"invalid segment", `[{
+  "path":"work_books","params":[{"name":"workbook"}]
+}]`, "invalid segment"},
+		{"empty params", `[{"path":"workbooks","params":[]}]`, "minItems"},
+		{"empty name", `[{"path":"workbooks","params":[{"name":""}]}]`, "properties/name: minLength"},
+		{"empty binding", `[{"path":"workbooks","params":[{"name":"workbook","binding_name":""}]}]`, "properties/binding_name: minLength"},
+		{"duplicate path", `[
+  {"path":"workbooks","params":[{"name":"workbook"}]},
+  {"path":"workbooks","params":[{"name":"other"}]}
+]`, `duplicate resource path "workbooks"`},
+		{"duplicate param", `[{
+  "path":"workbooks","params":[{"name":"workbook"},{"name":"workbook"}]
+}]`, `duplicate selector parameter "workbook"`},
+		{"repeated ancestor param", `[
+  {"path":"workbooks","params":[{"name":"workbook"}]},
+  {"path":"workbooks.sheets","params":[{"name":"workbook"}]}
+]`, `repeats selector parameter "workbook" from ancestor "workbooks"`},
 	}
 
 	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.entryTS, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			got := InferResourceParams(tt.entryTS)
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Fatalf("InferResourceParams(%q) mismatch (-want +got):\n%s", tt.entryTS, diff)
+			_, err := ParseDev(resourceTestManifest(tt.resources))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseDev() error = %v, want error containing %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestCompileWithResourceBindingsOverride(t *testing.T) {
+func TestParsePkgResourceValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		resources string
+		wantErr   string
+	}{
+		{"invalid segment", `[{"path":"work-books","params":[{"name":"workbook","binding_name":"workbook"}]}]`, "invalid segment"},
+		{"empty params", `[{"path":"workbooks","params":[]}]`, "must declare at least one selector parameter"},
+		{"empty name", `[{"path":"workbooks","params":[{"name":"","binding_name":"workbook"}]}]`, "empty selector parameter name or binding name"},
+		{"empty binding", `[{"path":"workbooks","params":[{"name":"workbook","binding_name":""}]}]`, "empty selector parameter name or binding name"},
+		{"duplicate path", `[
+  {"path":"workbooks","params":[{"name":"workbook","binding_name":"workbook"}]},
+  {"path":"workbooks","params":[{"name":"other","binding_name":"other"}]}
+]`, `duplicate resource path "workbooks"`},
+		{"duplicate param", `[{
+  "path":"workbooks","params":[
+    {"name":"workbook","binding_name":"workbook"},
+    {"name":"workbook","binding_name":"other"}
+  ]
+}]`, `duplicate selector parameter "workbook"`},
+		{"repeated ancestor param", `[
+  {"path":"workbooks","params":[{"name":"workbook","binding_name":"workbook"}]},
+  {"path":"workbooks.sheets","params":[{"name":"workbook","binding_name":"other"}]}
+]`, `repeats selector parameter "workbook" from ancestor "workbooks"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParsePkg(resourceTestManifest(tt.resources))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParsePkg() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func resourceTestManifest(resources string) []byte {
+	return []byte(`{
+  "module":"example.com/resources",
+  "name":"resources",
+  "runtime":"typescript-sandbox",
+  "resources":` + resources + `,
+  "tools":[{"entry_ts":"tools/resources.list.ts","effect":"readOnly"}]
+}`)
+}
+
+func TestCompileWithPackageResources(t *testing.T) {
 	t.Parallel()
 
 	dev := DevManifest{
 		Name:    "zendesk",
 		Runtime: tooldef.RuntimeTypeScriptSandbox,
+		Resources: []DevManifestResource{
+			{
+				Path: "accounts",
+				Params: []DevManifestResourceParam{
+					{Name: "account", BindingName: "zendesk_account"},
+				},
+			},
+			{
+				Path: "accounts.tickets",
+				Params: []DevManifestResourceParam{
+					{Name: "start"},
+					{Name: "end"},
+				},
+			},
+		},
 		Tools: []DevManifestTool{
 			{
-				EntryTS:    "tools/account.tickets.list.ts",
+				EntryTS:    "tools/accounts.tickets.get.ts",
 				Idempotent: boolPtr(true),
 				Effect:     effectPtr(tooldef.EffectReadOnly),
-				Resource: &DevManifestToolResource{
-					Bindings: map[string]string{"account_id": "zendesk_account"},
-				},
 			},
 		},
 	}
 
 	pkg := Compile(dev)
-
-	if len(pkg.Tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
+	want := []tooldef.Resource{
+		{Path: "accounts", Params: []tooldef.ResourceParam{{Name: "account", BindingName: "zendesk_account"}}},
+		{Path: "accounts.tickets", Params: []tooldef.ResourceParam{{Name: "start", BindingName: "start"}, {Name: "end", BindingName: "end"}}},
 	}
-
-	tool := pkg.Tools[0]
-	if len(tool.ResourceParams) != 1 {
-		t.Fatalf("expected 1 resource param, got %d", len(tool.ResourceParams))
-	}
-
-	rp := tool.ResourceParams[0]
-	if rp.Name != "account_id" {
-		t.Fatalf("expected resource param name 'account_id', got %q", rp.Name)
-	}
-	if rp.BindingName != "zendesk_account" {
-		t.Fatalf("expected binding name 'zendesk_account', got %q", rp.BindingName)
+	if diff := cmp.Diff(want, pkg.Resources); diff != "" {
+		t.Fatalf("compiled resources mismatch (-want +got):\n%s", diff)
 	}
 }
 
-func TestCompileWithResourceModeOverride(t *testing.T) {
+func TestParseDevRejectsLegacyPerToolResourceConfig(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name           string
-		entryTS        string
-		mode           string
-		wantParamNames []string
-	}{
-		{
-			// "archive" is normally a member verb (includes deepest ID: ticket_id).
-			// Forcing "collection" mode should exclude the deepest ID.
-			name:           "archive forced collection excludes deepest ID",
-			entryTS:        "tools/account.tickets.archive.ts",
-			mode:           "collection",
-			wantParamNames: []string{"account_id"},
-		},
-		{
-			// "list" is normally a collection verb (excludes deepest ID).
-			// Forcing "member" mode should include the deepest ID.
-			name:           "list forced member includes deepest ID",
-			entryTS:        "tools/account.tickets.list.ts",
-			mode:           "member",
-			wantParamNames: []string{"account_id", "ticket_id"},
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			dev := DevManifest{
-				Name:    "test",
-				Runtime: tooldef.RuntimeTypeScriptSandbox,
-				Tools: []DevManifestTool{
-					{
-						EntryTS: tt.entryTS,
-						Resource: &DevManifestToolResource{
-							Mode: tt.mode,
-						},
-					},
-				},
-			}
-
-			pkg := Compile(dev)
-
-			if len(pkg.Tools) != 1 {
-				t.Fatalf("expected 1 tool, got %d", len(pkg.Tools))
-			}
-
-			tool := pkg.Tools[0]
-			if len(tool.ResourceParams) != len(tt.wantParamNames) {
-				t.Fatalf("expected %d resource params, got %d: %v", len(tt.wantParamNames), len(tool.ResourceParams), tool.ResourceParams)
-			}
-
-			for i, wantName := range tt.wantParamNames {
-				if tool.ResourceParams[i].Name != wantName {
-					t.Fatalf("param[%d]: expected name %q, got %q", i, wantName, tool.ResourceParams[i].Name)
-				}
-			}
-		})
+	_, err := ParseDev([]byte(`{
+  "module": "example.com/legacy",
+  "name": "legacy",
+  "runtime": "typescript-sandbox",
+  "tools": [
+    {"entry_ts":"tools/workbook.officejs.run.ts","resource":{"mode":"collection"}}
+  ]
+}`))
+	if err == nil || !strings.Contains(err.Error(), "additional properties") {
+		t.Fatalf("ParseDev() error = %v, want legacy per-tool resource rejection", err)
 	}
 }
 

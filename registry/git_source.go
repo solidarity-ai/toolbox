@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"github.com/solidarity-ai/toolbox/packaging"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 const defaultGitCloneURLPrefix = "https://"
 
 // GitSourceFallback packages a tagged git checkout when no release assets are available.
 type GitSourceFallback struct {
-	URLPrefix string
+	URLPrefix     string
+	PackerVersion tooldef.Version
 }
 
 func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, version Version) (FetchResult, error) {
@@ -52,7 +54,7 @@ func (s *GitSourceFallback) Fetch(ctx context.Context, module ModulePath, versio
 		return FetchResult{}, fmt.Errorf("git rev-parse HEAD %s@%s from %s returned invalid commit sha %q", module, version, cloneURL, gitSHA)
 	}
 
-	packed, err := packaging.Pack(checkoutDir, outDir)
+	packed, err := packaging.Pack(checkoutDir, outDir, s.PackerVersion)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("pack cloned repo %s@%s: %w", module, version, err)
 	}

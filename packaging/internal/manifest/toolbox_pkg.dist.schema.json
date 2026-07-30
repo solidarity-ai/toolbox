@@ -2,8 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["module", "name", "runtime", "tools"],
+  "required": ["manifestSchemaVersion", "minimumToolboxVersion", "packedByToolboxVersion", "module", "name", "runtime", "tools"],
   "properties": {
+    "manifestSchemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "minimumToolboxVersion": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "packedByToolboxVersion": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
     "module": {
       "type": "string",
       "minLength": 1,
@@ -81,6 +93,31 @@
       "type": "array",
       "description": "Hosts that tools in this package are allowed to contact.",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "resources": {
+      "type": "array",
+      "description": "Package-level callable resource selectors used to shape the code-mode API.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "params"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "params": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "binding_name"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "binding_name": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
     },
     "tools": {
       "type": "array",

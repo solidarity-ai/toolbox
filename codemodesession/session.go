@@ -329,6 +329,44 @@ func (s *Session) InstructionsForSurface(mode ToolSurfaceMode, awaitAvailable bo
 	return s.instructionsForSurface(mode, awaitAvailable)
 }
 
+// SuperToolDescriptionForSurface describes how to enter a codemode session.
+// Unlocked surfaces return the full notebook instructions when the session is
+// created, so their always-present super_tool schema only needs a compact
+// bootstrap description and package index. Locked surfaces have no session
+// creation call and therefore retain the full instructions here.
+func (s *Session) SuperToolDescriptionForSurface(mode ToolSurfaceMode, awaitAvailable bool) string {
+	if mode == ToolSurfaceModeLocked {
+		return s.instructionsForSurface(mode, awaitAvailable)
+	}
+
+	var prepared toolset.PreparedToolset
+	if s != nil {
+		s.mu.Lock()
+		if s.prepared != nil {
+			prepared = s.prepared.Get()
+		}
+		s.mu.Unlock()
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Call %s first. It returns a tb_session and the notebook instructions. Reuse that tb_session on every %s call.\n", NewSessionToolName, SuperToolName)
+	if awaitAvailable {
+		fmt.Fprintf(&b, "Reuse the same tb_session on %s calls.\n", AwaitSuperToolApprovalsName)
+	}
+	rows := summarizePreparedTools(prepared)
+	if len(rows) > 0 {
+		fmt.Fprintln(&b, "Packages:")
+		for _, row := range rows {
+			if row.UseWhenHint == "" {
+				fmt.Fprintf(&b, "- %s\n", row.Name)
+				continue
+			}
+			fmt.Fprintf(&b, "- %s: %s\n", row.Name, row.UseWhenHint)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func (s *Session) instructionsForSurface(mode ToolSurfaceMode, awaitAvailable bool) string {
 	var prepared toolset.PreparedToolset
 	if s != nil {
@@ -345,7 +383,7 @@ func (s *Session) instructionsForSurface(mode ToolSurfaceMode, awaitAvailable bo
 	fmt.Fprintln(&b, "Important Notebook Usage Information:")
 	fmt.Fprintln(&b, "- `console.log(inspect($last))` is automatically added when console.log is NOT in the source.")
 	fmt.Fprintln(&b, "- Variables and state persist between cells. Promises must settle before the timeout or the cell will error.")
-	fmt.Fprintln(&b, "	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (use var or leave global).")
+	fmt.Fprintln(&b, "	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (prefer var or use caution).")
 	fmt.Fprintln(&b, "  - For long cells use unique variable names")
 	fmt.Fprintln(&b, "  - For small cells it's easier to use $last / $val(cell_index) to reuse prior results.")
 	fmt.Fprintln(&b, "  - Cells ending with console.log, return undefined — end with the variable if you need to reference it later.")

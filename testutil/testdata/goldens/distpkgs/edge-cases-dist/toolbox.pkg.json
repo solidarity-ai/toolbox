@@ -1,8 +1,11 @@
 {
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
   "module": "fixtures.local/edge-cases",
   "name": "edge-cases",
   "runtime": "typescript-sandbox",
-  "sha256": "f0ff3f2a7651807f6ffbaa4d1a6350669fe38d5f05c939ead09d4580f8ce2954",
+  "sha256": "95ebde5c7034ff983fca5c9d845be056ea41af769bf6d130eca407c2ebe0657e",
   "tools": [
     {
       "entry_ts": "tools/edge-cases.complex.ts",

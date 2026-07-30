@@ -150,7 +150,7 @@ func (e *Executor) runPreparedCall(ctx context.Context, prepared toolset.Prepare
 	if err != nil {
 		return nil, err
 	}
-	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, params)
+	tool, fullParams, injector, allowlist, err := prepareToolExecution(ctx, prepared, toolName, params)
 	if err != nil {
 		return nil, err
 	}
@@ -199,10 +199,13 @@ func (e *Executor) executeTool(ctx context.Context, tool toolset.PreparedTool, f
 	return "", fmt.Errorf("tool %s has no executable", tool.Name)
 }
 
-func prepareToolExecution(prepared toolset.PreparedToolset, toolName string, args map[string]any) (toolset.PreparedTool, map[string]any, *transport.CredentialInjector, *transport.HostAllowlist, error) {
+func prepareToolExecution(ctx context.Context, prepared toolset.PreparedToolset, toolName string, args map[string]any) (toolset.PreparedTool, map[string]any, *transport.CredentialInjector, *transport.HostAllowlist, error) {
 	tool, err := findTool(prepared, toolName)
 	if err != nil {
 		return toolset.PreparedTool{}, nil, nil, nil, err
+	}
+	if err := prepared.CheckToolExecution(ctx, tool); err != nil {
+		return toolset.PreparedTool{}, nil, nil, nil, fmt.Errorf("tool %s: %w", toolName, err)
 	}
 
 	fullParams, err := tool.ValidateCall(args)
@@ -415,7 +418,7 @@ func RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[stri
 // This allows callers to pre-populate files before execution and inspect
 // files written by the WASM guest afterwards.
 func (e *Executor) RunWithVFS(prepared toolset.PreparedToolset, toolName string, args map[string]any, memFS *vfs.MemFS) (string, error) {
-	tool, fullParams, injector, allowlist, err := prepareToolExecution(prepared, toolName, args)
+	tool, fullParams, injector, allowlist, err := prepareToolExecution(context.Background(), prepared, toolName, args)
 	if err != nil {
 		return "", err
 	}

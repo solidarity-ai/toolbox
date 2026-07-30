@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"github.com/solidarity-ai/toolbox/assembler"
 	"github.com/solidarity-ai/toolbox/codemodesession"
 	"github.com/solidarity-ai/toolbox/credentialrepo"
+	"github.com/solidarity-ai/toolbox/internal/buildinfo"
 	"github.com/solidarity-ai/toolbox/invoke"
 	"github.com/solidarity-ai/toolbox/registry"
 	"github.com/solidarity-ai/toolbox/toolpkgdiscovery"
@@ -355,6 +355,9 @@ func (b *Bridge) compose(ctx context.Context, params ComposeParams) (ComposeResu
 	if params.Config != nil {
 		cfg = params.Config.toToolsetConfig(b.credentialPolicySource)
 	}
+	if b.resolver != nil {
+		cfg.PackageGuard = b.resolver.PackageGuard()
+	}
 
 	var manager *codemodesession.Manager
 	if params.Mode == ComposeModeCodemode {
@@ -436,9 +439,9 @@ func describeTools(mode ComposeMode, prepared toolset.PreparedToolset, manager *
 		metaSession.SetPreparedTools(prepared)
 		locked := manager != nil && manager.Locked()
 		awaitAvailable := prepared.HasApprovalTools()
-		description := metaSession.InstructionsForSurface(codemodesession.ToolSurfaceModeLocked, awaitAvailable)
+		description := metaSession.SuperToolDescriptionForSurface(codemodesession.ToolSurfaceModeLocked, awaitAvailable)
 		if !locked {
-			description = metaSession.InstructionsForSurface(codemodesession.ToolSurfaceModeUnlocked, awaitAvailable)
+			description = metaSession.SuperToolDescriptionForSurface(codemodesession.ToolSurfaceModeUnlocked, awaitAvailable)
 		}
 		tools := []ToolDescriptor{{
 			Name:         CodeModeToolName,
@@ -617,7 +620,7 @@ func (b *Bridge) invoke(ctx context.Context, params ToolInvokeParams) (ToolInvok
 			if err != nil {
 				return ToolInvokeResult{}, err
 			}
-			return ToolInvokeResult{Content: tbSession}, nil
+			return ToolInvokeResult{Content: manager.NewSessionResult(tbSession)}, nil
 		default:
 			return ToolInvokeResult{}, invalidParams(fmt.Sprintf("unknown tool %q", params.ToolName))
 		}
@@ -953,10 +956,7 @@ func resolveVersion(explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return explicit
 	}
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "dev"
+	return buildinfo.DisplayVersion()
 }
 
 func cloneMap(in map[string]any) map[string]any {

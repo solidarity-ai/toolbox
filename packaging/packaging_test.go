@@ -12,6 +12,8 @@ import (
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
+const testPackerVersion = tooldef.Version("v1.0.0")
+
 func TestLoadDev(t *testing.T) {
 	t.Parallel()
 
@@ -19,6 +21,7 @@ func TestLoadDev(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
   "module": "example.com/calc",
   "name": "calc",
+  "minimumToolboxVersion": "v0.9.0",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
@@ -39,6 +42,9 @@ func TestLoadDev(t *testing.T) {
 	if loaded.Package.Runtime != tooldef.RuntimeTypeScriptSandbox {
 		t.Fatalf("expected runtime=typescript-sandbox, got %q", loaded.Package.Runtime)
 	}
+	if loaded.Package.MinimumToolboxVersion != "v0.9.0" {
+		t.Fatalf("expected minimumToolboxVersion=v0.9.0, got %q", loaded.Package.MinimumToolboxVersion)
+	}
 }
 
 func TestPackAndLoadArchive(t *testing.T) {
@@ -48,6 +54,7 @@ func TestPackAndLoadArchive(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, packaging.DevManifestFilename), `{
   "module": "example.com/calc",
   "name": "calc",
+  "minimumToolboxVersion": "v0.9.0",
   "runtime": "typescript-sandbox",
   "tools": [
     { "entry_ts": "tools/calc.add.ts", "idempotent": true, "effect": "readOnly" }
@@ -56,12 +63,12 @@ func TestPackAndLoadArchive(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
 
 	outDir := t.TempDir()
-	result, err := packaging.Pack(dir, outDir)
+	result, err := packaging.Pack(dir, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("Pack() error: %v", err)
 	}
 
-	loaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath)
+	loaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 	if err != nil {
 		t.Fatalf("LoadArchive() error: %v", err)
 	}
@@ -70,6 +77,9 @@ func TestPackAndLoadArchive(t *testing.T) {
 	}
 	if loaded.Package.Name != "calc" {
 		t.Fatalf("expected name=calc, got %q", loaded.Package.Name)
+	}
+	if loaded.Package.MinimumToolboxVersion != "v0.9.0" || loaded.Package.PackedByToolboxVersion != testPackerVersion {
+		t.Fatalf("package versions = minimum %s, packed by %s", loaded.Package.MinimumToolboxVersion, loaded.Package.PackedByToolboxVersion)
 	}
 }
 
@@ -88,7 +98,7 @@ func TestPackAcceptsMissingIdempotent(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, "tools", "calc.add.ts"), `export default function tool() { return "ok"; }`)
 
 	outDir := t.TempDir()
-	_, err := packaging.Pack(dir, outDir)
+	_, err := packaging.Pack(dir, outDir, testPackerVersion)
 	if err != nil {
 		t.Fatalf("expected no error for missing idempotent, got: %v", err)
 	}
@@ -109,12 +119,12 @@ func TestPackRoundTripAllFixtures(t *testing.T) {
 			}
 
 			outDir := t.TempDir()
-			result, err := packaging.Pack(dir, outDir)
+			result, err := packaging.Pack(dir, outDir, testPackerVersion)
 			if err != nil {
 				t.Fatalf("Pack() error: %v", err)
 			}
 
-			archiveLoaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath)
+			archiveLoaded, err := packaging.LoadArchive(result.ArchivePath, result.ManifestPath, nil)
 			if err != nil {
 				t.Fatalf("LoadArchive() error: %v", err)
 			}

@@ -17,6 +17,7 @@ type AgentView struct {
 type AgentTool struct {
 	Name               string
 	Description        string
+	ResourceUses       []tooldef.ResourceUse
 	ParamsSchema       map[string]any
 	Sig                *toolbox.FuncSignature
 	paramsType         *toolbox.TSType
@@ -79,6 +80,7 @@ func (r PreparedToolset) buildAgentView() AgentView {
 		at := AgentTool{
 			Name:               rt.Name,
 			Description:        agentToolDescription(rt),
+			ResourceUses:       tooldef.CloneResourceUses(rt.ResourceUses),
 			Sig:                rt.Sig,
 			hiddenParams:       rt.HiddenParams(),
 			boundLiterals:      rt.boundLiterals(),
@@ -122,6 +124,7 @@ func cloneAgentView(view AgentView) AgentView {
 
 func cloneAgentTool(tool AgentTool) AgentTool {
 	tool.ParamsSchema = cloneAnyMap(tool.ParamsSchema)
+	tool.ResourceUses = tooldef.CloneResourceUses(tool.ResourceUses)
 	tool.hiddenParams = cloneBoolMap(tool.hiddenParams)
 	tool.boundLiterals = cloneAnyMap(tool.boundLiterals)
 	return tool

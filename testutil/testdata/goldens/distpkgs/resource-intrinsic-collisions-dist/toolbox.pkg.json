@@ -1,0 +1,47 @@
+{
+  "manifestSchemaVersion": 1,
+  "minimumToolboxVersion": "v1.0.0",
+  "packedByToolboxVersion": "v1.0.0",
+  "module": "fixtures.local/resource-intrinsic-collisions",
+  "name": "resource_intrinsic_collisions",
+  "runtime": "typescript-sandbox",
+  "sha256": "fd5e2b23e49325852c58b94d41572c2c1c723f6203d805c48855759634074f89",
+  "resources": [
+    {
+      "path": "workbook",
+      "params": [
+        {
+          "name": "path",
+          "binding_name": "workbook"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "entry_ts": "tools/workbook.get.ts",
+      "effect": "readOnly",
+      "description": "Select and describe a workbook."
+    },
+    {
+      "entry_ts": "tools/workbook.name.ts",
+      "effect": "irreversible",
+      "description": "Return the collection's domain name."
+    },
+    {
+      "entry_ts": "tools/workbook.length.ts",
+      "effect": "irreversible",
+      "description": "Count available workbooks."
+    },
+    {
+      "entry_ts": "tools/workbook.prototype.ts",
+      "effect": "irreversible",
+      "description": "Return prototype information from the domain."
+    },
+    {
+      "entry_ts": "tools/workbook.call.ts",
+      "effect": "irreversible",
+      "description": "Call the domain collection operation."
+    }
+  ]
+}

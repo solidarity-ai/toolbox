@@ -1,6 +1,33 @@
 package tool
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
+
+type versionSemanticsFixture struct {
+	Valid       []string `json:"valid"`
+	Invalid     []string `json:"invalid"`
+	Comparisons []struct {
+		A    Version `json:"a"`
+		B    Version `json:"b"`
+		Want int     `json:"want"`
+	} `json:"comparisons"`
+}
+
+func loadVersionSemantics(t *testing.T) versionSemanticsFixture {
+	t.Helper()
+	data, err := os.ReadFile("testdata/version_semantics.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture versionSemanticsFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
 
 func TestFQNParseModulePath(t *testing.T) {
 	t.Parallel()
@@ -67,6 +94,7 @@ func TestFQNParseVersion(t *testing.T) {
 		{name: "empty", input: "", wantErr: true},
 		{name: "missing leading v", input: "1.2.3", wantErr: true},
 		{name: "missing patch", input: "v1.2", wantErr: true},
+		{name: "leading zero", input: "v01.2.3", wantErr: true},
 		{name: "bad pseudo timestamp", input: "v0.0.0-20260327-abcdef123456", wantErr: true},
 		{name: "bad pseudo commit length", input: "v0.0.0-20260327112233-abcdef12345", wantErr: true},
 		{name: "bad pseudo commit charset", input: "v0.0.0-20260327112233-abcdeg123456", wantErr: true},
@@ -106,6 +134,36 @@ func TestFQNParseVersion(t *testing.T) {
 				t.Fatalf("Version(%q).PseudoCommit() = %q, want %q", got, got.PseudoCommit(), tt.wantCommit)
 			}
 		})
+	}
+}
+
+func TestVersionComparison(t *testing.T) {
+	t.Parallel()
+
+	for _, comparison := range loadVersionSemantics(t).Comparisons {
+		if got := CompareVersions(comparison.A, comparison.B); got != comparison.Want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", comparison.A, comparison.B, got, comparison.Want)
+		}
+	}
+	if Version("v01.2.3").IsRelease() {
+		t.Fatal("invalid semantic version reported as a release")
+	}
+}
+
+func TestVersionSemanticsConformance(t *testing.T) {
+	t.Parallel()
+
+	fixture := loadVersionSemantics(t)
+	for _, input := range fixture.Valid {
+		got, err := ParseVersion(input)
+		if err != nil || got.String() != input {
+			t.Errorf("ParseVersion(%q) = %q, %v", input, got, err)
+		}
+	}
+	for _, input := range fixture.Invalid {
+		if _, err := ParseVersion(input); err == nil {
+			t.Errorf("ParseVersion(%q) error = nil, want error", input)
+		}
 	}
 }
 

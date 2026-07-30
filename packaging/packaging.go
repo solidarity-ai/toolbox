@@ -4,6 +4,7 @@ import (
 	"github.com/solidarity-ai/toolbox/packaging/internal/archive"
 	"github.com/solidarity-ai/toolbox/packaging/internal/manifest"
 	"github.com/solidarity-ai/toolbox/packaging/internal/source"
+	tooldef "github.com/solidarity-ai/toolbox/tool"
 )
 
 // Type aliases for backward compatibility and convenience.
@@ -32,15 +33,15 @@ func LoadDevWithMode(dir string, mode ValidationMode) (LoadDirResult, error) {
 }
 
 // Pack creates a .toolbox.pkg archive from the source package at dir.
-func Pack(dir string, outDir string) (PackResult, error) {
-	loaded, err := source.LoadDirWithMode(dir, manifest.ValidationModeDist)
+func Pack(dir string, outDir string, packerVersion tooldef.Version) (PackResult, error) {
+	loaded, err := source.LoadDirWithMode(dir, manifest.ValidationModeDev)
 	if err != nil {
 		return PackResult{}, err
 	}
-	return archive.Pack(loaded.Loaded, outDir)
+	return archive.Pack(loaded.Loaded, outDir, packerVersion)
 }
 
 // LoadArchive loads a package from a .toolbox.pkg archive with its manifest.
-func LoadArchive(archivePath, manifestPath string) (LoadedPackage, error) {
-	return archive.LoadArchive(archivePath, manifestPath)
+func LoadArchive(archivePath, manifestPath string, check func(tooldef.Package) error) (LoadedPackage, error) {
+	return archive.LoadArchive(archivePath, manifestPath, check)
 }

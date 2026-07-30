@@ -210,7 +210,7 @@ signatures without a concrete value type) also make a tool non-JSON-callable.
 
 ### Filename Convention
 
-The filename defines the tool's resource path:
+The filename defines the tool's dotted method path:
 
 ```
 users.list.ts                       → method "list" on resource "users"
@@ -220,12 +220,42 @@ channels.messages.send.ts           → method "send" on resource "messages" und
 clone.ts                            → method "clone", no resource (flat action)
 ```
 
-Rules:
-- Last segment = method (verb)
-- Everything before = resource path (plural nouns)
-- Each resource segment implies a `{singular}_id` param: `users` → `user_id`, `channels` → `channel_id`
-- `list` method on a resource does not require that resource's ID (operates on collection)
-- Flat actions (no dots before the verb) have no inferred resource params
+The last segment is the method. Earlier segments are ordinary namespaces unless
+the package manifest declares an exact path as a resource selector. Nothing is
+inferred from plurality or from verbs such as `list` and `get`.
+
+Package resources are declared once:
+
+```json
+{
+  "resources": [
+    {"path":"users","params":[{"name":"user","binding_name":"user"}]},
+    {"path":"users.calendars","params":[{"name":"calendar","binding_name":"calendar"}]},
+    {"path":"users.calendars.events","params":[{"name":"start"},{"name":"end"}]}
+  ]
+}
+```
+
+Selector parameter groups are ordered and must form the beginning of every
+matching tool signature. For a chain `users(user).calendars(calendar)`, the
+signature must begin `(user, calendar, ...)`; reordering or interleaving method
+parameters is invalid. A signature containing all of a node's parameters is
+installed on the selected-resource surface; containing none installs it on the
+callable collection surface. Partial groups are invalid.
+This supports both `users(user).calendars.list()` and
+`users(user).calendars(calendar).get()`, plus multi-argument selectors such as
+`events(start, end)`. Resource selectors only capture parameters and return a
+member API object; they never invoke tools themselves. Collection methods such
+as `calendars.list()` remain properties of the callable selector and do not
+conflict with its call signature. When a collection member deliberately uses a
+function intrinsic name such as `name`, the tool keeps the natural name and the
+displaced intrinsic is exposed as an underscore method such as `_name()`.
+JavaScript plumbing names that are unlikely to be useful domain APIs are
+reserved across generated resource API surfaces. These include `then`, `__proto__`,
+`toString`, `valueOf`, the object ownership/prototype inspection methods, and
+the legacy getter/setter hooks. Plausible domain vocabulary such as `name`,
+`length`, `prototype`, `call`, `apply`, and `bind` remains available with an
+underscore escape method for the displaced function behavior.
 
 ### Tool File Format
 
@@ -234,37 +264,18 @@ A tool file exports `params`, `metadata`, and an `execute` function:
 ```typescript
 // tools/users.calendars.events.list.ts
 //
-// Resource path: users.calendars.events
-// Inferred params: user_id, calendar_id (events.list doesn't need event_id)
-// Declared params below are the method-specific params only.
+// The package resource tree declares users(user) and calendars(calendar).
 
-export const params = {
-  time_min: { type: "string", description: "Start of time range (RFC3339)" },
-  time_max: { type: "string", description: "End of time range (RFC3339)" },
-  max_results: { type: "number", description: "Max events to return", default: 50 }
-}
-
-export const metadata = {
-  readOnly: true,
-  idempotent: true,
-  description: "List calendar events for a user"
-}
-
-export async function execute(params, ctx) {
-  const result = await exec("gwc", [
-    "calendar", "events", "list",
-    "--user", params.user_id,
-    "--calendar-id", params.calendar_id,
-    "--time-min", params.time_min,
-    "--time-max", params.time_max,
-    "--max-results", String(params.max_results),
-    "--format", "json"
-  ]);
-  return JSON.parse(result.stdout);
+/** @effect readOnly */
+export default async function tool(
+  user: string,
+  calendar: string,
+  timeMin: string,
+  timeMax: string,
+): Promise<Event[]> {
+  return fetchEvents({ user, calendar, timeMin, timeMax });
 }
 ```
-
-Note: `params.user_id` and `params.calendar_id` are available in `execute` because they're inferred from the resource path. They don't need to be declared in `params` — they're always present.
 
 Tool metadata is not only for static safety labeling. Fields such as `readOnly`, `idempotent`, and `effect` are also expected to inform recovery guidance later, for example helping an LLM decide whether to retry, re-read state, or choose a safer follow-up tool after a failed call.
 
@@ -373,36 +384,13 @@ Structured logging, collected in the audit trail.
 
 ## Resource Path Conventions
 
-Resource paths in tool filenames follow REST conventions:
-
-- Resources are **plural nouns**: `users`, `tickets`, `channels`, `events`
-- Methods are **verbs**: `get`, `list`, `create`, `update`, `delete`, `send`, `add`
-- Last segment is always the method
-- Each resource segment infers a `{singular}_id` parameter
-- Singularization is simple: strip trailing `s` (handles most cases; `companies` → `companie_id` is ugly but functional; can add a singularization override in manifest later if needed)
-
-### How resource params work
-
-For `users.calendars.events.list.ts`:
-- Resource path: `users.calendars.events`
-- Inferred params: `user_id`, `calendar_id`
-- `event_id` is NOT inferred because `list` operates on the collection
-- The tool author declares only method-specific params (e.g. `time_min`, `time_max`)
-
-For `users.calendars.events.get.ts`:
-- Resource path: `users.calendars.events`
-- Inferred params: `user_id`, `calendar_id`, `event_id`
-- `get` operates on a specific resource, so the deepest ID is required
-
-### Which methods require the deepest resource ID
-
-Methods that operate on a specific resource instance:
-- `get`, `update`, `delete` — require the deepest resource ID
-
-Methods that operate on the collection:
-- `list`, `create` — do NOT require the deepest resource ID
-
-Custom verbs: the tool author can override by explicitly declaring the deepest ID in their `params` if they need it, or omitting it if they don't.
+Resource paths are package-level API declarations rather than filename
+heuristics. Each resource has a dotted path and one or more selector parameters.
+Parameter names are exact TypeScript parameter names, and types must agree in
+every consuming tool. Selector parameters are required and unique along a
+resource chain. Ordinary filename segments that are not declared resources
+remain namespaces; for example, with only `workbook` declared as a resource,
+`workbook.officejs.run.ts` becomes `workbook(path).officejs.run(code)`.
 
 ## Distribution
 

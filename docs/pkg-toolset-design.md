@@ -25,7 +25,7 @@ Contains:
 - Fully qualified tool reference (package + tool name + version, e.g. `zendesk@2.0.1/account.tickets.comments.add`)
 - A map of param name → Binding
 - Every param in the tool definition MUST have a binding (no implicit passthrough)
-- Resource params (auto-inferred from the tool's resource path, e.g. `account_id`, `ticket_id`) are params like any other — they need bindings too
+- Selector params declared by the package resource tree are params like any other — they may be bound too
 
 ### Binding
 
@@ -46,9 +46,11 @@ CEL is the one language used everywhere. `value` resolves the param. `check` val
 
 ### Resource-Level Binding
 
-Because tools use resource path naming (e.g. `account.tickets.comments.add`), binding a resource param applies to ALL tools under that resource in the toolset.
+Because packages declare resource selectors once, binding a selector's canonical
+`binding_name` applies to every tool that consumes that selector.
 
-Binding `account_id` once scopes every `account.*` tool. The harness doesn't repeat `account_id` binding per-tool — it binds at the resource level and the toolset resolves it for every tool that uses that resource param.
+Binding `account` once can scope every tool that selects `account`; collection
+methods that do not consume the selector are unaffected.
 
 ### Context
 
@@ -144,7 +146,8 @@ Toolset:
 
 Note: `account_id` binding is declared once at resource level and applies to all `zendesk@2.0.1/account.*` tools automatically.
 
-Open question: resource-level bindings may still need package scoping if different packages infer similarly named resource IDs with different meanings.
+Canonical binding names are authored in the package resource declaration; they
+are not inferred from filenames.
 
 Agent sees (bound resource levels stripped from names):
 

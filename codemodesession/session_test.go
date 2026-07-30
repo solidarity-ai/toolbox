@@ -1340,6 +1340,28 @@ func TestSetPreparedTools_RemovesBindingsAfterCommittedCells(t *testing.T) {
 	assertContains(t, gone, "tool calc.add came from a previous runtime and is no longer callable")
 }
 
+func TestSetPreparedTools_RemovesResourceFactoriesAfterCommittedCells(t *testing.T) {
+	ctx := context.Background()
+	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+		PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-collections"), toolset.Config{}),
+	})
+	if err != nil {
+		t.Fatalf("OpenMemory() error: %v", err)
+	}
+	defer session.Close()
+
+	assertContains(t, session.Submit(ctx, `resource_collections.workbook("/tmp/book.xlsx").officejs.run`), "cell 1")
+
+	session.SetPreparedTools(toolset.PreparedToolset{})
+
+	failed := session.Submit(ctx, `($val(1) as any)("return 1")`)
+	assertContains(t, failed, "failure:")
+	assertContains(t, failed, "tool workbook.officejs.run came from a previous runtime and is no longer callable")
+
+	removed := session.Submit(ctx, `(globalThis as any).resource_collections === undefined`)
+	assertContains(t, removed, "=> true")
+}
+
 func TestSetPreparedTools_WrappersDoNotExposeInternalMetadata(t *testing.T) {
 	ctx := context.Background()
 	session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{

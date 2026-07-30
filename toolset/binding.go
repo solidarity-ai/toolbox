@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/solidarity-ai/toolbox/safeguard"
 	tooldef "github.com/solidarity-ai/toolbox/tool"
 	"github.com/solidarity-ai/toolbox/transport"
 )
@@ -42,5 +43,6 @@ type Config struct {
 	ToolApprovals          map[string]bool    // Notebook-visible tool name -> requires approval/task return
 	EnvContext             map[string]any     // Flat key-value environment context from harness
 	CredentialPolicySource PackageCredentialPolicySource
+	PackageGuard           safeguard.PackageGuard
 	FetchTransport         http.RoundTripper // optional; used by tests to intercept fetch calls
 }

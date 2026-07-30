@@ -24,6 +24,7 @@ func loadPreparedToolset(ctx context.Context, toolsetPath, effects string, opts 
 
 	prepared, err := ts.Prepare(ctx, resolver, toolset.Config{
 		CredentialPolicySource: newCredentialPolicySource(opts),
+		PackageGuard:           resolver.PackageGuard(),
 	})
 	if err != nil {
 		return toolset.PreparedToolset{}, err
@@ -43,9 +44,12 @@ func newFileToolsetBackend(ctx context.Context, toolsetPath, effects string, opt
 
 	repo := newCredentialRepository(opts)
 	return toolsetctl.NewFileBackend(ctx, toolsetctl.FileBackendOptions{
-		ToolsetPath:          toolsetPath,
-		Resolver:             resolver,
-		Config:               toolset.Config{CredentialPolicySource: repo},
+		ToolsetPath: toolsetPath,
+		Resolver:    resolver,
+		Config: toolset.Config{
+			CredentialPolicySource: repo,
+			PackageGuard:           resolver.PackageGuard(),
+		},
 		SearchClientFactory:  func() (toolsetctl.SearchClient, error) { return newToolRegistrySearchClient() },
 		CredentialRepository: repo,
 		Consumer:             consumer,

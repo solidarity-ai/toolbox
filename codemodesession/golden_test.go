@@ -23,6 +23,96 @@ var (
 )
 
 func TestSubmitOutputGoldens(t *testing.T) {
+	t.Run("nested-resource-collections", func(t *testing.T) {
+		ctx := context.Background()
+		session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+			PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-collections"), toolset.Config{}),
+		})
+		if err != nil {
+			t.Fatalf("OpenMemory() error: %v", err)
+		}
+		defer session.Close()
+
+		checkGolden(t, goldenPath("submit_nested_resource_collections.txt"), normalizeToolCallRefs(session.Submit(ctx, `const workbook = resource_collections.workbook("/tmp/book.xlsx");
+const officejs = await workbook.officejs.run("return 1");
+const sheets = await workbook.sheet.list();
+const sheet = await workbook.sheet("Forecast").get();
+const range = await workbook.sheet("Forecast").range("A1", "B2").get();
+		({ officejs, sheets, sheet, range })`)))
+	})
+
+	t.Run("resource-selector-is-pure", func(t *testing.T) {
+		ctx := context.Background()
+		session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+			PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-collections"), toolset.Config{}),
+		})
+		if err != nil {
+			t.Fatalf("OpenMemory() error: %v", err)
+		}
+		defer session.Close()
+
+		checkGolden(t, goldenPath("submit_resource_selector_is_pure.txt"), session.Submit(ctx, `const workbook = resource_collections.workbook("/tmp/book.xlsx");
+const sheetSelector = workbook.sheet;
+const selectedSheet = sheetSelector("Forecast");
+({
+  selectedHasGet: typeof selectedSheet.get === "function",
+  selectedHasRange: typeof selectedSheet.range === "function",
+  selectorHasList: typeof sheetSelector.list === "function",
+  selectorStartedTool: "toolCallTask" in selectedSheet,
+})`))
+	})
+
+	t.Run("bound-hidden-resource-selector-collapses", func(t *testing.T) {
+		ctx := context.Background()
+		session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+			PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-collections"), toolset.Config{
+				EnvContext: map[string]any{"workbook_path": "/tmp/bound.xlsx"},
+				ResourceBindings: map[string]toolset.Binding{
+					"workbook": {Value: "context.workbook_path", Hidden: true},
+				},
+			}),
+		})
+		if err != nil {
+			t.Fatalf("OpenMemory() error: %v", err)
+		}
+		defer session.Close()
+
+		checkGolden(t, goldenPath("submit_bound_hidden_resource_selector_collapses.txt"), session.Submit(ctx, `const workbook = resource_collections.workbook;
+const officejs = await workbook.officejs.run("return 1");
+const sheet = await workbook.sheet("Forecast").get();
+({
+  workbookIsObject: typeof workbook === "object",
+  officejsRunIsMethod: typeof workbook.officejs.run === "function",
+  sheetRemainsSelector: typeof workbook.sheet === "function",
+  selectedSheetHasGet: typeof workbook.sheet("Forecast").get === "function",
+  officejs,
+  sheet,
+})`))
+	})
+
+	t.Run("resource-intrinsic-collisions", func(t *testing.T) {
+		ctx := context.Background()
+		session, err := codemodesession.OpenMemory(ctx, t.TempDir(), codemodesession.SessionConfig{
+			PreparedTools: tooltest.PrepareToolset(t, tooltest.LocalPackageDecl("resource-intrinsic-collisions"), toolset.Config{}),
+		})
+		if err != nil {
+			t.Fatalf("OpenMemory() error: %v", err)
+		}
+		defer session.Close()
+
+		checkGolden(t, goldenPath("submit_resource_intrinsic_collisions.txt"), session.Submit(ctx, `const selector = resource_intrinsic_collisions.workbook;
+const selectedViaCall = selector._call(undefined, "/tmp/book.xlsx");
+({
+  naturalNameIsTool: typeof selector.name === "function",
+  naturalLengthIsTool: typeof selector.length === "function",
+  naturalPrototypeIsTool: typeof selector.prototype === "function",
+  originalNameType: typeof selector._name(),
+  originalLengthType: typeof selector._length(),
+  originalPrototypeIsUndefined: selector._prototype() === undefined,
+  intrinsicCallStillSelects: typeof (selectedViaCall as { get?: unknown }).get === "function",
+})`))
+	})
+
 	t.Run("typecheck-failure", func(t *testing.T) {
 		ctx := context.Background()
 		session, err := codemodesession.OpenMemory(ctx, t.TempDir())

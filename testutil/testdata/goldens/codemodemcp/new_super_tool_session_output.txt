@@ -1,1 +1,100 @@
 <tb-session>
+
+super_tool submits a code cell to a notebook like environment. The notebook has globally installed tools which connect to outside systems.
+super_tool is much more efficient and effective than regular tool calling and should be used whenever possible.
+Important Notebook Usage Information:
+- `console.log(inspect($last))` is automatically added when console.log is NOT in the source.
+- Variables and state persist between cells. Promises must settle before the timeout or the cell will error.
+	- Redeclaring const, let, classes, or functions with the same name in later cells causes an error (prefer var or use caution).
+  - For long cells use unique variable names
+  - For small cells it's easier to use $last / $val(cell_index) to reuse prior results.
+  - Cells ending with console.log, return undefined — end with the variable if you need to reference it later.
+- There are no imports
+- Start a notebook with `new_super_tool_session`, then pass the same `tb_session` on every `super_tool` call to continue that notebook.
+
+===
+// Notebook Input
+Object.entries($pkgMetadata).map(([name, meta]) => [
+  name, meta.toolCount, (meta.useWhenHint || "")
+])
+// Notebook Output
+[  ]
+===
+
+Note:
+`console.log(inspect(<last expression>))` is automatically added if console.log is NOT in the source.
+
+Notebook Env:
+// value for a prior cell index
+$val(index : number) : any
+// $val(<last-cell>) / last value in an expression in prior cell
+$last : any
+// truncated object summary for inspecting data shape (limited depth and length traversal)
+inspect(x : any) : string
+
+type ToolCallTask<T = unknown> = {
+  toolCallId: string;
+};
+
+type ToolCallPromise<T> = Promise<T> & {
+  toolCallTask: ToolCallTask<T>;
+};
+
+type ToolCallView<T = unknown> =
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "started";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "needsApproval";
+      params?: unknown;
+      approval: { approvalId?: string };
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "success";
+      params?: unknown;
+      result: T;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "failed";
+      params?: unknown;
+      error: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "rejected";
+      params?: unknown;
+      reason: string;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "cancelled";
+      params?: unknown;
+    }
+  | {
+      toolCallId: string;
+      toolName: string;
+      status: "unknown";
+      params?: unknown;
+    };
+
+declare function $tool_call<T>(refOrId: ToolCallTask<T> | string): ToolCallView<T>;
+declare function $tool_call<T>(ref: ToolCallPromise<T>): ToolCallView<T>;
+
+declare const $pkgMetadata: Record<string, {
+  toolCount: number;
+  // present when the package needs extra guidance
+  useWhenHint?: string;
+  /* .d.ts for package, always use console.log to view */
+  api: string;
+}>;

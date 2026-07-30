@@ -75,7 +75,7 @@ func runVersions(cmd versionsCmd, stdout io.Writer) error {
 	for version := range seen {
 		versions = append(versions, version)
 	}
-	sortVersionsDesc(versions)
+	tooldef.SortVersionsDesc(versions)
 
 	for _, version := range versions {
 		if cmd.Source == "all" {

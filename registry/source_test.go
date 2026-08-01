@@ -110,6 +110,51 @@ func TestGitHubReleaseSource(t *testing.T) {
 		}
 	})
 
+	t.Run("annotated tag", func(t *testing.T) {
+		module := mustModulePath(t, "github.com/admin/stub-annotated")
+		version := mustVersion(t, "v1.0.0")
+		tagSHA := strings.Repeat("b", 40)
+		commitSHA := strings.Repeat("c", 40)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/admin/stub-annotated/releases/tags/v1.0.0":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id":       10,
+					"tag_name": "v1.0.0",
+					"assets": []map[string]any{
+						{"id": 1, "name": "calc.toolbox.pkg"},
+						{"id": 2, "name": "toolbox.pkg.json"},
+					},
+				})
+			case "/repos/admin/stub-annotated/git/ref/tags/v1.0.0":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"object": map[string]any{"type": "tag", "sha": tagSHA},
+				})
+			case "/repos/admin/stub-annotated/git/tags/" + tagSHA:
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"object": map[string]any{"type": "commit", "sha": commitSHA},
+				})
+			case "/repos/admin/stub-annotated/releases/assets/1":
+				_, _ = w.Write([]byte("archive-bytes"))
+			case "/repos/admin/stub-annotated/releases/assets/2":
+				_, _ = w.Write([]byte(`{"name":"calc"}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer ts.Close()
+
+		stub := NewGitHubReleaseSource(ts.URL, ts.Client())
+		result, err := stub.Fetch(context.Background(), module, version)
+		if err != nil {
+			t.Fatalf("Fetch(): %v", err)
+		}
+		if result.Metadata.GitSHA != commitSHA {
+			t.Fatalf("git_sha = %q, want %q", result.Metadata.GitSHA, commitSHA)
+		}
+	})
+
 	t.Run("release not found", func(t *testing.T) {
 		repo := nextSourceRepoName("not-found")
 		module := mustModulePath(t, "github.com/admin/"+repo)

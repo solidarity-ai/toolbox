@@ -211,38 +211,61 @@ func (s *GitHubReleaseSource) fetchReleaseByTag(ctx context.Context, owner, repo
 
 func (s *GitHubReleaseSource) fetchTagCommitSHA(ctx context.Context, owner, repo, tag string) (string, error) {
 	path := fmt.Sprintf("/repos/%s/%s/git/ref/tags/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(tag))
+	object, err := s.fetchGitObject(ctx, path)
+	if err != nil {
+		return "", err
+	}
+
+	for range 16 {
+		switch object.Type {
+		case "commit":
+			if !gitCommitSHAPattern.MatchString(object.SHA) {
+				return "", fmt.Errorf("invalid commit sha %q", object.SHA)
+			}
+			return strings.ToLower(object.SHA), nil
+		case "tag":
+			if !gitCommitSHAPattern.MatchString(object.SHA) {
+				return "", fmt.Errorf("invalid tag sha %q", object.SHA)
+			}
+			path = fmt.Sprintf("/repos/%s/%s/git/tags/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(object.SHA))
+			object, err = s.fetchGitObject(ctx, path)
+			if err != nil {
+				return "", err
+			}
+		default:
+			return "", fmt.Errorf("expected tag ref object type %q or %q, got %q", "commit", "tag", object.Type)
+		}
+	}
+	return "", fmt.Errorf("tag object chain exceeds 16 entries")
+}
+
+func (s *GitHubReleaseSource) fetchGitObject(ctx context.Context, path string) (githubRefObject, error) {
 	requestURL := s.requestURL(path)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("build tag ref request: %w", err)
+		return githubRefObject{}, fmt.Errorf("build git object request: %w", err)
 	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("GET %s: %w", requestURL, err)
+		return githubRefObject{}, fmt.Errorf("GET %s: %w", requestURL, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("GET %s: read response body: %w", requestURL, err)
+		return githubRefObject{}, fmt.Errorf("GET %s: read response body: %w", requestURL, err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("GET %s: unexpected status %d: %s", requestURL, resp.StatusCode, strings.TrimSpace(string(body)))
+		return githubRefObject{}, fmt.Errorf("GET %s: unexpected status %d: %s", requestURL, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var ref githubRef
 	if err := json.Unmarshal(body, &ref); err != nil {
-		return "", fmt.Errorf("GET %s: decode response: %w", requestURL, err)
+		return githubRefObject{}, fmt.Errorf("GET %s: decode response: %w", requestURL, err)
 	}
-	if ref.Object.Type != "commit" {
-		return "", fmt.Errorf("GET %s: expected tag ref object type %q, got %q", requestURL, "commit", ref.Object.Type)
-	}
-	if !gitCommitSHAPattern.MatchString(ref.Object.SHA) {
-		return "", fmt.Errorf("GET %s: invalid commit sha %q", requestURL, ref.Object.SHA)
-	}
-	return strings.ToLower(ref.Object.SHA), nil
+	return ref.Object, nil
 }
 
 func (s *GitHubReleaseSource) downloadAsset(ctx context.Context, owner, repo string, assetID int) ([]byte, error) {

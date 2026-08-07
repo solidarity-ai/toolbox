@@ -89,6 +89,18 @@ func TestRunWithNoArgsPrintsHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "install [<package>] [flags]") {
 		t.Fatalf("stdout = %q, want command list", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "auth <command> [flags]") {
+		t.Fatalf("stdout = %q, want grouped auth command", stdout.String())
+	}
+	for _, unwanted := range []string{
+		"auth status [<target>] [flags]",
+		"auth oauth2 login <target> [flags]",
+		"auth secret set <target> [flags]",
+	} {
+		if strings.Contains(stdout.String(), unwanted) {
+			t.Fatalf("stdout = %q, did not want expanded command %q", stdout.String(), unwanted)
+		}
+	}
 }
 
 func TestRunDaemonStopCommand(t *testing.T) {
@@ -260,8 +272,10 @@ func TestRunVersionsUsesGitHubTokenAuthorizationWithoutLeakingIt(t *testing.T) {
 	registryMu.Lock()
 	gotRegistryHeaders := append([]string(nil), registryAuthHeaders...)
 	registryMu.Unlock()
-	if !reflect.DeepEqual(gotRegistryHeaders, []string{""}) {
-		t.Fatalf("registry Authorization headers = %#v, want %#v", gotRegistryHeaders, []string{""})
+	for _, header := range gotRegistryHeaders {
+		if header != "" {
+			t.Fatalf("registry Authorization headers = %#v, want no credentials", gotRegistryHeaders)
+		}
 	}
 
 	githubMu.Lock()

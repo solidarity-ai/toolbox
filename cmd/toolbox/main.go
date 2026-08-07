@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/alecthomas/kong"
 )
@@ -284,6 +283,9 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		kong.Name("toolbox"),
 		kong.Description("Toolbox resolves toolsets, inspects package metadata, and serves tools over MCP."),
 		kong.Writers(stdout, stderr),
+		kong.ConfigureHelp(kong.HelpOptions{
+			NoExpandSubcommands: true,
+		}),
 	)
 	if err != nil {
 		return err
@@ -310,43 +312,43 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 	}
 	switch {
-	case strings.HasPrefix(command, "version"):
+	case commandMatches(command, "version"):
 		return runVersion(parsed.Version, stdout)
-	case strings.HasPrefix(command, "install"):
+	case commandMatches(command, "install"):
 		return runInstall(parsed.Install, stdout)
-	case strings.HasPrefix(command, "update"):
+	case commandMatches(command, "update"):
 		return runUpdate(parsed.Update, stdout)
-	case strings.HasPrefix(command, "versions"):
+	case commandMatches(command, "versions"):
 		return runVersions(parsed.Versions, stdout)
-	case strings.HasPrefix(command, "info"):
+	case commandMatches(command, "info"):
 		return runInfo(parsed.Info, stdout)
-	case strings.HasPrefix(command, "outdated"):
+	case commandMatches(command, "outdated"):
 		return runOutdated(parsed.Outdated, stdout)
-	case strings.HasPrefix(command, "search"):
+	case commandMatches(command, "search"):
 		return runSearch(parsed.Search, stdout)
-	case strings.HasPrefix(command, "package pack"):
+	case commandMatches(command, "package pack"):
 		return runPackagePack(parsed.Package.Pack, stdout)
-	case strings.HasPrefix(command, "mcp"):
+	case commandMatches(command, "mcp"):
 		return runMCP(parsed.MCP, secretOpts, stdin, stdout, stderr)
-	case strings.HasPrefix(command, "codemode repl"):
+	case commandMatches(command, "codemode repl"):
 		return runRepl(parsed.Codemode.Repl, secretOpts, stdin, stdout, stderr)
-	case strings.HasPrefix(command, "codemode session new"):
+	case commandMatches(command, "codemode session new"):
 		return runCodemodeSessionNew(stdout)
-	case strings.HasPrefix(command, "codemode mcp"):
+	case commandMatches(command, "codemode mcp"):
 		return runCodemodeMCP(parsed.Codemode.MCP, secretOpts, stdin, stdout, stderr)
-	case strings.HasPrefix(command, "auth"):
+	case commandMatches(command, "auth"):
 		return runAuthCommand(parsed.Auth, command, secretOpts, stdin, stdout, stderr)
-	case strings.HasPrefix(command, "daemon stop"):
+	case commandMatches(command, "daemon stop"):
 		return runDaemonStop(stdout, stderr)
-	case strings.HasPrefix(command, "daemon logs"):
+	case commandMatches(command, "daemon logs"):
 		return runDaemonLogs(parsed.Daemon.Logs, stdout)
-	case strings.HasPrefix(command, "_daemon serve"):
+	case commandMatches(command, "_daemon serve"):
 		return runDaemonServe(stderr)
-	case strings.HasPrefix(command, "_daemon ping"):
+	case commandMatches(command, "_daemon ping"):
 		return runDaemonPing(parsed.InternalDaemon.Ping, stdout)
-	case strings.HasPrefix(command, "_daemon stop"):
+	case commandMatches(command, "_daemon stop"):
 		return runDaemonStop(stdout, stderr)
-	case strings.HasPrefix(command, "_sdkbridge serve-stdio"):
+	case commandMatches(command, "_sdkbridge serve-stdio"):
 		return runSDKBridgeServeStdio(secretOpts, stdin, stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q", command)

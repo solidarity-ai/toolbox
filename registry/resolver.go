@@ -165,7 +165,7 @@ func (r *Resolver) ListVersions(ctx context.Context, module ModulePath) ([]Versi
 		versionSources++
 		listed, err := lister.ListVersions(ctx, module)
 		if err != nil {
-			if errors.Is(err, ErrReleaseNotFound) || errors.Is(err, ErrSourceUnavailable) {
+			if len(versions) > 0 || errors.Is(err, ErrReleaseNotFound) || errors.Is(err, ErrSourceUnavailable) {
 				continue
 			}
 			return nil, fmt.Errorf("list versions for %s: source[%d]: %w", module, i, err)

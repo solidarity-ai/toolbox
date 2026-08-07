@@ -1462,7 +1462,7 @@ func TestRunAuthOAuth2CallbackDoesNotConsumeNextCredentialInput(t *testing.T) {
 }
 
 func TestRunAuthOAuth2PrefersDaemonWhenAvailable(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")
@@ -1904,7 +1904,7 @@ func TestRunAuthOAuth2FallsBackWhenDaemonBeginReturnsEmptyFlowID(t *testing.T) {
 }
 
 func TestRunAuthOAuth2ManualPasteCancelsDaemonFlow(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	codeCh := make(chan string, 1)

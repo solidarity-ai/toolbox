@@ -205,7 +205,7 @@ func TestDaemonOAuthReceiverPropagatesBeginErrorBeforeFlowID(t *testing.T) {
 }
 
 func TestDaemonOAuthReceiverAuthorizeCodeWithRealDaemon(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)
@@ -322,7 +322,7 @@ func TestDaemonOAuthReceiverManualWinsCancelsDaemonFlow(t *testing.T) {
 }
 
 func TestDaemonOAuthReceiverManualWinsCancelsRealDaemonFlow(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)

@@ -21,17 +21,17 @@ import (
 )
 
 type stubDaemonHTTPControl struct {
-	mu                sync.Mutex
-	locked            bool
-	unlockKey         string
-	unlockErr         error
-	setupErr          error
-	lockErr           error
-	statusErr         error
-	setupRequired     bool
-	recoveryUnlocked  bool
-	recoveryUnlockKey string
-	recoveryGenerated int
+	mu                 sync.Mutex
+	locked             bool
+	unlockKey          string
+	unlockErr          error
+	setupErr           error
+	lockErr            error
+	statusErr          error
+	setupRequired      bool
+	recoveryUnlocked   bool
+	recoveryUnlockKey  string
+	recoveryGenerated  int
 	oauthWebserverAddr string
 	oauthCompleteErr   error
 	oauthCallbacks     []daemon.OAuthCallbackResult
@@ -235,6 +235,16 @@ func testOAuthFlowSnapshot(id, label, authURL string) daemon.OAuthFlowSnapshot {
 	}
 }
 
+func useShortDaemonDir(t *testing.T) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "tbx-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("TOOLBOX_DAEMON_DIR", dir)
+}
+
 func TestMaybeAutoOpenDaemonBrowserLocked(t *testing.T) {
 	prevLauncher := daemonBrowserLauncher
 	defer func() {
@@ -423,7 +433,7 @@ func TestStartDaemonDebugServerRegistersOAuthWebserverAddress(t *testing.T) {
 }
 
 func TestDaemonDebugServerAdvertisesOAuthURLsThroughConnect(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	socketPath, err := daemon.SocketPath()
@@ -494,7 +504,7 @@ func TestDaemonDebugServerAdvertisesOAuthURLsThroughConnect(t *testing.T) {
 }
 
 func TestDaemonOAuthCallbackCompletesFlowThroughHTTPAndConnect(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)
@@ -570,7 +580,7 @@ func TestDaemonOAuthCallbackCompletesFlowThroughHTTPAndConnect(t *testing.T) {
 }
 
 func TestDaemonOAuthCallbackProviderErrorCompletesFlowThroughHTTPAndConnect(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)
@@ -647,7 +657,7 @@ func TestDaemonOAuthCallbackProviderErrorCompletesFlowThroughHTTPAndConnect(t *t
 }
 
 func TestDaemonOAuthCallbackUnknownStateDoesNotCreateFlow(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)
@@ -708,11 +718,11 @@ func TestDaemonOAuthCallbackRejectsInvalidOrUnknownCallbacks(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name       string
-		path       string
-		wantStatus int
-		wantBody   string
-		wantCalls  int
+		name        string
+		path        string
+		wantStatus  int
+		wantBody    string
+		wantCalls   int
 		completeErr error
 	}{
 		{name: "missing state", path: "/oauth2/callback?code=abc", wantStatus: http.StatusBadRequest, wantBody: "missing state"},
@@ -750,7 +760,7 @@ func TestDaemonOAuthCallbackRejectsInvalidOrUnknownCallbacks(t *testing.T) {
 }
 
 func TestDaemonOAuthCallbackRepeatedCallbackDoesNotOverwriteResult(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv(daemonBindAddressEnv, "127.0.0.1:0")
 
 	udsServer, closeUDS := startTestDaemonServer(t)
@@ -994,7 +1004,7 @@ func TestApprovalConsoleShowsPendingOAuthFlowsWhenUnlocked(t *testing.T) {
 }
 
 func TestApprovalConsoleShowsRealDaemonPendingOAuthFlow(t *testing.T) {
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TOOLBOX_SECRET_STORE_SCRYPT_WORK_FACTOR", "10")

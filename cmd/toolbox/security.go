@@ -100,7 +100,11 @@ func checkCurrentToolboxPolicy(stderr io.Writer) error {
 }
 
 func securityCheckExempt(command string) bool {
-	return strings.HasPrefix(command, "version") ||
-		strings.HasPrefix(command, "daemon stop") ||
-		strings.HasPrefix(command, "_daemon stop")
+	return commandMatches(command, "version") ||
+		commandMatches(command, "daemon stop") ||
+		commandMatches(command, "_daemon stop")
+}
+
+func commandMatches(command, prefix string) bool {
+	return command == prefix || strings.HasPrefix(command, prefix+" ")
 }

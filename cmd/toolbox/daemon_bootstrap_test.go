@@ -15,7 +15,7 @@ import (
 
 func stubSessionDaemon(t *testing.T) *atomic.Int32 {
 	t.Helper()
-	t.Setenv("TOOLBOX_DAEMON_DIR", t.TempDir())
+	useShortDaemonDir(t)
 
 	var calls atomic.Int32
 	prev := ensureSessionDaemon
